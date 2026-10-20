@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"] - Parking Guidance</title>
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <script src="~/js/prefs.js"></script>
+    <script src="~/js/viewToggle.js"></script>
+</head>
+<body>
+    @{
+        var currentPath = (Context.Request.Path.Value ?? "/").ToLowerInvariant();
+        Func<string, bool> isActive = p => currentPath == p.ToLowerInvariant();
+    }
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-badge">P</div>
+                <div>
+                    <div class="brand-title">Parking Guidance</div>
+                    <div class="brand-sub" data-i18n="brand.sub">Hướng dẫn đỗ xe</div>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-group-title" data-i18n="nav.operate">VẬN HÀNH</div>
+                <a href="/" class="nav-link @(isActive("/") ? "active" : "")" data-i18n="nav.monitor">🗂️ Giám sát</a>
+                <a href="/Search" class="nav-link @(isActive("/Search") ? "active" : "")" data-i18n="nav.search">🔍 Tìm xe</a>
+                <a href="#" class="nav-link disabled" data-i18n="nav.report">📈 Báo cáo</a>
+
+                <div class="nav-group-title" data-i18n="nav.manage">QUẢN LÝ BÃI XE</div>
+                <a href="#" class="nav-link disabled" data-i18n="nav.catalog">🗄️ Danh mục</a>
+                <a href="#" class="nav-link disabled" data-i18n="nav.map">🗺️ Bản đồ</a>
+                <a href="#" class="nav-link disabled" data-i18n="nav.import">⬆️ Import</a>
+                <a href="#" class="nav-link disabled" data-i18n="nav.kiosk">🖥️ Kiosk &amp; đường đi</a>
+
+                <div class="nav-group-title" data-i18n="nav.tasks">TASKS</div>
+                <a href="/Tasks/Tags" class="nav-link @(isActive("/Tasks/Tags") ? "active" : "")" data-i18n="nav.tags">🏷️ Tags</a>
+                <a href="/Tasks/Script" class="nav-link @(isActive("/Tasks/Script") ? "active" : "")" data-i18n="nav.script">📜 Script</a>
+
+                <div class="nav-group-title" data-i18n="nav.settings">CÀI ĐẶT &amp; HỆ THỐNG</div>
+                <a href="#" class="nav-link disabled" data-i18n="nav.user">👤 Người dùng</a>
+
+                <a href="/User/Preferences" class="nav-link nav-sublink @(isActive("/User/Preferences") ? "active" : "")" data-i18n="nav.prefs">🎨 Giao diện &amp; ngôn ngữ</a>
+
+                <div class="nav-subgroup-title" data-i18n="nav.device">Thiết bị</div>
+                <a href="/System/Cameras" class="nav-link nav-sublink @(isActive("/System/Cameras") ? "active" : "")" data-i18n="nav.camera">📷 Camera</a>
+                <a href="/System/Sensors" class="nav-link nav-sublink @(isActive("/System/Sensors") ? "active" : "")" data-i18n="nav.sensor">📡 Cảm biến</a>
+                <a href="/System/Leds" class="nav-link nav-sublink @(isActive("/System/Leds") ? "active" : "")" data-i18n="nav.led">💡 LED</a>
+                <a href="/System/External" class="nav-link nav-sublink @(isActive("/System/External") ? "active" : "")" data-i18n="nav.other">🧩 Thiết bị ngoài</a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="profile-row">
+                    <div class="avatar">TV</div>
+                    <div class="profile-icons">
+                        <span title="Đổi mật khẩu">🔑</span>
+                        <span title="Thông tin">ℹ️</span>
+                        <span title="Khoá màn hình">🔒</span>
+                        <span title="Đăng xuất">↪️</span>
+                    </div>
+                </div>
+                <div class="profile-name" data-i18n="prof.admin">Quản trị viên</div>
+                <div class="profile-role">Quản trị viên</div>
+            </div>
+        </aside>
+        <main class="content">
+            @RenderBody()
+        </main>
+    </div>
+
+    <div class="view-fab" id="viewFab">
+        <button type="button" id="fabSidebar" title="Ẩn / hiện thanh menu bên trái">☰</button>
+        <button type="button" id="fabFull" title="Toàn màn hình: ẩn thanh tab + địa chỉ của trình duyệt (F11)">⛶</button>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    @RenderSection("Scripts", required: false)
+</body>
+</html>

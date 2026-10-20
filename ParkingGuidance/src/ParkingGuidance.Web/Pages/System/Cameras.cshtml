@@ -1,0 +1,710 @@
+@page "/System/Cameras"
+@{
+    ViewData["Title"] = "Quản lý Camera";
+}
+
+<div class="page-header">
+    <h1><span data-i18n="nav.device">Thiết bị</span> — <span data-i18n="nav.cam">Camera</span></h1>
+</div>
+
+<div class="source-tabs">
+    <button class="tab-btn active" data-tab="list">📋 Danh sách</button>
+    <button class="tab-btn" data-tab="zones">🎯 Vị trí đỗ</button>
+    <button class="tab-btn" data-tab="config">⚙️ Cấu hình chung</button>
+    <button class="tab-btn" data-tab="data">📊 Dữ liệu</button>
+    <button class="tab-btn" data-tab="log">🕘 Lịch sử</button>
+    <button class="tab-btn" data-tab="sim">🧪 Mô phỏng</button>
+    <button class="tab-btn" data-tab="trainhub">🧠 Train</button>
+</div>
+
+<div id="listTab" class="sys-tab-panel active">
+
+    <section class="panel">
+        <h2>Dò tìm camera trên mạng</h2>
+        <p class="hint">
+            Chọn hãng camera đang dùng trong hệ thống rồi bấm <strong>"Quét lại"</strong> để dò tìm
+            camera hãng đó trên mạng LAN (qua chuẩn ONVIF). Không tự động quét lại — chỉ quét khi bạn bấm nút.
+        </p>
+
+        <div class="camera-toolbar">
+            <select id="brandSelect"></select>
+            <button id="scanBtn" class="btn primary">🔄 Quét lại</button>
+            <button id="addCameraBtn" class="btn secondary">➕ Thêm camera (theo IP)</button>
+        </div>
+
+        <div id="scanStatus" class="hint small"></div>
+
+        <table class="data-table" id="scanTable">
+            <thead>
+                <tr><th>IP</th><th>Cổng</th><th>Hãng phát hiện</th><th>Model</th><th>Trạng thái</th><th></th></tr>
+            </thead>
+            <tbody id="scanResultsBody">
+                <tr><td colspan="6" class="no-result">Chưa quét — chọn hãng rồi bấm "Quét lại".</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <section class="panel">
+        <h2>Camera trong hệ thống</h2>
+        <p class="hint">
+            Nhấp vào 1 dòng để gán <strong>tầng hầm</strong> và <strong>Zone</strong> (khu vực lắp đặt trong tầng), ghi <strong>chú thích</strong>, rồi bấm
+            <strong>"Thêm vào hệ thống bãi đỗ"</strong> — từ lúc đó camera mới được dùng cho các thao
+            tác giám sát/nhận diện về sau.
+        </p>
+
+        <table class="data-table" id="registryTable">
+            <thead>
+                <tr><th>IP</th><th>Hãng / Model</th><th>Tầng hầm</th><th>Zone</th><th>Trạng thái</th><th></th></tr>
+            </thead>
+            <tbody id="registryBody">
+                <tr><td colspan="6" class="no-result">Chưa có camera nào trong danh sách.</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <div id="cameraDetailPanel" class="camera-detail" style="display:none;"></div>
+
+    <div id="addCameraModal" class="modal-overlay" style="display:none;">
+        <div class="modal-box">
+            <h3>Thêm camera theo IP</h3>
+            <div class="prop-field"><label>Địa chỉ IP</label><input id="newCamIp" type="text" placeholder="192.168.1.64" /></div>
+            <div class="prop-field"><label>Cổng</label><input id="newCamPort" type="number" value="80" /></div>
+            <div class="prop-field">
+                <label>Hãng</label>
+                <select id="newCamBrand"></select>
+            </div>
+            <div class="prop-field"><label>Model (tuỳ chọn)</label><input id="newCamModel" type="text" /></div>
+            <div id="addCameraError" class="form-error"></div>
+            <div class="prop-actions">
+                <button id="confirmAddCameraBtn" class="btn primary">➕ Thêm</button>
+                <button id="cancelAddCameraBtn" class="btn secondary">Huỷ</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="zonesTab" class="sys-tab-panel">
+    <section class="panel">
+        <h2>Vị trí đỗ — vùng nhận diện theo camera</h2>
+        <details class="hint-fold"><summary>ℹ️ Hướng dẫn</summary><p class="hint">
+            Chọn 1 camera <strong>đã có trong bãi đỗ</strong> (đã "Thêm vào hệ thống bãi đỗ" ở tab
+            Danh sách), xem hình ảnh camera đó chụp (hoặc <strong>mô phỏng</strong> bằng cách chọn 1
+            ảnh trên máy tính nếu chưa có camera thật), rồi vẽ các <strong>vùng nhận diện</strong> —
+            mỗi vùng ứng với 1 ô đỗ cụ thể. Xe chỉ được tính là đang đỗ ở ô đó khi
+            <strong>phần lớn diện tích xe nằm trong vùng</strong>. Mỗi vùng chỉ nhận <strong>tối đa 1 xe</strong>
+            (xe chiếm nhiều diện tích trong vùng nhất; xe nhỏ/xa/bị che cùng nằm trong vùng bị bỏ qua), nên số xe nhận được
+            không bao giờ vượt quá số vùng. Lõi AI dùng đúng các vùng này khi nhận diện thật.
+        </p></details>
+
+        <div class="camera-toolbar">
+            <select id="zoneCameraSelect"><option value="">— Chọn camera —</option></select>
+        </div>
+
+        <div id="zoneEditorEmpty" class="no-result">Chọn 1 camera ở trên để bắt đầu.</div>
+
+        <div id="zoneEditor" style="display:none;">
+            <div class="camera-toolbar">
+                <div class="mode-toggle compact">
+                    <button id="srcCameraBtn" class="btn secondary btn-sm mode-btn">📷 Lấy từ Camera</button>
+                    <button id="srcPcBtn" class="btn secondary btn-sm mode-btn mode-active">📁 Chọn từ PC</button>
+                </div>
+                <span class="toolbar-sep"></span>
+                <label class="btn secondary btn-sm file-btn" id="chooseImageLabel">
+                    📁 Chọn ảnh mô phỏng
+                    <input type="file" id="zoneImageInput" accept="image/*" hidden />
+                </label>
+                <button id="drawZoneBtn" class="btn secondary btn-sm">➕ Vẽ vùng mới</button>
+                <button id="cancelZoneBtn" class="btn secondary btn-sm" style="display:none;">✕ Huỷ vẽ</button>
+                <button id="testDetectBtn" class="btn secondary btn-sm">🔍 Chạy thử nhận diện</button>
+                <button id="saveZonesBtn" class="btn primary btn-sm">💾 Lưu vùng nhận diện</button>
+            </div>
+
+            <div id="cameraSourceControls" class="camera-toolbar" style="display:none;">
+                <button id="captureNowBtn" class="btn secondary btn-sm">📸 Lấy ảnh ngay</button>
+                <label class="prop-inline" style="margin-left:6px;">
+                    <span class="hint small" style="margin:0;">Tự động lấy mỗi</span>
+                    <input id="captureIntervalInput" type="number" min="2" max="600" value="10" style="width:60px;" />
+                    <span class="hint small" style="margin:0;">giây</span>
+                </label>
+                <button id="toggleAutoCaptureBtn" class="btn secondary btn-sm">▶️ Bắt đầu tự động</button>
+                <span id="captureStatus" class="hint small"></span>
+            </div>
+
+            <div class="camera-toolbar">
+                <label class="prop-inline" title="Chỉ áp dụng cho ảnh xem trước trên trang này (khi trang đang mở)">
+                    <input id="autoDetectChk" type="checkbox" checked />
+                    <span class="hint small" style="margin:0;">Tự động nhận diện khi ảnh mới thay đổi vượt ngưỡng</span>
+                </label>
+                <label class="prop-inline">
+                    <input id="registerChk" type="checkbox" checked />
+                    <span class="hint small" style="margin:0;">Ghi nhận kết quả vào bãi đỗ (cập nhật ô đỗ &amp; bản đồ Giám sát)</span>
+                </label>
+                <span id="autoDetectStatus" class="hint small"></span>
+            </div>
+
+            <div class="camera-toolbar">
+                <span class="hint small" style="margin:0;" title="Tự động: camera chạy nền liên tục theo vòng lặp (áp dụng ngưỡng bên cạnh), kể cả khi đóng trang này. Thủ công: KHÔNG chạy nền — chỉ nhận diện khi bấm &quot;Nhận diện ngay&quot;.">Chế độ chạy nền ⓘ</span>
+                <div class="mode-toggle compact">
+                    <button id="modeAutoBtn" class="btn secondary btn-sm mode-btn">🔁 Tự động</button>
+                    <button id="modeManualBtn" class="btn secondary btn-sm mode-btn">✋ Thủ công</button>
+                </div>
+                <button id="detectNowBtn" class="btn primary btn-sm" style="display:none;">▶️ Nhận diện ngay</button>
+                <span id="detectNowStatus" class="hint small"></span>
+                <span class="toolbar-sep"></span>
+                <label class="prop-inline" title="Camera ở chế độ Tự động chỉ chạy AI khi ảnh thay đổi từ mức này trở lên so với khung hình trước (giảm tải khi có nhiều camera). Để trống = dùng mặc định toàn hệ thống.">
+                    <span class="hint small" style="margin:0;">Ngưỡng thay đổi ảnh (%)</span>
+                    <input id="motionThresholdInput" type="number" min="0" max="100" step="0.5" placeholder="mặc định" style="width:90px;" />
+                </label>
+                <button id="saveMotionBtn" class="btn secondary btn-sm">💾 Lưu ngưỡng</button>
+            </div>
+
+            <div id="drawHint" class="hint small" style="display:none;">
+                Đang vẽ vùng: nhấp chuột tại <strong>điểm đầu</strong> của khu vực, kéo tới
+                <strong>điểm cuối</strong> rồi thả chuột để hoàn tất.
+            </div>
+
+            <div class="zone-workspace">
+                <div class="zone-main">
+                    <div class="zone-stage-wrap">
+                        <div class="camera-stage" id="zoneStage">
+                            <img id="zonePreviewImg" alt="Ảnh camera / mô phỏng" />
+                            <canvas id="zoneOverlay"></canvas>
+                            <div id="zoneStagePlaceholder" class="stage-placeholder">Chưa có ảnh — chọn ảnh mô phỏng ở trên</div>
+                        </div>
+                    </div>
+
+                    <div id="testDetectResults" class="zone-results"></div>
+                </div>
+
+                <aside id="zoneListSide" class="zone-list-side">
+                    <h3 class="zone-list-title">
+                        <span>Danh sách vùng đã vẽ (<span id="zoneCount">0</span>)</span>
+                        <button id="toggleZoneLinesBtn" class="btn secondary btn-sm mode-active" aria-pressed="true" title="Ẩn / hiện đường viền các vùng nhận diện trên ảnh">👁 Vùng: Hiện</button>
+                    </h3>
+                    <div id="zoneList"></div>
+                </aside>
+            </div>
+        </div>
+    </section>
+</div>
+
+<div id="configTab" class="sys-tab-panel">
+    <section class="panel">
+        <h2>Cài đặt nhận diện chung</h2>
+        <p class="hint small">
+            Các thông số này được <strong>lưu lại</strong> và có hiệu lực ngay (không cần khởi động lại).
+            Camera nào không đặt ngưỡng thay đổi ảnh riêng ở tab Vị trí đỗ sẽ dùng giá trị mặc định ở đây.
+        </p>
+        <div class="settings-grid">
+            <div class="prop-field"><label>Chu kỳ lấy ảnh mỗi camera (giây)</label><input id="setInterval" type="number" min="0.5" step="0.5" /></div>
+            <div class="prop-field"><label>Ngưỡng thay đổi ảnh mặc định (%)</label><input id="setMotion" type="number" min="0" max="100" step="0.5" /></div>
+            <div class="prop-field"><label>Độ tin cậy tối thiểu nhận diện xe (0.05 - 0.95)</label><input id="setConf" type="number" min="0.05" max="0.95" step="0.05" /></div>
+            <div class="prop-field"><label>Chờ mở kết nối camera tối đa (giây)</label><input id="setOpenTimeout" type="number" min="1" step="1" /></div>
+            <div class="prop-field"><label>Chờ lấy 1 khung hình tối đa (giây)</label><input id="setReadTimeout" type="number" min="1" step="1" /></div>
+            <div class="prop-field"><label>Camera lỗi: nghỉ tối đa trước khi thử lại (giây)</label><input id="setBackoff" type="number" min="1" step="1" /></div>
+            <div class="prop-field"><label>Cảnh báo khi hàng đợi AI chờ quá (giây)</label><input id="setQueueWarn" type="number" min="1" step="1" /></div>
+            <div class="prop-field"><label>Xác nhận xe đã rời sau (số lần xử lý liên tiếp không thấy xe)</label><input id="setVacancy" type="number" min="1" max="20" step="1" /></div>
+            <div class="prop-field"><label>Bộ dò khung biển (0 = tự động, 1 = chỉ YOLO11n đã train, 2 = chỉ Darknet)</label><input id="setPlateDetector" type="number" min="0" max="2" step="1" /></div>
+            <div class="prop-field"><label>Độ tin cậy tối thiểu khung biển số (0.05 - 0.95)</label><input id="setPlateBoxConf" type="number" min="0.05" max="0.95" step="0.05" /></div>
+            <div class="prop-field"><label>Kết hợp Tesseract kiểm chứng khi YOLO chưa chắc (0 = tắt, 1 = bật)</label><input id="setCharCombine" type="number" min="0" max="1" step="1" /></div>
+            <div class="prop-field"><label>Độ tin cậy tối thiểu ký tự biển số (0 - 0.95)</label><input id="setCharConf" type="number" min="0" max="0.95" step="0.05" /></div>
+            <div class="prop-field"><label>Biển phải nằm trong khung xe tối thiểu (0 - 1, 0 = tắt)</label><input id="setPlateOverlap" type="number" min="0" max="1" step="0.05" /></div>
+            <div class="prop-field"><label>Cạnh dài tối đa ảnh đưa vào dò xe/biển (px, 0 = ảnh gốc)</label><input id="setProcessMaxSide" type="number" min="0" max="4096" step="64" /></div>
+            <div class="prop-field"><label>Chiều cao ảnh biển khi đọc ký tự (px, 40 - 300)</label><input id="setPlateReadHeight" type="number" min="40" max="300" step="10" /></div>
+            <div class="prop-field"><label>Xe không có khung biển: vẫn tìm biển đầy đủ (0 = bỏ qua, 1 = tìm, chậm)</label><input id="setPlateFullSearch" type="number" min="0" max="1" step="1" /></div>
+        </div>
+        <div class="prop-actions">
+            <button id="saveSettingsBtn" class="btn primary">💾 Lưu cài đặt</button>
+            <span id="settingsStatus" class="hint small"></span>
+        </div>
+        <p class="hint small">Dữ liệu (cài đặt, danh sách camera, vùng nhận diện, mặt bằng, phiên đỗ xe) được lưu tại: <code id="dataDirText">...</code></p>
+    </section>
+
+    <section class="panel">
+        <h2>Hàng đợi nhận diện AI &amp; trạng thái camera chạy nền</h2>
+        <p class="hint small">
+            Mỗi camera đủ điều kiện (đã thêm vào hệ thống, có Nguồn video, chế độ Tự động, đã vẽ vùng) <strong>luôn chạy ngầm</strong>,
+            không cần mở trang camera. Ảnh vượt ngưỡng thay đổi được xếp hàng; AI xử lý lần lượt từng việc, việc bạn bấm tay được ưu tiên trước.
+        </p>
+        <div id="queueSummary" class="hint"></div>
+        <div id="queueCameras"></div>
+    </section>
+</div>
+
+<!-- =============== Dữ liệu — biến MC (mỗi biến đếm 1 trạng thái trên các vị trí đỗ được chỉ định) =============== -->
+<div id="dataTab" class="sys-tab-panel">
+<section class="panel">
+    <h2>Dữ liệu MC — biến tổng hợp từ vị trí đỗ của camera</h2>
+    <div class="hint small" style="margin-top:0">
+        Mỗi <b>biến MC</b> chỉ đếm <b>một trạng thái</b> — <b>Còn trống</b>, <b>Đã đỗ</b> hoặc <b>Lỗi</b> — trên các <b>vị trí đỗ</b> (vùng nhận diện khoanh trên ảnh camera, tab 🎯 Vị trí đỗ) bạn chỉ định.
+        Chỉ cần <b>1 biến</b> cho cả nhóm vị trí; cần đếm riêng (theo khu, theo tầng…) hoặc đếm trạng thái khác thì tạo thêm biến.
+        Giá trị cập nhật theo trạng thái ô đỗ thật; biến được lưu lại khi tắt/mở chương trình.
+    </div>
+
+    <div class="tg-toolbar">
+        <button id="mcAdd" class="btn primary btn-sm"><span class="ico">➕</span> Thêm biến</button>
+        <button id="mcEdit" class="btn secondary btn-sm" disabled><span class="ico">✏️</span> Sửa</button>
+        <button id="mcDel" class="btn secondary btn-sm" disabled><span class="ico">🗑️</span> Xoá</button>
+        <span id="mcState" class="hint small" style="margin:0"></span>
+    </div>
+
+    <div id="mcForm" class="tg-form" style="display:none;">
+        <h3 id="mcFormTitle" class="tg-form-title"></h3>
+        <div class="tg-form-grid">
+            <div class="prop-field" style="grid-column:1/-1"><label for="McCount">Đếm trạng thái</label>
+                <div class="dv-state-row">
+                    <select id="McCount" style="min-width:270px">
+                        <option value="">— Chưa chọn —</option>
+                        <option value="Free">Còn trống (Có chỗ đỗ)</option>
+                        <option value="Occupied">Đã đỗ (Không có chỗ đỗ)</option>
+                        <option value="Error">Lỗi</option>
+                    </select>
+                    <div class="dv-legend" id="mcLegend">
+                        <span data-st="Free"><i class="dv-sw s0"></i>Còn trống (Có chỗ đỗ)</span>
+                        <span data-st="Occupied"><i class="dv-sw s1"></i>Đã đỗ (Không có chỗ đỗ)</span>
+                        <span data-st="Error"><i class="dv-sw s2"></i>Lỗi</span>
+                        <span><i class="dv-sw np"></i>Không chọn</span>
+                    </div>
+                </div></div>
+            <div class="prop-field" style="grid-column:1/-1"><label for="McDesc">Mô tả</label><input id="McDesc" type="text" maxlength="200" /></div>
+        </div>
+
+        <div class="sn-sub"><b>Chọn các vị trí đỗ được đếm</b> — lọc camera theo <b>tầng / Zone</b> hoặc tìm theo IP / hãng, bấm camera để xem các vị trí của nó.
+            Nút <b>Chọn tất cả (đang lọc)</b> chọn mọi vị trí của các camera đang hiện (ví dụ cả một Zone). Trong lưới: bấm ô, kéo chuột, hoặc bấm một ô rồi giữ <b>Shift</b> + bấm ô khác để chọn/bỏ cả đoạn.</div>
+        <div class="mc-filter">
+            <label>Tầng <select id="McFloor"></select></label>
+            <label>Zone <select id="McZone"></select></label>
+            <input id="McSearch" type="search" placeholder="🔍 Tìm theo IP / hãng camera…" autocomplete="off" spellcheck="false" />
+            <label class="mc-only"><input type="checkbox" id="McOnly" /> Chỉ camera đã chọn</label>
+            <button id="McSelAll" class="btn secondary btn-sm" type="button">Chọn tất cả (đang lọc)</button>
+            <button id="McSelNone" class="btn secondary btn-sm" type="button">Bỏ chọn (đang lọc)</button>
+            <span id="mcFilterInfo" class="hint small" style="margin:0"></span>
+        </div>
+        <div id="mcCams" class="mc-camlist"></div>
+        <div class="sn-sub"><b id="mcCamTitle"></b>
+            <button id="McCamAll" class="btn secondary btn-sm" type="button">Chọn cả camera này</button>
+            <button id="McCamNone" class="btn secondary btn-sm" type="button">Bỏ chọn camera này</button></div>
+        <div id="mcGrid" class="sn-grid dv-grid"></div>
+        <div id="mcPickSummary" class="hint small"></div>
+
+        <div class="tg-toolbar">
+            <button id="mcSave" class="btn primary btn-sm"><span class="ico">💾</span> Lưu</button>
+            <button id="mcCancel" class="btn secondary btn-sm">Huỷ</button>
+            <span id="mcFormState" class="hint small" style="margin:0"></span>
+        </div>
+    </div>
+
+    <table class="data-table tg-table" id="mcTable">
+        <thead>
+            <tr>
+                <th style="width:50px">STT</th>
+                <th>Tên</th>
+                <th>Đếm trạng thái</th>
+                <th>Vị trí chỉ định</th>
+                <th style="width:190px">Giá trị</th>
+                <th>Mô tả</th>
+            </tr>
+        </thead>
+        <tbody id="mcBody"><tr><td colspan="6" class="hint small">Chưa có biến nào — bấm "Thêm biến".</td></tr></tbody>
+    </table>
+</section>
+</div>
+
+<div id="logTab" class="sys-tab-panel">
+    <section class="panel">
+        <h2>Lịch sử camera — sự kiện nhận diện</h2>
+        <p class="hint small">Xe vào / cập nhật / xe ra do từng camera ghi nhận (cập nhật realtime). Lọc theo camera để xem riêng từng camera.</p>
+        <div class="hist-toolbar">
+            <label class="hint small" for="histCamera" style="margin:0;">Camera:</label>
+            <select id="histCamera"><option value="">Tất cả camera</option></select>
+            <button id="histRefreshBtn" class="btn secondary btn-sm">🔄 Tải lại</button>
+            <span id="histCount" class="hint small" style="margin:0;"></span>
+        </div>
+        <table class="data-table hist-table">
+            <thead><tr><th>Thời gian</th><th>Camera</th><th>Vị trí</th><th>Biển số</th><th>Sự kiện</th></tr></thead>
+            <tbody id="histBody"><tr><td colspan="5" class="no-result">Đang tải…</td></tr></tbody>
+        </table>
+    </section>
+</div>
+
+<div id="simTab" class="sys-tab-panel">
+    <section class="panel">
+        <h2>Mô phỏng — nhận diện ảnh từ thư mục</h2>
+        <details class="hint-fold"><summary>ℹ️ Hướng dẫn</summary><p class="hint">
+            Chọn <strong>thư mục chứa ảnh</strong> (hoặc chọn nhiều ảnh) trên máy tính. Chương trình nhận diện ảnh đầu tiên ngay;
+            bấm <strong>Tiếp theo</strong> (hoặc phím →) để nhận diện ảnh kế tiếp — hoặc nhập số giây rồi bấm <strong>▶ Chạy tự động</strong> để chương trình
+            tự sang ảnh kế sau chừng đó giây (bấm <strong>⏸ Dừng tự động</strong> để dừng). <strong>Tất cả xe</strong> trong ảnh đều được nhận diện
+            và đọc biển số — <strong>không giới hạn vùng nhận diện</strong>. Tab này chỉ để xem kết quả: <strong>không ghi</strong> vào bãi đỗ,
+            bản đồ hay lịch sử.<br />
+            <strong>✂️ Cắt/Zoom vùng</strong>: bật rồi quét chuột trên ảnh để cắt một vùng (vd biển số xa, nhỏ) — vùng hiện phóng to ở cột bên phải,
+            có thể nhận diện riêng vùng đó.<br />
+            Ảnh nào <strong>không nhận diện được</strong> hoặc <strong>đọc sai</strong>: dùng nhóm nút <strong>🧠 Thêm vào Train</strong> ở góc trái thanh công cụ —
+            <strong>Train xe</strong> (sang tab 🚗 Train xe), <strong>Train biển</strong> (sang tab 🔖 Train biển số), <strong>Train ký tự</strong> (hàng chờ của tab 🔤 Train ký tự,
+            phím tắt <kbd>T</kbd>, nơi bạn cắt vùng biển và nhập ký tự đúng) hoặc <strong>Train tất cả</strong> (cả ba). Ở Train xe/biển ứng dụng tự gợi ý khung, bạn kiểm tra lại rồi mới train.
+        </p></details>
+
+        <div id="simModelWarn" class="sim-warn" style="display:none;"></div>
+
+        <div class="camera-toolbar">
+            <div class="sim-train-group" role="group" aria-label="Thêm ảnh này vào Train">
+                <span class="sim-train-label">🧠 Thêm vào Train</span>
+                <button id="simTrainVehBtn" class="btn secondary btn-sm" disabled title="Gửi ảnh gốc này sang tab Train › Train xe (tự gợi ý khung xe, bạn kiểm tra lại ở tab Train)">➕ Train xe</button>
+                <button id="simTrainPlateBtn" class="btn secondary btn-sm" disabled title="Gửi ảnh gốc này sang tab Train › Train biển số (tự gợi ý khung biển, bạn kiểm tra lại ở tab Train)">➕ Train biển</button>
+                <button id="simTrainCharBtn" class="btn secondary btn-sm" disabled title="Gửi ảnh gốc này sang hàng chờ Train › Train ký tự (dùng khi không nhận diện được hoặc đọc sai biển) — phím tắt T">➕ Train ký tự</button>
+                <button id="simTrainAllBtn" class="btn primary btn-sm" disabled title="Gửi ảnh gốc này vào cả 3 nơi: Train xe, Train biển và Train ký tự">➕ Train tất cả</button>
+            </div>
+            <span class="toolbar-sep"></span>
+            <label class="btn secondary btn-sm file-btn">📂 Chọn thư mục ảnh
+                <input type="file" id="simFolderInput" webkitdirectory multiple hidden />
+            </label>
+            <label class="btn secondary btn-sm file-btn">🖼️ Chọn nhiều ảnh
+                <input type="file" id="simFilesInput" accept="image/*" multiple hidden />
+            </label>
+            <span class="toolbar-sep"></span>
+            <button id="simPrevBtn" class="btn secondary btn-sm sim-prev" disabled>◀ Trước</button>
+            <button id="simNextBtn" class="btn primary btn-sm sim-next" disabled>Tiếp theo ▶</button>
+            <button id="simRedoBtn" class="btn secondary btn-sm" disabled>🔁 Nhận diện lại</button>
+            <button id="simCropBtn" class="btn secondary btn-sm" disabled title="Bật rồi quét chuột trên ảnh để cắt một vùng và phóng to">✂️ Cắt/Zoom vùng</button>
+            <button id="simClearBtn" class="btn secondary btn-sm" title="Quên thư mục + kết quả, giải phóng bộ nhớ">🗑 Xoá danh sách</button>
+            <button id="simImportBtn" class="btn secondary btn-sm" title="Nhập dữ liệu train (ký tự / biển số / xe) từ một thư mục đã Export">Import...</button>
+            <span class="toolbar-sep"></span>
+            <label class="prop-inline">
+                <span class="hint small" style="margin:0;">Ngưỡng tin cậy xe</span>
+                <input id="simConf" type="number" min="0.05" max="0.95" step="0.05" placeholder="mặc định" style="width:90px;" />
+            </label>
+            <label class="prop-inline" title="Sau chừng đó giây (tính từ lúc nhận diện xong) tự chuyển sang ảnh kế tiếp khi đang bật chế độ tự động.">
+                <span class="hint small" style="margin:0;">Chuyển ảnh sau (giây)</span>
+                <input id="simAutoSec" type="number" min="0.5" step="0.5" value="3" style="width:70px;" />
+            </label>
+            <button id="simAutoBtn" class="btn secondary btn-sm" disabled title="Tự động chuyển sang ảnh kế tiếp sau số giây ở ô bên cạnh">▶ Chạy tự động</button>
+        </div>
+
+        <div class="sim-layout">
+            <div>
+                <div class="sim-stage">
+                    <div id="simEmpty" class="no-result">Chọn thư mục ảnh để bắt đầu.</div>
+                    <canvas id="simCanvas" style="display:none;"></canvas>
+                </div>
+            </div>
+            <div class="sim-side">
+                <div id="simSummary" class="detection-summary">Chưa có kết quả.</div>
+                <div id="simVehicles" class="sim-vehicles"><div class="no-result">—</div></div>
+                <div id="simTotals" class="hint small"></div>
+
+                <div id="simInfo" class="sim-info">
+                    <strong id="simProgress" class="hint" style="margin:0;">Chưa chọn thư mục.</strong>
+                    <div id="simStatus" class="hint small" style="margin:0;"></div>
+                    <div id="simAuto" class="hint small" style="margin:0;"></div>
+                    <div class="sim-info-nav">
+                        <button id="simPrevBtn2" class="btn secondary btn-sm sim-prev" disabled>◀ Lùi ảnh</button>
+                        <button id="simNextBtn2" class="btn primary btn-sm sim-next" disabled>Ảnh tiếp theo ▶</button>
+                    </div>
+                </div>
+
+                <div id="simZoomPanel" class="sim-zoom-box" style="display:none;">
+                    <div class="sim-zoom-head">🔍 Vùng đã cắt <span id="simZoomInfo" class="hint small" style="margin:0;"></span></div>
+                    <div class="sim-zoom-btns">
+                        <button id="simZoomDetectBtn" class="btn primary btn-sm" title="Chạy lại nhận diện xe + biển chỉ trên vùng này (ảnh to hơn nên dễ đọc hơn)">🔍 Nhận diện xe/biển trong vùng</button>
+                        <button id="simZoomPlateBtn" class="btn secondary btn-sm" title="Dùng khi vùng cắt vừa khít biển số">🔖 Coi vùng này là biển số</button>
+                        <button id="simZoomCloseBtn" class="btn secondary btn-sm">✕ Đóng vùng cắt</button>
+                    </div>
+                    <div id="simZoomStatus" class="hint small" style="margin:4px 0;"></div>
+                    <div class="sim-stage"><canvas id="simZoomCanvas"></canvas></div>
+                    <div id="simZoomRows" class="sim-vehicles"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="panel" data-collapsible="sim-files">
+        <h2>Danh sách ảnh trong thư mục <span id="simFileCount" class="hint small" style="margin:0;"></span></h2>
+        <div id="simFileList" class="sim-files"><div class="no-result">Chưa có ảnh.</div></div>
+    </section>
+</div>
+
+<!-- =============== Tab lớn 🧠 Train: 3 phần — Train biển số · Train xe · Train ký tự =============== -->
+<div id="trainhubTab" class="sys-tab-panel">
+    <div class="train-subtabs-row">
+        <div class="train-subtabs" role="tablist" aria-label="Các phần huấn luyện">
+            <button type="button" class="sub-tab-btn" data-sub="plate" role="tab" title="Dạy bộ dò biết biển số nằm ở đâu trong ảnh">🔖 Train biển số</button>
+            <button type="button" class="sub-tab-btn" data-sub="vehicle" role="tab" title="Dạy model nhận diện xe (YOLO11)">🚗 Train xe</button>
+            <button type="button" class="sub-tab-btn" data-sub="char" role="tab" title="Cắt biển, gán ký tự đúng và dạy model đọc ký tự">🔤 Train ký tự</button>
+        </div>
+        <button type="button" id="trExportBtn" class="btn secondary btn-sm" title="Đưa dữ liệu train (ký tự / biển số / xe) ra một thư mục để sao lưu hoặc mang sang máy khác">Export...</button>
+    </div>
+    <div class="hint small train-flow">Quy trình đọc biển: <b>🚗 tìm xe</b> → <b>🔖 tìm biển trên xe</b> → <b>🔤 đọc từng ký tự</b>. Mỗi bước có một model riêng; sai ở bước nào thì train bước đó.</div>
+
+<!-- ---------- Train biển số — dạy thêm cho bộ dò vùng biển số (YOLO11, 1 lớp) ---------- -->
+<div id="ptrainTab" class="train-sub-panel">
+<section class="panel">
+    <h2>🔖 Train biển số — dạy thêm cho bộ dò vùng biển số (YOLO11)</h2>
+    <div class="hint small" style="margin-top:0;">
+        <b>Việc của bộ dò này:</b> chỉ ra <b>biển số nằm ở đâu</b> trong ảnh (bước 1 của đọc biển). Đọc từng ký tự là việc của tab <b>🔤 Train ký tự</b>; tìm xe là việc của tab <b>🚗 Train xe</b>.<br />
+        <b>Cách làm:</b> (1) <b>Thêm ảnh</b> chụp từ camera của bạn (cả khung hình hoặc ảnh xe đều được) — nhất là các ảnh bộ dò đang <i>bỏ sót biển</i> hoặc <i>khoanh nhầm</i> (biển nghiêng, ở xa, ban đêm, ngược sáng, bẩn/mờ, xe máy…).
+        (2) Mở từng ảnh, <b>vẽ khung ôm sát biển số</b> (kéo chuột để vẽ khung mới, kéo khung / góc để chỉnh, Delete để xoá) rồi bấm <b>✓ Lưu &amp; duyệt</b>. Biển 2 dòng thì khoanh <b>cả hai dòng</b> trong một khung.
+        Ảnh thật sự không có biển nào cũng nên <b>duyệt với 0 khung</b> để bộ dò bớt khoanh nhầm. (3) Đủ ảnh (từ ~50 ảnh, càng nhiều càng tốt) thì bấm <b>Train</b>.
+        Chỉ ảnh <b>đã duyệt</b> được dùng để train. Khung chỉ cần <b>ôm sát</b> — khi đọc, hệ thống tự nới nhẹ viền để không cắt mất ký tự.
+    </div>
+    <div class="vt-model">Bộ dò đang dùng: <b id="ptModelInfo">…</b>
+        <button id="ptRestore" class="btn secondary btn-sm" style="display:none;" title="Bỏ model biển số đã train thêm và quay về bộ dò mặc định (bản đã train được giữ lại)">↩ Về bộ dò mặc định</button></div>
+</section>
+
+<section class="panel" data-collapsible="pt-samples">
+    <h2>🖼 Ảnh huấn luyện <span id="ptCount" class="hint small" style="margin:0;"></span></h2>
+    <div class="tg-toolbar">
+        <label class="btn primary btn-sm" style="cursor:pointer;">➕ Thêm ảnh<input id="ptFiles" type="file" accept="image/*" multiple hidden /></label>
+        <label class="checkbox-label"><input type="checkbox" id="ptSuggest" checked /> Tự gán khung bằng bộ dò hiện tại</label>
+        <select id="ptFilter"><option value="all">Tất cả ảnh</option><option value="todo">Chưa duyệt</option><option value="done">Đã duyệt</option></select>
+        <button id="ptClear" class="btn secondary btn-sm">🗑 Xoá tất cả ảnh</button>
+        <span id="ptListMsg" class="hint small" style="margin:0;"></span>
+    </div>
+    <div id="ptGrid" class="vt-grid"></div>
+</section>
+
+<section class="panel" id="ptEditorPanel" style="display:none;">
+    <h2 id="ptEditTitle">Chỉnh khung biển</h2>
+    <div class="tg-toolbar">
+        <button id="ptSuggestAgain" class="btn secondary btn-sm" title="Chạy bộ dò hiện tại để gợi ý khung (thay các khung đang có)">🤖 Gợi ý lại</button>
+        <button id="ptDelBox" class="btn secondary btn-sm" title="Phím Delete">✂ Xoá khung đã chọn</button>
+        <button id="ptClearBoxes" class="btn secondary btn-sm">Xoá hết khung</button>
+    </div>
+    <div class="vt-stage" id="ptStage"><canvas id="ptCanvas"></canvas></div>
+    <div id="ptBoxInfo" class="hint small"></div>
+    <div class="tg-toolbar">
+        <button id="ptSaveNext" class="btn primary btn-sm" title="Phím Enter">✓ Lưu &amp; duyệt → ảnh kế</button>
+        <button id="ptSave" class="btn secondary btn-sm">💾 Lưu (chưa duyệt)</button>
+        <button id="ptSkip" class="btn secondary btn-sm">⏭ Bỏ qua</button>
+        <button id="ptDelSample" class="btn secondary btn-sm">🗑 Xoá ảnh này</button>
+        <button id="ptCloseEditor" class="btn secondary btn-sm">Đóng</button>
+        <span id="ptEditMsg" class="hint small" style="margin:0;"></span>
+    </div>
+</section>
+
+<section class="panel">
+    <h2>🧠 Huấn luyện</h2>
+    <div class="tg-toolbar">
+        <label class="vt-cls-lbl">Số vòng (epoch) <input id="ptEpochs" type="number" min="3" max="300" value="40" style="width:80px;" /></label>
+        <label class="checkbox-label" title="Mặc định train tiếp từ lần train trước. Tích ô này để bắt đầu lại từ model gốc."><input type="checkbox" id="ptScratch" /> Bắt đầu lại từ model gốc</label>
+        <button id="ptTrain" class="btn primary btn-sm">▶ Train</button>
+        <button id="ptCancel" class="btn secondary btn-sm" style="display:none;">⏹ Huỷ</button>
+        <button id="ptInstall" class="btn secondary btn-sm" style="display:none;">✔ Vẫn cài bản mới</button>
+        <button id="ptResultClear" class="btn secondary btn-sm" style="display:none;">🗑 Xoá kết quả train</button>
+    </div>
+    <div id="ptTrainMsg" class="hint small"></div>
+    <div id="ptProgress" class="vt-progress" style="display:none;"><div id="ptProgressBar"></div></div>
+    <div id="ptResult"></div>
+</section>
+</div>
+
+<!-- ---------- Train xe — dạy thêm cho model nhận diện xe (YOLO11) ---------- -->
+<div id="vtrainTab" class="train-sub-panel">
+<section class="panel">
+    <h2>🚗 Train xe — dạy thêm cho model nhận diện xe (YOLO11)</h2>
+    <div class="hint small" style="margin-top:0;">
+        <b>Cách làm:</b> (1) <b>Thêm ảnh</b> chụp từ camera của bạn — nhất là các ảnh model đang nhận sai (xe bị bỏ sót, nhận nhầm, xe che khuất, ban đêm…).
+        (2) Mở từng ảnh, <b>sửa khung</b> cho đúng (kéo chuột để vẽ khung mới, kéo khung / góc để chỉnh, Delete để xoá) rồi bấm <b>✓ Lưu &amp; duyệt</b>.
+        Ảnh thật sự không có xe cũng nên <b>duyệt với 0 khung</b> để model bớt báo nhầm. (3) Đủ ảnh (từ ~100 ảnh, càng nhiều càng tốt) thì bấm <b>Train</b>.
+        Chỉ ảnh <b>đã duyệt</b> được dùng để train. Xe máy nên được gán nhãn <i>motorcycle</i> (dù ứng dụng không đếm xe máy) để model không nhầm với ô tô.
+    </div>
+    <div class="vt-model">Model đang dùng: <b id="vtModelInfo">…</b>
+        <button id="vtRestore" class="btn secondary btn-sm" style="display:none;" title="Bỏ model đã train thêm và quay về model gốc (bản đã train được giữ lại)">↩ Về model gốc</button></div>
+</section>
+
+<section class="panel" data-collapsible="vt-samples">
+    <h2>🖼 Ảnh huấn luyện <span id="vtCount" class="hint small" style="margin:0;"></span></h2>
+    <div class="tg-toolbar">
+        <label class="btn primary btn-sm" style="cursor:pointer;">➕ Thêm ảnh<input id="vtFiles" type="file" accept="image/*" multiple hidden /></label>
+        <label class="checkbox-label"><input type="checkbox" id="vtSuggest" checked /> Tự gán khung bằng model hiện tại</label>
+        <select id="vtFilter"><option value="all">Tất cả ảnh</option><option value="todo">Chưa duyệt</option><option value="done">Đã duyệt</option></select>
+        <button id="vtClear" class="btn secondary btn-sm">🗑 Xoá tất cả ảnh</button>
+        <span id="vtListMsg" class="hint small" style="margin:0;"></span>
+    </div>
+    <div id="vtGrid" class="vt-grid"></div>
+</section>
+
+<section class="panel" id="vtEditorPanel" style="display:none;">
+    <h2 id="vtEditTitle">Chỉnh khung</h2>
+    <div class="tg-toolbar">
+        <label class="vt-cls-lbl">Loại xe cho khung mới / khung đang chọn
+            <select id="vtCls">
+                <option value="car">🟩 Ô tô (car) — phím 1</option>
+                <option value="motorcycle">🟧 Xe máy (motorcycle) — phím 2</option>
+                <option value="bus">🟦 Xe buýt (bus) — phím 3</option>
+                <option value="truck">🟥 Xe tải (truck) — phím 4</option>
+            </select></label>
+        <button id="vtSuggestAgain" class="btn secondary btn-sm" title="Chạy model hiện tại để gợi ý khung (thay các khung đang có)">🤖 Gợi ý lại</button>
+        <button id="vtDelBox" class="btn secondary btn-sm" title="Phím Delete">✂ Xoá khung đã chọn</button>
+        <button id="vtClearBoxes" class="btn secondary btn-sm">Xoá hết khung</button>
+    </div>
+    <div class="vt-stage" id="vtStage"><canvas id="vtCanvas"></canvas></div>
+    <div id="vtBoxInfo" class="hint small"></div>
+    <div class="tg-toolbar">
+        <button id="vtSaveNext" class="btn primary btn-sm" title="Phím Enter">✓ Lưu &amp; duyệt → ảnh kế</button>
+        <button id="vtSave" class="btn secondary btn-sm">💾 Lưu (chưa duyệt)</button>
+        <button id="vtSkip" class="btn secondary btn-sm">⏭ Bỏ qua</button>
+        <button id="vtDelSample" class="btn secondary btn-sm">🗑 Xoá ảnh này</button>
+        <button id="vtCloseEditor" class="btn secondary btn-sm">Đóng</button>
+        <span id="vtEditMsg" class="hint small" style="margin:0;"></span>
+    </div>
+</section>
+
+<section class="panel">
+    <h2>🧠 Huấn luyện</h2>
+    <div class="tg-toolbar">
+        <label class="vt-cls-lbl">Số vòng (epoch) <input id="vtEpochs" type="number" min="3" max="300" value="30" style="width:80px;" /></label>
+        <label class="checkbox-label" title="Mặc định train tiếp từ lần train trước. Tích ô này để bắt đầu lại từ model gốc."><input type="checkbox" id="vtScratch" /> Bắt đầu lại từ model gốc</label>
+        <button id="vtTrain" class="btn primary btn-sm">▶ Train</button>
+        <button id="vtCancel" class="btn secondary btn-sm" style="display:none;">⏹ Huỷ</button>
+        <button id="vtInstall" class="btn secondary btn-sm" style="display:none;">✔ Vẫn cài bản mới</button>
+        <button id="vtResultClear" class="btn secondary btn-sm" style="display:none;">🗑 Xoá kết quả train</button>
+    </div>
+    <div id="vtTrainMsg" class="hint small"></div>
+    <div id="vtProgress" class="vt-progress" style="display:none;"><div id="vtProgressBar"></div></div>
+    <div id="vtResult"></div>
+</section>
+</div>
+
+<div id="trainTab" class="train-sub-panel">
+    <section class="panel">
+        <h2>🧠 Train — dạy lại nhận diện biển số <span id="trCounts" class="hint small" style="margin:0;"></span></h2>
+        <details class="hint-fold"><summary>ℹ️ Hướng dẫn</summary><p class="hint">
+            <strong>1.</strong> Ở tab <strong>🧪 Mô phỏng</strong>, ảnh nào không nhận diện được / đọc sai biển thì dùng nhóm nút <strong>🧠 Thêm vào Train</strong> (Train ký tự hoặc Train tất cả), hoặc <strong>📂 Thêm ảnh từ máy</strong> ngay ở đây.<br />
+            <strong>2.</strong> Chọn ảnh trong <strong>hàng chờ</strong>. Kéo chuột trên ảnh để <strong>cắt vùng biển số</strong> (kéo khung đã vẽ để dời, kéo góc/cạnh để chỉnh; lăn chuột để zoom, giữ chuột giữa/phải hoặc phím <kbd>Space</kbd> + kéo để dịch ảnh).
+            Nếu hệ thống đã dò được biển thì khung và biển đọc được đã được <strong>điền sẵn</strong> — chỉ cần sửa. Nút <strong>🤖 Tự dò biển</strong> chạy lại AI để gợi ý khung.<br />
+            <strong>3.</strong> Gõ <strong>ký tự đúng</strong> của biển rồi <kbd>Enter</kbd> để lưu mẫu; lưu xong tất cả khung của ảnh thì tự sang ảnh kế.
+            Biển Việt Nam 7–9 ký tự chữ/số, không dùng I, J, O, Q, W. Biển 2 dòng: gõ liền dòng trên rồi dòng dưới.<br />
+            <strong>4.</strong> Đủ mẫu thì bấm <strong>🧠 Train</strong>: học nền, ưu tiên thấp, không làm chậm camera thật; model mới tốt hơn thì tự cài (bản cũ được sao lưu).
+            Mẫu càng đa dạng (ngày/đêm, nghiêng, mờ, 2 dòng…) càng tốt — nên có ít nhất ~10 mẫu mỗi lần train.
+        </p></details>
+
+        <div id="trTrainerWarn" class="sim-warn" style="display:none;"></div>
+        <div class="camera-toolbar">
+            <button id="trTrainBtn" class="btn primary btn-sm" disabled>🧠 Train</button>
+            <label class="prop-inline" title="Số vòng học (3–200). Nhiều hơn = kỹ hơn nhưng lâu hơn.">
+                <span class="hint small" style="margin:0;">Số epoch</span>
+                <input id="trEpochs" type="number" min="3" max="200" step="1" value="25" style="width:70px;" />
+            </label>
+            <button id="trTrainCancelBtn" class="btn secondary btn-sm" style="display:none;">⏹ Huỷ train</button>
+            <button id="trTrainInstallBtn" class="btn secondary btn-sm" style="display:none;">✔ Vẫn cài bản mới</button>
+            <button id="trTrainClearBtn" class="btn secondary btn-sm" style="display:none;" title="Xoá bảng kết quả lần train gần nhất (không ảnh hưởng model đang dùng và các mẫu đã lưu)">🗑 Xoá kết quả train</button>
+        </div>
+        <div class="sim-bar" id="trTrainBarWrap" style="display:none;"><i id="trTrainBar"></i></div>
+        <div id="trTrainMsg" class="hint" style="margin:6px 0;"></div>
+        <div id="trTrainResult"></div>
+    </section>
+
+    <section class="panel" id="trWorkbench">
+        <h2>✂️ Cắt biển &amp; gán ký tự <span id="trImgInfo" class="hint small" style="margin:0;"></span></h2>
+        <div class="camera-toolbar">
+            <label class="btn secondary btn-sm file-btn">📂 Thêm ảnh từ máy
+                <input type="file" id="trUploadInput" accept="image/*" multiple hidden />
+            </label>
+            <span class="toolbar-sep"></span>
+            <button id="trPrevBtn" class="btn secondary btn-sm" disabled title="Ảnh trước (←)">◀ Trước</button>
+            <button id="trNextBtn" class="btn secondary btn-sm" disabled title="Ảnh sau (→)">Sau ▶</button>
+            <span class="toolbar-sep"></span>
+            <button id="trDetectBtn" class="btn secondary btn-sm" disabled title="Chạy AI trên ảnh này để gợi ý khung biển và ký tự">🤖 Tự dò biển</button>
+            <button id="trCutBtn" class="btn secondary btn-sm" disabled title="Bật rồi kéo chuột trên ảnh để cắt vùng biển số (dùng khi Tự dò biển không ra khung). Phím tắt C">✂️ Cắt vùng biển</button>
+            <button id="trFitBtn" class="btn secondary btn-sm" disabled title="Vừa khung nhìn (phím F)">⛶ Vừa khung</button>
+            <button id="trZoomOutBtn" class="btn secondary btn-sm" disabled title="Thu nhỏ">−</button>
+            <button id="trZoomInBtn" class="btn secondary btn-sm" disabled title="Phóng to">+</button>
+            <span class="toolbar-sep"></span>
+            <label class="prop-inline" title="Chỉ để nhìn rõ ảnh tối/mờ — không đổi ảnh được lưu làm mẫu.">
+                <span class="hint small" style="margin:0;">Sáng</span>
+                <input id="trBright" type="range" min="50" max="250" value="100" style="width:90px;" />
+            </label>
+            <label class="prop-inline" title="Chỉ để nhìn rõ ảnh tối/mờ — không đổi ảnh được lưu làm mẫu.">
+                <span class="hint small" style="margin:0;">Tương phản</span>
+                <input id="trContrast" type="range" min="50" max="300" value="100" style="width:90px;" />
+            </label>
+            <label class="checkbox-label" title="Lưu xong mọi khung của ảnh thì tự mở ảnh chưa xử lý kế tiếp">
+                <input type="checkbox" id="trAutoNext" checked /> Tự sang ảnh kế
+            </label>
+        </div>
+        <div id="trMsg" class="hint small" style="margin:4px 0;min-height:16px;"></div>
+
+        <div class="tr-layout">
+            <div class="tr-stage-wrap">
+                <div class="tr-stage" id="trStage">
+                    <canvas id="trCanvas"></canvas>
+                    <div id="trEmpty" class="tr-empty no-result">Chưa có ảnh. Thêm ảnh từ tab 🧪 Mô phỏng (➕ Train ký tự) hoặc bấm 📂 Thêm ảnh từ máy.</div>
+                </div>
+                <div class="hint small" style="margin:4px 0;">Kéo chuột để vẽ khung biển · kéo khung để dời · kéo mép/góc để chỉnh · <kbd>Del</kbd> xoá khung đang chọn · lăn chuột = zoom · <kbd>Space</kbd>/chuột giữa + kéo = dịch ảnh.</div>
+            </div>
+            <aside class="tr-side">
+                <div class="tr-side-head">Biển trong ảnh này <span id="trRegionCount" class="hint small" style="margin:0;"></span></div>
+                <div id="trRegions" class="tr-regions"><div class="no-result">Chọn một ảnh ở hàng chờ bên dưới.</div></div>
+                <div class="tr-side-actions">
+                    <button id="trDoneBtn" class="btn primary btn-sm" disabled title="Đánh dấu ảnh đã xử lý (kể cả khi ảnh không có biển dùng được) và sang ảnh kế">✔ Xong ảnh này</button>
+                    <button id="trDropBtn" class="btn secondary btn-sm" disabled title="Bỏ ảnh khỏi hàng chờ (và xoá mẫu đã lưu từ ảnh này)">🗑 Bỏ ảnh</button>
+                </div>
+            </aside>
+        </div>
+    </section>
+
+    <section class="panel" data-collapsible="tr-inbox">
+        <h2>📥 Hàng chờ ảnh <span id="trInboxCount" class="hint small" style="margin:0;"></span></h2>
+        <div class="camera-toolbar">
+            <select id="trFilter" title="Lọc danh sách">
+                <option value="pending">Chưa xử lý</option>
+                <option value="all">Tất cả</option>
+                <option value="done">Đã xong</option>
+            </select>
+            <button id="trClearDoneBtn" class="btn secondary btn-sm" title="Gỡ các ảnh đã xong khỏi hàng chờ (mẫu đã lưu vẫn giữ nguyên)">🧹 Gỡ ảnh đã xong</button>
+        </div>
+        <div id="trInbox" class="tr-grid"><div class="no-result">Hàng chờ trống.</div></div>
+    </section>
+
+    <section class="panel" data-collapsible="tr-samples">
+        <h2>📋 Mẫu đã lưu <span id="trSampleCount" class="hint small" style="margin:0;"></span></h2>
+        <div class="camera-toolbar">
+            <input id="trSampleSearch" type="search" class="tr-sample-search" placeholder="🔍 Tìm mẫu theo biển (đúng / đọc ra) hoặc tên ảnh…" autocomplete="off" spellcheck="false" />
+            <label class="checkbox-label"><input type="checkbox" id="trOnlyWrong" /> Chỉ mẫu hệ thống đọc sai / không đọc được</label>
+            <label class="checkbox-label" id="trNeedFixLbl" style="display:none;"><input type="checkbox" id="trNeedFix" /> <span id="trNeedFixText">Chỉ mẫu cần chỉnh theo kết quả train</span></label>
+            <button id="trClearSamplesBtn" class="btn secondary btn-sm">🗑 Xoá tất cả mẫu</button>
+            <span id="trSampleShown" class="hint small" style="margin:0;"></span>
+        </div>
+        <div id="trSamples" class="sim-files"><div class="no-result">Chưa có mẫu.</div></div>
+    </section>
+    <div id="trCharModal" class="tr-modal" style="display:none;">
+        <div class="tr-modal-box">
+            <div class="tr-modal-head">
+                <strong id="trCharTitle">🔤 Gắn từng ký tự</strong>
+                <button id="trCharClose" class="btn secondary btn-sm" type="button">✕ Đóng</button>
+            </div>
+            <p class="hint small" style="margin:4px 0 8px;">
+                Dùng khi hệ thống <strong>tự tách sai/thiếu ký tự</strong>: khoanh <strong>từng ký tự</strong> bằng một ô (kéo chuột trên ảnh biển), rồi chọn ký tự đúng cho ô đó
+                (gõ phím hoặc bấm bàn phím bên dưới). Mô hình sẽ học thẳng từ các ô này. <kbd>Del</kbd> xoá ô · <kbd>Backspace</kbd> bỏ ký tự của ô · <kbd>←</kbd>/<kbd>→</kbd> chọn ô kế · <kbd>Enter</kbd> áp dụng.
+            </p>
+            <div class="camera-toolbar">
+                <input id="trCharText" class="tr-input" style="max-width:240px;" type="text" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Chuỗi ký tự của biển" />
+                <button id="trCharSplit" class="btn secondary btn-sm" type="button" title="Tạo sẵn các ô chia đều theo chuỗi ký tự (biển 2 dòng: dòng dưới 5 ký tự) rồi bạn chỉnh từng ô cho khít">📏 Tự chia ô theo chuỗi</button>
+                <button id="trCharAssign" class="btn secondary btn-sm" type="button" title="Gán lần lượt các ký tự của chuỗi vào các ô theo thứ tự đọc (khi số ô = số ký tự)">🔤 Gán chuỗi vào các ô</button>
+                <button id="trCharClear" class="btn secondary btn-sm" type="button">🗑 Xoá hết ô</button>
+            </div>
+            <div class="tr-char-stage" id="trCharStage"><canvas id="trCharCanvas"></canvas></div>
+            <div id="trCharKeypad" class="tr-keypad"></div>
+            <div id="trCharInfo" class="tr-valid" style="min-height:18px;"></div>
+            <div class="tr-modal-foot">
+                <button id="trCharApply" class="btn primary" type="button">💾 Áp dụng &amp; lưu mẫu</button>
+                <button id="trCharCancel" class="btn secondary" type="button">Huỷ</button>
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+
+@section Scripts {
+    <script src="~/js/systemCameras.js"></script>
+    <script src="~/js/parkingZones.js"></script>
+    <script src="~/js/systemSettings.js"></script>
+    <script src="~/js/cameraData.js"></script>
+    <script src="~/js/cameraHistory.js"></script>
+    <script src="~/js/cameraSimulation.js"></script>
+    <script src="~/js/trainHub.js" asp-append-version="true"></script>
+    <script src="~/js/cameraTrain.js" asp-append-version="true"></script>
+    <script src="~/js/vehicleTrain.js" asp-append-version="true"></script>
+    <script src="~/js/plateTrain.js" asp-append-version="true"></script>
+    <script src="~/js/trainTransfer.js" asp-append-version="true"></script>
+    <script src="~/js/panelCollapse.js"></script>
+}

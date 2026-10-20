@@ -1,0 +1,152 @@
+@page "/System/Leds"
+@{
+    ViewData["Title"] = "LED card";
+}
+
+<div class="page-header">
+    <h1><span data-i18n="nav.device">Thiết bị</span> — <span data-i18n="nav.ledn">LED</span></h1>
+</div>
+
+<div class="source-tabs">
+    <button class="tab-btn active" data-tab="card"><span class="ico">💡</span> <span data-i18n="led.tabCard">Cài đặt card LED</span></button>
+</div>
+<div id="hdTransport" class="hint small"></div>
+
+<div class="hd-settings">
+    <div class="prop-field">
+        <label for="LedTimeout" data-i18n="led.timeout">Thời gian chờ gửi LED (giây)</label>
+        <input id="LedTimeout" type="number" min="1" max="120" step="1" title="Thời gian tối đa chờ card/SDK phản hồi (1–120 giây)" />
+    </div>
+    <div class="prop-field"><label>&nbsp;</label><button id="LedTimeoutSave" class="btn primary btn-sm"><span class="ico">💾</span> <span data-i18n="led.save">Lưu</span></button></div>
+    <span id="LedTimeoutState" class="hint small"></span>
+</div>
+<div class="hint small" data-i18n="led.timeoutHint">Quá thời gian này mà card/SDK không phản hồi thì lần gửi bị coi là lỗi (bridge tự khởi động lại và thử lại sau). Có hiệu lực ngay, không cần khởi động lại.</div>
+
+<!-- =============== TAB: CARD (Form HDCard) =============== -->
+<section id="tab-card" class="panel">
+    <div class="hd-card-bar">
+        <div class="prop-field"><label data-i18n="led.cardNo">Card số</label><select id="CardNo"></select></div>
+        <div class="prop-field"><label data-i18n="led.ip">Địa chỉ IP</label><input id="IPCard" type="text" maxlength="15" placeholder="192.168.0.8" /></div>
+        <div class="prop-field"><label data-i18n="led.status">Trạng thái</label><select id="EnnableCard"><option value="0" data-i18n="led.off">Tắt</option><option value="1" data-i18n="led.on">Bật</option></select></div>
+        <div class="prop-field"><label data-i18n="led.w">Rộng</label><input id="Width" type="number" min="32" step="32" /></div>
+        <div class="prop-field"><label data-i18n="led.h">Cao</label><input id="Height" type="number" min="16" step="16" /></div>
+        <div class="prop-field"><label data-i18n="led.cardType">Loại card</label><select id="Card_model"></select></div>
+        <div class="prop-field"><label data-i18n="led.color">Màu</label><select id="Color"></select></div>
+        <div class="prop-field"><label data-i18n="led.gray">Mức xám</label><select id="Graylevel"></select></div>
+        <div class="prop-field"><label data-i18n="led.conn">Kết nối</label><button id="hdConn" class="btn secondary btn-sm" title="Bấm để kiểm tra kết nối">—</button></div>
+        <div class="prop-field"><label>&nbsp;</label><button id="Mybutton" class="btn secondary btn-sm" data-i18n="led.cardList">Danh sách card</button></div>
+    </div>
+    <div id="hdCardHint" class="hint small"></div>
+
+    <div id="DanhsachCard" style="display:none;">
+        <table class="data-table">
+            <thead><tr><th>Card</th><th>IP</th><th data-i18n="led.on">Bật</th><th data-i18n="led.screen">Màn hình</th><th data-i18n="led.cardType">Loại card</th><th data-i18n="led.areas">Số vùng</th><th data-i18n="led.conn">Kết nối</th></tr></thead>
+            <tbody id="cardListBody"></tbody>
+        </table>
+    </div>
+
+    <div class="hd-main">
+        <div class="hd-left">
+            <table class="data-table hd-rows" id="CommList">
+                <thead><tr><th style="width:60px" data-i18n="led.no">STT</th><th data-i18n="led.type">Loại</th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <div class="hd-buttons">
+                <button id="btnProps" class="btn secondary btn-sm" title="Mở / đóng hộp thoại thuộc tính (hoặc nháy đúp vào vùng)"><span class="ico">⚙️</span> <span data-i18n="led.props">Thuộc tính</span></button>
+                <button id="btnAddFile" class="btn secondary btn-sm"><span class="ico">🖼️</span> <span data-i18n="led.addImage">Thêm hình ảnh</span></button>
+                <button id="btnAddText" class="btn secondary btn-sm"><span class="ico">🔤</span> <span data-i18n="led.addText">Thêm chữ</span></button>
+                <button id="btnAddNum" class="btn secondary btn-sm"><span class="ico">🔢</span> <span data-i18n="led.addNum">Thêm số</span></button>
+                <button id="btnDel" class="btn secondary btn-sm"><span class="ico">🗑️</span> <span data-i18n="led.del">Xóa</span></button>
+                <button id="btnUp" class="btn secondary btn-sm"><span class="ico">⬆️</span> <span data-i18n="led.up">Lên</span></button>
+                <button id="BtnDow" class="btn secondary btn-sm"><span class="ico">⬇️</span> <span data-i18n="led.down">Xuống</span></button>
+                <button id="button4" class="btn primary btn-sm"><span class="ico">📤</span> <span data-i18n="led.send">Gửi tới card</span></button>
+            </div>
+            <div id="hdSaveState" class="hint small"></div>
+        </div>
+
+        <div class="hd-right">
+            <div class="hd-stage">
+                <div class="hd-zoom-bar hd-zoom-float" title="Phóng to / thu nhỏ riêng khu vực thiết kế">
+                    <button id="ledZoomOut" type="button" class="zb" title="Thu nhỏ (Ctrl + lăn chuột xuống)">−</button>
+                    <input id="ledZoomRange" type="range" min="13" max="800" step="1" value="100" />
+                    <button id="ledZoomIn" type="button" class="zb" title="Phóng to (Ctrl + lăn chuột lên)">+</button>
+                    <span id="ledZoomLabel" class="hd-zoom-label">100%</span>
+                    <button id="ledZoomFit" type="button" class="zb zb-txt" title="Vừa khung nhìn">⤢ Vừa</button>
+                    <button id="ledZoom100" type="button" class="zb zb-txt" title="Về 100%">100%</button>
+                </div>
+                <div class="hd-led-wrap" id="ledWrap"><div id="palLedBlock" class="hd-led"></div></div>
+            </div>
+            <div id="ledSizeInfo" class="hint small" style="margin:-6px 0 10px"></div>
+
+            <input id="imageFile" type="file" accept=".png,.jpg,.jpeg,.bmp,.gif,.dat" style="display:none" />
+        </div>
+    </div>
+
+    <!-- Hop thoai thuoc tinh vung hien thi (noi, bo cuc ngang): nhay dup vao vung (hoac dong trong bang) de mo;
+         khi dang mo, chon vung khac se thay the noi dung -->
+    <div id="ledPropsDialog" class="props-dialog led-props-dialog" style="display:none;" role="dialog" aria-label="Thuộc tính vùng hiển thị">
+        <div id="ledPropsTitle" class="props-dialog-title">
+            <span id="ledPropsTitleText" data-i18n="led.propsTitle">Thuộc tính vùng hiển thị</span>
+            <button id="ledPropsClose" type="button" class="props-dialog-close" title="Đóng (Esc)">✕</button>
+        </div>
+        <div class="led-props-body">
+            <p id="ledPropsEmpty" class="no-result" data-i18n="led.propsHint">Nhấp vào 1 vùng trên khung LED (hoặc 1 dòng trong bảng) để xem thuộc tính.</p>
+            <div id="palArea" style="display:none;">
+                <div class="hd-origin">
+                    <div class="prop-field"><label data-i18n="led.ox">Gốc X</label><input data-f="originX" data-t="int" type="number" min="0" max="1000" /></div>
+                    <div class="prop-field"><label data-i18n="led.oy">Gốc Y</label><input data-f="originY" data-t="int" type="number" min="0" max="1000" /></div>
+                    <div class="prop-field"><label data-i18n="led.w">Rộng</label><input data-f="width" data-t="int" type="number" min="1" max="1000" /></div>
+                    <div class="prop-field"><label data-i18n="led.h">Cao</label><input data-f="height" data-t="int" type="number" min="1" max="1000" /></div>
+                </div>
+
+                <!-- CÀI ĐẶT VÙNG NHỚ HÌNH ẢNH -->
+                <div id="palImage2" class="hd-pal" style="display:none;">
+                    <h3 data-i18n="led.hImg">CÀI ĐẶT VÙNG NHỚ HÌNH ẢNH</h3>
+                    <div class="hd-grid">
+                        <div class="prop-field"><label data-i18n="led.image">Ảnh</label><div class="led-pair"><input data-f="ipath" data-t="str" id="txtImage2" readonly /><button id="btnSeleImage2" class="btn secondary btn-sm" data-i18n="led.pick">Chọn ảnh</button></div></div>
+                        <div class="prop-field"><label data-i18n="led.effect">Hiệu ứng</label><select data-f="ieffects" data-t="int" data-src="effects"></select></div>
+                        <div class="prop-field"><label data-i18n="led.speed">Tốc độ di chuyển</label><select data-f="ispeed" data-t="int" data-src="speeds"></select></div>
+                        <div class="prop-field"><label data-i18n="led.delay">Độ trễ</label><select data-f="istopover" data-t="int" data-src="stopovers"></select></div>
+                    </div>
+                </div>
+
+                <!-- CÀI ĐẶT VÙNG NHỚ CHỮ -->
+                <div id="palText" class="hd-pal" style="display:none;">
+                    <h3 data-i18n="led.hTxt">CÀI ĐẶT VÙNG NHỚ CHỮ</h3>
+                    <div class="hd-grid">
+                        <div class="prop-field" style="grid-column:1/-1"><label data-i18n="led.msg">Nội dung</label><input data-f="ttext" data-t="str" id="Texttext" /></div>
+                        <div class="prop-field"><label data-i18n="led.color">Màu</label><select data-f="tcolor" data-t="int" data-src="textColors"></select></div>
+                        <div class="prop-field"><label data-i18n="led.fsize">Cỡ chữ</label><select data-f="tfont" data-t="int" data-src="fontSizes"></select></div>
+                        <div class="prop-field"><label data-i18n="led.ftype">Loại font</label><select data-f="tfont_Type" data-t="str" data-src="fontTypes"></select></div>
+                        <div class="prop-field"><label data-i18n="led.effect">Hiệu ứng</label><select data-f="teffects" data-t="int" data-src="effects"></select></div>
+                        <div class="prop-field"><label data-i18n="led.speed">Tốc độ di chuyển</label><select data-f="tspeed" data-t="int" data-src="speeds"></select></div>
+                        <div class="prop-field"><label data-i18n="led.delay">Độ trễ</label><select data-f="tstopover" data-t="int" data-src="stopovers"></select></div>
+                    </div>
+                </div>
+
+                <!-- CÀI ĐẶT VÙNG NHỚ SỐ -->
+                <div id="palNumber" class="hd-pal" style="display:none;">
+                    <h3 data-i18n="led.hNum">CÀI ĐẶT VÙNG NHỚ SỐ</h3>
+                    <p class="hint small" data-i18n="led.numHint">Số hiển thị = biến MS + biến MC + project tag đã chọn (mục để trống tính là 0). Project tag chỉ gồm kiểu Integer, Boolean, Real.</p>
+                    <div class="hd-grid">
+                        <div class="prop-field"><label data-i18n="led.dMs">Dữ liệu MS (cảm biến)</label><select data-f="nMs" data-t="str" data-src="srcMs"></select></div>
+                        <div class="prop-field"><label data-i18n="led.dMc">Dữ liệu MC (camera)</label><select data-f="nMc" data-t="str" data-src="srcMc"></select></div>
+                        <div class="prop-field"><label data-i18n="led.dTag">Project tag</label><select data-f="nTag" data-t="str" data-src="srcTag"></select></div>
+                        <div class="prop-field"><label data-i18n="led.digits">Số lượng ký tự</label><select data-f="nquantity" data-t="int" data-src="digitCounts"></select></div>
+                        <div class="prop-field"><label data-i18n="led.autoColor">Chế độ màu tự động</label><select data-f="nmode" data-t="int" id="Numbermode"><option value="0" data-i18n="led.manual">Thủ công</option><option value="1" data-i18n="led.auto">Tự động</option></select></div>
+                        <div class="prop-field"><label data-i18n="led.color">Màu</label><select data-f="ncolor" data-t="int" data-src="textColors" id="Numbercolor"></select></div>
+                        <div class="prop-field"><label data-i18n="led.yel">Màu vàng khi &lt;=</label><input data-f="nlimitY" data-t="int" type="number" min="0" max="99999" /></div>
+                        <div class="prop-field"><label data-i18n="led.red">Màu đỏ khi &lt;=</label><input data-f="nlimitR" data-t="int" type="number" min="0" max="99999" /></div>
+                        <div class="prop-field"><label data-i18n="led.fsize">Cỡ chữ</label><select data-f="nfont" data-t="int" data-src="fontSizes"></select></div>
+                        <div class="prop-field"><label data-i18n="led.ftype">Loại font</label><select data-f="nfont_Type" data-t="str" data-src="fontTypes"></select></div>
+                        <div class="prop-field"><label data-i18n="led.full">Báo FULL khi bằng 0</label><select data-f="nFull" data-t="int"><option value="0" data-i18n="led.optNo">Không</option><option value="1" data-i18n="led.optYes">Có</option></select></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+@section Scripts {
+    <script src="~/js/systemLeds.js"></script>
+}

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- HDSDK.dll la DLL 32-bit (x86, MFC) => tien trinh phu nay BAT BUOC build x86.
+       Self-contained de may chay khong can cai rieng .NET 8 x86 runtime. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x86</PlatformTarget>
+    <RuntimeIdentifier>win-x86</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RootNamespace>ParkingGuidance.LedBridge</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="native\HDSDK.dll" CopyToOutputDirectory="PreserveNewest" Link="HDSDK.dll" />
+  </ItemGroup>
+
+</Project>

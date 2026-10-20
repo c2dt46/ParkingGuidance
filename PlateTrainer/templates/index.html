@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><title>PlateTrainer — huấn luyện ký tự biển số</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--b:#d9dde3;--t:#1c2330;--m:#6b7482;--a:#1f6feb;--ok:#1a8f3c;--bad:#c62828}
+@media(prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d222a;--b:#343b46;--t:#e6e9ee;--m:#98a2b0;--a:#5aa0ff;--ok:#4cc26a;--bad:#ff6b6b}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.5 system-ui,Segoe UI,sans-serif;background:var(--bg);color:var(--t)}
+header{padding:12px 20px;border-bottom:1px solid var(--b);background:var(--card);display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+header h1{font-size:17px;margin:0}nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{border:1px solid var(--b);background:var(--bg);color:var(--t);padding:6px 14px;border-radius:6px;cursor:pointer}
+nav button.on{background:var(--a);border-color:var(--a);color:#fff}
+main{max-width:1100px;margin:0 auto;padding:18px}section{display:none}section.on{display:block}
+.card{background:var(--card);border:1px solid var(--b);border-radius:8px;padding:14px 16px;margin-bottom:14px}
+h2{font-size:15px;margin:0 0 8px}p.m,.m{color:var(--m)}label{display:inline-flex;flex-direction:column;gap:2px;margin:0 12px 8px 0;font-size:12px;color:var(--m)}
+input[type=number],input[type=text],select{padding:5px 8px;border:1px solid var(--b);border-radius:5px;background:var(--bg);color:var(--t);width:120px}
+input[type=text].w{width:420px;max-width:100%}
+button.p{background:var(--a);color:#fff;border:0;border-radius:6px;padding:7px 16px;cursor:pointer}button.s{background:var(--bg);color:var(--t);border:1px solid var(--b);border-radius:6px;padding:6px 12px;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--b);padding:4px 8px;text-align:left}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px}
+.cell{border:1px solid var(--b);border-radius:6px;padding:4px;text-align:center;background:var(--bg)}
+.cell img{width:84px;height:84px;image-rendering:pixelated;background:#000;display:block;margin:0 auto 3px}
+.cell select,.cell input{width:100%;padding:2px}
+.ok{color:var(--ok)}.bad{color:var(--bad)}
+.bar{height:8px;background:var(--b);border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;background:var(--a);width:0}
+.cls{display:inline-block;min-width:54px;margin:2px;padding:2px 6px;border:1px solid var(--b);border-radius:5px;font-size:12px}
+canvas{width:100%;max-width:640px;height:220px;border:1px solid var(--b);border-radius:6px;background:var(--bg)}
+pre{background:var(--bg);border:1px solid var(--b);padding:8px;border-radius:6px;overflow:auto;max-height:160px;font-size:12px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+</style></head><body>
+<header><h1>PlateTrainer</h1><span class="m">Huấn luyện CNN ký tự cho ParkingGuidance (char_cnn.onnx)</span>
+<nav id="nav"></nav></header>
+<main>
+<section id="t-raw" class="on">
+ <div class="card"><h2>Xử lý thô: cắt biển số và nhập tên</h2>
+  <p class="m">Thêm nhiều ảnh (ảnh xe hoặc ảnh chụp bất kỳ) → ảnh mở lần lượt → <b>quét chuột</b> quanh biển số → gõ biển số (vd <code>51D-932.40</code>) → nhấn <b>Enter</b>: ảnh đã cắt được lưu và tự chuyển sang ảnh kế tiếp. Esc = bỏ vùng chọn.</p>
+  <div class="row"><input type="file" id="rawFiles" multiple accept="image/*"><button class="s" onclick="rawPrev()">◀ Ảnh trước</button><button class="s" onclick="rawSkip()">Bỏ qua ▶</button><span id="rawPos" class="m"></span></div></div>
+ <div class="card">
+  <div id="rawStage" style="overflow:auto"><canvas id="rawCanvas" style="cursor:crosshair;max-width:none;width:auto;height:auto;display:block"></canvas></div>
+  <div class="row" style="margin-top:10px"><label>Biển số (Enter để lưu)<input type="text" id="rawLabel" class="w" style="width:260px;font-size:18px;text-transform:uppercase" placeholder="51D-932.40" autocomplete="off"></label>
+  <button class="p" onclick="rawSave()">Lưu &amp; ảnh kế</button><button class="s" onclick="rawClearSel()">Bỏ vùng chọn</button></div>
+  <div id="rawMsg" class="m"></div></div>
+ <div class="card"><h2>Đã xử lý thô <span id="rawCount" class="m"></span></h2>
+  <div class="row"><label>% giữ làm tập kiểm thử<input type="number" id="rawHold" value="0" min="0" max="50"></label>
+  <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="rawSuggest" checked> gợi ý nhãn bằng model hiện tại</label>
+  <button class="p" onclick="rawImport()">Chuyển sang tab Dữ liệu</button></div>
+  <div id="rawImportOut" class="m"></div><div id="rawList" class="grid" style="margin-top:8px"></div></div>
+</section>
+
+<section id="t-data">
+ <div class="card"><h2>1. Nhập ảnh biển số thật</h2>
+  <p class="m">Chọn nhiều ảnh <b>đã cắt sát biển số</b>, <b>tên file = biển đúng</b> (vd <code>80A-00538.jpg</code>, <code>51D-932.40.png</code>). Ứng dụng tách ký tự bằng đúng thuật toán của CnnPlateReader.cs. Biển nào tách ra đúng số ký tự thì gán nhãn tự động; biển còn lại bạn duyệt tay.</p>
+  <div class="row"><input type="file" id="plateFiles" multiple accept="image/*">
+  <label>% ảnh giữ làm tập kiểm thử<input type="number" id="holdout" value="0" min="0" max="50"></label>
+  <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="suggest" checked> gợi ý nhãn bằng model hiện tại của dự án</label>
+  <button class="p" onclick="importPlates()">Nhập</button></div>
+  <div id="importOut" class="m"></div></div>
+ <div class="card"><h2>2. Duyệt ký tự chờ nhãn <span id="pendCount" class="m"></span></h2>
+  <div class="row"><button class="s" onclick="acceptMatched()">Chấp nhận tất cả mẫu đã khớp</button>
+  <button class="p" onclick="savePending()">Lưu các nhãn đã chọn</button><button class="s" onclick="clearPending()">Xoá hàng đợi</button></div>
+  <p class="m">Chọn nhãn đúng cho từng ảnh (để trống = bỏ). <b>"nền"</b> dùng cho nhiễu/viền/ốc vít bị tách nhầm thành ký tự.</p>
+  <div id="pending" class="grid"></div></div>
+ <div class="card"><h2>3. Thống kê dữ liệu</h2><div id="stats"></div>
+  <p class="m" id="statsSum"></p><button class="s" onclick="delSyn()">Xoá toàn bộ dữ liệu tổng hợp</button></div>
+ <div class="card"><h2>4. Lưu / nạp bộ dữ liệu thành thư mục trên máy</h2>
+  <p class="m">Kho dữ liệu hiện tại: <code id="dataDir"></code>. Bộ dữ liệu lưu ra có cấu trúc giống hệt kho (<code>chars/</code>, <code>plates/</code>, <code>plates_test/</code>, <code>runs/</code>) nên dùng lại được ở bất kỳ phiên bản nào: gộp vào kho khác, hoặc đặt làm kho cố định để các lần train sau kế thừa.</p>
+  <div class="row"><label>Lưu ra thư mục<input type="text" class="w" id="expDir" placeholder="D:\PlateData\bo-1"></label>
+   <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="expSyn"> kèm ảnh tổng hợp</label>
+   <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="expRuns" checked> kèm các lần train (để học tiếp)</label>
+   <button class="p" onclick="expData()">Lưu ra thư mục</button></div>
+  <div class="row"><label>Gộp từ thư mục<input type="text" class="w" id="impDir" placeholder="D:\PlateData\bo-1"></label><button class="s" onclick="mergeData()">Gộp vào dữ liệu hiện tại</button></div>
+  <div class="row"><label>Đặt kho dữ liệu cố định tại<input type="text" class="w" id="cfgDir" placeholder="D:\PlateData"></label>
+   <button class="s" onclick="setDataDir(false)">Đặt (cần chạy lại ứng dụng)</button><button class="s" onclick="setDataDir(true)">Về mặc định</button></div>
+  <div id="dataOut" class="m"></div></div>
+</section>
+
+<section id="t-synth">
+ <div class="card"><h2>Phông chữ biển số</h2>
+  <p class="m">Dữ liệu tổng hợp càng giống thật khi dùng phông giống biển số Việt Nam. Thêm file .ttf/.otf của bạn ở đây (hoặc chép vào thư mục <code>fonts/</code>).</p>
+  <div class="row"><input type="file" id="fontFiles" multiple accept=".ttf,.otf"><button class="s" onclick="uploadFonts()">Tải phông lên</button></div>
+  <p id="fontInfo" class="m"></p></div>
+ <div class="card"><h2>Sinh dữ liệu tổng hợp</h2>
+  <div class="row"><label>Số ảnh mỗi ký tự<input type="number" id="perClass" value="400"></label>
+  <label>Số ảnh lớp "nền"<input type="number" id="bgCount" value="600"></label>
+  <label>Độ khó (0.5–1.5)<input type="number" id="strength" value="1" step="0.1"></label>
+  <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="userOnly"> chỉ dùng phông của bạn (100%)</label>
+  <button class="p" id="synBtn" onclick="startSynth()">Sinh dữ liệu</button><button class="s" onclick="previewSynth()">Xem thử mẫu</button></div>
+  <div class="bar" style="margin-top:8px"><i id="synBar"></i></div><div id="synMsg" class="m"></div><div id="synPrev" class="grid" style="margin-top:8px"></div></div>
+</section>
+
+<section id="t-train">
+ <div class="card"><h2>Huấn luyện</h2>
+  <div class="row"><label>Epoch<input type="number" id="epochs" value="40"></label><label>Batch<input type="number" id="batch" value="128"></label>
+  <label>Learning rate<input type="number" id="lr" value="0.002" step="0.0005"></label><label>Tăng cường (0=tắt)<input type="number" id="aug" value="1" step="0.25"></label>
+  <label>Nhân ảnh thật ×<input type="number" id="rw" value="4"></label><label>Dừng sớm sau<input type="number" id="pat" value="10"></label>
+  <label>Khởi tạo từ<select id="initFrom" style="width:290px"></select></label><label>LR khi học tiếp ×<input type="number" id="initLr" value="0.3" step="0.05"></label>
+  <button class="p" id="trBtn" onclick="startTrain()">Bắt đầu</button><button class="s" onclick="stopTrain()">Dừng</button></div>
+  <div class="row"><label>Dữ liệu dùng để train<select id="dataMode" style="width:350px" onchange="modeHint()">
+   <option value="all">Toàn bộ dữ liệu hiện có (khuyến nghị)</option>
+   <option value="new">Chỉ dữ liệu MỚI — bỏ những gì lần tham chiếu đã học</option>
+   <option value="only">Chỉ đúng dữ liệu đã dùng ở lần tham chiếu</option></select></label>
+   <label>Lần tham chiếu<select id="dataRef" style="width:260px"></select></label></div>
+  <p class="m" id="modeHint"></p>
+  <p class="m">Cần PyTorch (xem README). Model xuất ra đúng hợp đồng của C#: vào [N,1,28,28] 0..255, ra [N,32] xác suất.</p>
+  <div id="trInfo"></div><canvas id="chart" width="640" height="220"></canvas><div id="trMsg"></div><pre id="trTail" style="display:none"></pre></div>
+ <div class="card"><h2>Kết quả các lần huấn luyện</h2><div id="runs"></div></div>
+</section>
+
+<section id="t-test">
+ <div class="card"><h2>Kiểm thử 1 ảnh biển</h2>
+  <div class="row"><input type="file" id="testFile" accept="image/*"><label>Model<select id="testModel" style="width:260px"></select></label><button class="p" onclick="testOne()">Đọc biển</button></div>
+  <div id="testOut"></div></div>
+ <div class="card"><h2>Đo độ chính xác trên cả thư mục ảnh biển</h2>
+  <div class="row"><label>Tập ảnh<select id="evSet"><option value="test">Tập kiểm thử (giữ riêng)</option><option value="train">Ảnh đã nhập</option></select></label>
+  <label>So sánh với<select id="evModels" multiple size="4" style="width:280px"></select></label><button class="p" onclick="evalSet()">Đo</button></div>
+  <div id="evOut"></div></div>
+</section>
+
+<section id="t-install">
+ <div class="card"><h2>Cài model vào dự án</h2>
+  <label>Thư mục dự án ParkingGuidance<input type="text" class="w" id="projPath" placeholder="D:\ParkingGuidance-v21\ParkingGuidance"></label>
+  <button class="s" onclick="savePath()">Lưu đường dẫn</button><div id="projInfo" class="m"></div>
+  <div class="row" style="margin-top:10px"><label>Model cần cài<select id="instModel" style="width:260px"></select></label><button class="p" onclick="install()">Cài (tự sao lưu model cũ)</button></div>
+  <div id="instOut"></div></div>
+</section>
+</main>
+<script>
+const TABS=[["raw","Xử lý thô"],["data","Dữ liệu"],["synth","Sinh dữ liệu"],["train","Huấn luyện"],["test","Kiểm thử"],["install","Cài vào dự án"]];
+const ALPHA=[...{{ alphabet|tojson }}];const $=id=>document.getElementById(id);
+const nav=$("nav");TABS.forEach(([k,n],i)=>{const b=document.createElement("button");b.textContent=n;b.id="nb-"+k;b.onclick=()=>show(k);nav.appendChild(b)});
+function show(k){TABS.forEach(([t])=>{$("t-"+t).classList.toggle("on",t==k);$("nb-"+t).classList.toggle("on",t==k)});if(k=="data")loadPending();if(k=="train")pollTrain()}
+show("raw");
+const J=async(u,b)=>(await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})})).json();
+let S=null;
+async function refresh(){S=await (await fetch("/api/state")).json();
+ const cls=["_bg",...ALPHA];let tot=0,real=0;
+ $("stats").innerHTML=ALPHA.concat(["_bg"]).map(c=>{const s=S.stats.per_class[c];tot+=s.syn+s.real;real+=s.real;
+   const low=s.real+s.syn<50;return `<span class="cls ${low?'bad':''}" title="thật ${s.real} / tổng hợp ${s.syn}"><b>${c=="_bg"?"nền":c}</b> ${s.real}+${s.syn}</span>`}).join("");
+ $("statsSum").textContent=`Tổng ${tot} ký tự (thật ${real}). Ảnh biển đã nhập: ${S.stats.plates}, tập kiểm thử: ${S.stats.plates_test}. Mỗi ô: số ảnh thật + tổng hợp; đỏ = dưới 50 ảnh.`;
+ if(S.untrained_real!=null)$("statsSum").textContent+=` Chưa train: ${S.untrained_real} ký tự thật mới so với lần ${S.latest_run}.`;
+ $("pendCount").textContent=S.stats.pending?`(${S.stats.pending})`:"";
+ $("fontInfo").textContent=`Phông của bạn: ${S.fonts_user}${S.fonts_user?" ("+S.fonts_user_names.join(", ")+") — chiếm ~85% mẫu sinh ra":""}. Tổng phông dùng được: ${S.fonts_total}.`+(S.fonts_total==0?" ⚠ Chưa có phông nào!":"");
+ $("projPath").value=S.settings.project_path||"";
+ $("projInfo").innerHTML=S.project_model?`Model dự án: <code>${S.project_model}</code> ${S.project_model_exists?"":"(chưa có file)"}`:"Chưa tìm thấy thư mục Models trong đường dẫn trên.";
+ const opts=(withProj)=>(withProj&&S.project_model_exists?`<option value="project">Model hiện tại của dự án</option>`:"")+S.runs.map(r=>`<option value="run:${r.name}">${r.name} — val ${(r.val_acc*100).toFixed(1)}%${r.val_acc_real!=null?" / thật "+(r.val_acc_real*100).toFixed(1)+"%":""}</option>`).join("");
+ const cur=$("initFrom").value||"latest";
+ $("initFrom").innerHTML=`<option value="latest">Tiếp tục từ lần gần nhất (khuyến nghị)</option><option value="none">Học lại từ đầu</option>`+S.runs.map(r=>`<option value="run:${r.name}">Tiếp tục từ ${r.name}</option>`).join("");
+ $("initFrom").value=[...$("initFrom").options].some(o=>o.value==cur)?cur:"latest";
+ const curRef=$("dataRef").value||"latest";
+ $("dataRef").innerHTML=`<option value="latest">Lần gần nhất</option>`+S.runs.filter(r=>r.has_manifest).map(r=>`<option value="run:${r.name}">${r.name}</option>`).join("");
+ $("dataRef").value=[...$("dataRef").options].some(o=>o.value==curRef)?curRef:"latest";modeHint();
+ $("dataDir").textContent=S.data_dir+(S.custom_data_dir?" (đã đặt cố định)":" (mặc định, trong thư mục ứng dụng)");
+ $("testModel").innerHTML=opts(true);$("evModels").innerHTML=opts(true);$("instModel").innerHTML=opts(false);
+ $("runs").innerHTML=S.runs.length?`<table><tr><th>Lần</th><th>Độ chính xác val</th><th>Trên ảnh thật</th><th>Epoch tốt nhất</th><th>Học tiếp từ</th></tr>`+S.runs.map(r=>`<tr><td>${r.name}</td><td>${(r.val_acc*100).toFixed(2)}%</td><td>${r.val_acc_real==null?"—":(r.val_acc_real*100).toFixed(2)+"%"}</td><td>${r.best_epoch}</td><td>${r.parent||"từ đầu"}</td></tr>`).join("")+"</table>":"<span class='m'>Chưa có.</span>";
+}
+async function importPlates(){const fs=$("plateFiles").files;if(!fs.length)return;const fd=new FormData();for(const f of fs)fd.append("files",f);
+ fd.append("holdout",$("holdout").value);fd.append("suggest",$("suggest").checked?"1":"0");$("importOut").textContent="Đang xử lý…";
+ const r=await (await fetch("/api/import",{method:"POST",body:fd})).json();
+ $("importOut").innerHTML="<table>"+r.results.map(x=>`<tr><td>${x.file}</td><td>${x.label}</td><td>${x.chars||""}</td><td>${x.status}</td></tr>`).join("")+"</table>";await refresh();loadPending()}
+async function loadPending(){await refresh();const r=await (await fetch("/api/pending")).json();
+ const sel=g=>`<select>${["",...ALPHA,"_bg"].map(c=>`<option value="${c}" ${c==g?"selected":""}>${c=="_bg"?"nền":c}</option>`).join("")}</select>`;
+ $("pending").innerHTML=r.items.map(it=>`<div class="cell" data-id="${it.id}"><img src="/pending/${it.id}.png?${Date.now()}"><div class="m" style="font-size:11px">${it.plate} #${it.idx+1}${it.matched?" ✓":""}</div>${sel(it.guess)}</div>`).join("")||"<span class='m'>Hàng đợi trống.</span>";
+ if(r.total>r.items.length)$("pending").insertAdjacentHTML("beforeend",`<span class='m'>…còn ${r.total-r.items.length} mẫu nữa (lưu lô này rồi tải lại)</span>`)}
+async function savePending(){const items=[...document.querySelectorAll("#pending .cell")].map(c=>({id:c.dataset.id,label:c.querySelector("select").value||null}));await J("/api/pending/resolve",{items});loadPending()}
+async function acceptMatched(){const r=await J("/api/pending/accept_matched");alert("Đã chấp nhận "+r.accepted+" ký tự");loadPending()}
+async function clearPending(){if(confirm("Xoá toàn bộ hàng đợi?")){await J("/api/pending/clear");loadPending()}}
+async function delSyn(){if(confirm("Xoá toàn bộ ảnh tổng hợp?")){const r=await J("/api/delete_synthetic");alert("Đã xoá "+r.deleted);refresh()}}
+async function uploadFonts(){const fd=new FormData();for(const f of $("fontFiles").files)fd.append("files",f);await fetch("/api/fonts",{method:"POST",body:fd});refresh()}
+async function startSynth(){const r=await J("/api/synth",{per_class:+$("perClass").value,bg_count:+$("bgCount").value,strength:+$("strength").value,user_only:$("userOnly").checked});if(r.error)return alert(r.error);$("synBtn").disabled=true;pollSynth()}
+async function pollSynth(){const r=await (await fetch("/api/synth/status")).json();$("synBar").style.width=(r.progress*100)+"%";$("synMsg").textContent=r.running?"Đang sinh…":r.msg;
+ if(r.running)setTimeout(pollSynth,700);else{$("synBtn").disabled=false;refresh()}}
+async function previewSynth(){const r=await (await fetch("/api/synth/preview?user_only="+($("userOnly").checked?1:0))).json();if(r.error)return alert(r.error);
+ $("synPrev").innerHTML=r.items.map(i=>`<div class="cell"><img src="${i.img}"><b>${i.ch}</b></div>`).join("")}
+async function startTrain(){if(S.stats.per_class&&0){}const r=await J("/api/train",{epochs:+$("epochs").value,batch:+$("batch").value,lr:+$("lr").value,aug:+$("aug").value,real_weight:+$("rw").value,patience:+$("pat").value,init:$("initFrom").value,init_lr_scale:+$("initLr").value,data_mode:$("dataMode").value,data_ref:$("dataRef").value});
+ if(r.error)return alert(r.error);pollTrain()}
+async function stopTrain(){await J("/api/train/stop")}
+let trTimer=null;
+async function pollTrain(){clearTimeout(trTimer);const r=await (await fetch("/api/train/status")).json();if(!r.run)return;
+ const ep=r.events.filter(e=>e.type=="epoch"),info=r.events.find(e=>e.type=="info"&&e.samples),err=r.events.find(e=>e.type=="error"),done=r.events.find(e=>e.type=="done");
+ $("trBtn").disabled=r.running;
+ $("trInfo").innerHTML=info?`<p class="m">Thiết bị: <b>${info.dev}</b> · ${info.samples} mẫu (thật ${info.real}) · train ${info.train} / val ${info.val}${info.empty_classes.length?` · <span class="bad">lớp chưa có dữ liệu: ${info.empty_classes.join(", ")}</span>`:""}</p>`:"";
+ const last=ep[ep.length-1];
+ let msg=err?`<span class="bad">${err.msg}</span>`:last?`Epoch ${last.epoch}/${last.epochs} · loss ${last.train_loss} · val ${(last.val_acc*100).toFixed(2)}%`+(last.val_acc_real!=null?` · thật ${(last.val_acc_real*100).toFixed(2)}%`:""):(r.running?"Đang khởi động…":"");
+ const st=r.events.find(e=>e.start);if(st)msg+=`<br><span class="m">Học tiếp từ model cũ — điểm xuất phát: val ${(st.start.val_acc*100).toFixed(2)}%${st.start.val_acc_real!=null?" / thật "+(st.start.val_acc_real*100).toFixed(2)+"%":""}.</span>`;
+ if(done&&done.best_epoch===0)msg+=`<br><span class="bad">Không có epoch nào tốt hơn model cũ — bản xuất ra giữ nguyên model cũ (hãy thêm dữ liệu hoặc thử "Học lại từ đầu").</span>`;
+ if(done)msg+=`<br><b class="ok">Xong.</b> Epoch tốt nhất ${done.best_epoch}, val ${(done.val_acc*100).toFixed(2)}%, lệch ONNX–PyTorch ${done.onnx_max_diff_vs_torch.toExponential(1)}.`+(r.report?`<br>Nhầm lẫn hay gặp: ${r.report.top_confusions.slice(0,8).map(c=>c.join(" ×")).join(" · ")||"không có"}`:"");
+ if(r.crashed)msg+=`<br><span class="bad">Tiến trình dừng bất thường.</span>`;
+ $("trMsg").innerHTML=msg;const t=$("trTail");t.style.display=r.tail?"block":"none";t.textContent=r.tail||"";
+ draw(ep);if(r.running){trTimer=setTimeout(pollTrain,1500)}else{refresh()}}
+function draw(ep){const c=$("chart"),g=c.getContext("2d");g.clearRect(0,0,c.width,c.height);if(!ep.length)return;
+ const W=c.width,H=c.height,n=Math.max(ep.length,2);const mx=Math.max(...ep.map(e=>Math.max(e.train_loss,e.val_loss)))||1;
+ const line=(vals,col,max)=>{g.beginPath();vals.forEach((v,i)=>{const x=30+i*(W-40)/(n-1),y=H-20-(v/max)*(H-35);i?g.lineTo(x,y):g.moveTo(x,y)});g.strokeStyle=col;g.lineWidth=2;g.stroke()};
+ line(ep.map(e=>e.train_loss),"#e0803a",mx);line(ep.map(e=>e.val_loss),"#c62828",mx);line(ep.map(e=>e.val_acc),"#1a8f3c",1);
+ g.fillStyle="#888";g.font="11px sans-serif";g.fillText("cam: loss train · đỏ: loss val · xanh: độ chính xác val (0–1)",30,12)}
+async function testOne(){const f=$("testFile").files[0];if(!f)return;const fd=new FormData();fd.append("file",f);fd.append("model",$("testModel").value);
+ const r=await (await fetch("/api/test",{method:"POST",body:fd})).json();if(r.error){$("testOut").innerHTML=`<span class="bad">${r.error}</span>`;return}
+ let h=`<p style="font-size:18px">Kết quả: <b>${r.plate||"không đọc được"}</b> ${r.expected?` — đúng: ${r.expected} `+(r.correct==null?"":r.correct?'<span class="ok">✓</span>':'<span class="bad">✗</span>'):""}</p><img src="${r.image}" style="max-width:100%;border:1px solid var(--b)">`;
+ h+=`<p class="m">Nếu ký tự bị đọc sai, chọn nhãn đúng rồi bấm "Thêm vào dữ liệu" để model học lại lần sau (rồi huấn luyện lại).</p><div class="grid">`+r.chars.map((c,i)=>`<div class="cell"><img src="${c.crop}"><div>${c.ch} <span class="m">${(c.p*100).toFixed(0)}%</span></div><div class="m" style="font-size:10px">${c.top3.map(t=>t[0]+Math.round(t[1]*100)).join(" ")}</div>
+  <select id="fix${i}">${["",...ALPHA,"_bg"].map(a=>`<option value="${a}">${a==""?"đúng nhãn":a=="_bg"?"nền":a}</option>`).join("")}</select><button class="s" onclick='addChar(${i})'>Thêm</button></div>`).join("")+"</div>";
+ h+=`<p class="m">4 kiểu nhị phân hoá: `+r.variants.map(v=>`${v.adaptive?"adaptive":"Otsu"}${v.invert?"+đảo":""}: ${v.ok?(v.pretty+(v.valid?"":" (sai định dạng)")):"—"}`).join(" · ")+"</p>";
+ $("testOut").innerHTML=h;window._chars=r.chars}
+async function addChar(i){const lab=$("fix"+i).value;if(!lab)return alert("Chọn nhãn đúng trước");await J("/api/add_char",{png:window._chars[i].png,label:lab});alert("Đã thêm vào dữ liệu")}
+async function evalSet(){const models=[...$("evModels").selectedOptions].map(o=>o.value);if(!models.length)return alert("Chọn ít nhất 1 model");$("evOut").textContent="Đang đo…";
+ const r=await J("/api/eval",{set:$("evSet").value,models});if(r.error){$("evOut").innerHTML=`<span class="bad">${r.error}</span>`;return}
+ const ks=Object.keys(r.results);let h=`<table><tr><th>Model</th><th>Đúng</th><th>Tỉ lệ</th></tr>`+ks.map(k=>{const x=r.results[k];return x.error?`<tr><td>${k}</td><td colspan=2 class="bad">${x.error}</td></tr>`:`<tr><td>${k}</td><td>${Math.round(x.acc*x.n)}/${x.n}</td><td><b>${(x.acc*100).toFixed(1)}%</b></td></tr>`}).join("")+"</table>";
+ h+=`<table style="margin-top:8px"><tr><th>Ảnh</th><th>Đúng</th>`+ks.map(k=>`<th>${k}</th>`).join("")+"</tr>";
+ const f=r.results[ks.find(k=>r.results[k].rows)];if(f)f.rows.forEach((row,i)=>{h+=`<tr><td>${row.file}</td><td>${row.expected}</td>`+ks.map(k=>{const y=r.results[k].rows&&r.results[k].rows[i];return y?`<td class="${y.ok?'ok':'bad'}">${y.got}</td>`:"<td>—</td>"}).join("")+"</tr>"});
+ $("evOut").innerHTML=h+"</table>"}
+async function savePath(){await J("/api/settings",{project_path:$("projPath").value});refresh()}
+async function install(){const m=$("instModel").value;if(!m)return alert("Chưa có bản huấn luyện nào");const r=await J("/api/install",{model:m});
+ $("instOut").innerHTML=r.error?`<p class="bad">${r.error}</p>`:`<p class="ok">Đã cài vào <code>${r.dst}</code>${r.backup?`<br>Bản cũ lưu tại <code>${r.backup}</code>`:""}</p><p class="m">${r.note}</p>`;refresh()}
+// ---------------- Dữ liệu: lưu / nạp / đặt kho
+function modeHint(){const m=$("dataMode").value,u=S&&S.untrained_real;
+ $("modeHint").innerHTML=m=="all"?"Dùng mọi ký tự trong kho — kết hợp với \"Tiếp tục từ lần gần nhất\" là cách an toàn nhất.":
+  m=="new"?`Chỉ dùng ký tự chưa có trong lần tham chiếu${u!=null?` (hiện có <b>${u}</b> ký tự thật mới)`:""}. Nên chọn kèm \"Tiếp tục từ…\" cùng lần đó; model có thể <b>quên</b> ký tự nào không có mẫu mới.`:
+  "Dùng lại đúng tập ký tự của lần đó (để tái lập kết quả hoặc so sánh công bằng)."}
+async function expData(){const dest=$("expDir").value.trim();if(!dest)return alert("Nhập thư mục đích");$("dataOut").textContent="Đang lưu…";
+ const r=await J("/api/data/export",{dest,include_syn:$("expSyn").checked,include_runs:$("expRuns").checked});
+ $("dataOut").innerHTML=r.error?`<span class="bad">${r.error}</span>`:`<span class="ok">Đã lưu vào <code>${r.dest}</code></span>: ${r.counts.real} ký tự thật${r.counts.syn?`, ${r.counts.syn} tổng hợp`:""}, ${r.counts.plates} ảnh biển, ${r.counts.plates_test} ảnh kiểm thử, ${r.counts.runs} lần train mới chép.`}
+async function mergeData(){const src=$("impDir").value.trim();if(!src)return alert("Nhập thư mục nguồn");$("dataOut").textContent="Đang gộp…";
+ const r=await J("/api/data/merge",{src});$("dataOut").innerHTML=r.error?`<span class="bad">${r.error}</span>`:`<span class="ok">Đã gộp:</span> thêm ${r.counts.chars_added} ký tự (đã có sẵn ${r.counts.chars_existing}), ${r.counts.plates_added} ảnh biển, ${r.counts.runs_added} lần train.`;refresh()}
+async function setDataDir(reset){const d=$("cfgDir").value.trim();if(!reset&&!d)return alert("Nhập thư mục kho dữ liệu");
+ const r=await J("/api/config",reset?{reset:true}:{data_dir:d});$("dataOut").innerHTML=r.error?`<span class="bad">${r.error}</span>`:`<span class="ok">Đã lưu cấu hình.</span> ${r.note}`}
+// ---------------- Xử lý thô
+let rawQ=[],rawI=0,rawImg=null,rawScale=1,rawSel=null,rawDrag=null,rawSaved=0;
+const rc=$("rawCanvas"),rg=rc.getContext("2d");
+$("rawFiles").onchange=e=>{const fs=[...e.target.files];if(!fs.length)return;const wasEmpty=rawQ.length==0||rawI>=rawQ.length;rawQ=rawQ.concat(fs);if(wasEmpty){rawI=rawQ.length-fs.length;rawLoad()}else rawPos();e.target.value=""};
+function rawPos(){$("rawPos").textContent=rawQ.length?`Ảnh ${Math.min(rawI+1,rawQ.length)}/${rawQ.length}${rawQ[rawI]?" — "+rawQ[rawI].name:""} · đã lưu phiên này: ${rawSaved}`:"Chưa thêm ảnh nào"}
+function rawLoad(){rawSel=null;$("rawLabel").value="";$("rawMsg").textContent="";
+ if(rawI>=rawQ.length){rawImg=null;rg.clearRect(0,0,rc.width,rc.height);rc.width=600;rc.height=80;rg.fillStyle="#888";rg.font="16px sans-serif";rg.fillText(rawQ.length?"Đã hết ảnh trong hàng đợi. Thêm ảnh mới để tiếp tục.":"Hãy thêm ảnh để bắt đầu.",16,44);rawPos();return}
+ const img=new Image();img.onload=()=>{rawImg=img;rawScale=Math.min(1060/img.naturalWidth,620/img.naturalHeight,4);rc.width=Math.round(img.naturalWidth*rawScale);rc.height=Math.round(img.naturalHeight*rawScale);rawDraw();$("rawLabel").focus()};
+ img.src=URL.createObjectURL(rawQ[rawI]);rawPos()}
+function rawDraw(){if(!rawImg)return;rg.clearRect(0,0,rc.width,rc.height);rg.drawImage(rawImg,0,0,rc.width,rc.height);
+ const r=rawDrag||rawSel;if(r){const x=Math.min(r.x0,r.x1),y=Math.min(r.y0,r.y1),w=Math.abs(r.x1-r.x0),h=Math.abs(r.y1-r.y0);
+  rg.fillStyle="rgba(0,0,0,.45)";rg.fillRect(0,0,rc.width,y);rg.fillRect(0,y+h,rc.width,rc.height-y-h);rg.fillRect(0,y,x,h);rg.fillRect(x+w,y,rc.width-x-w,h);
+  rg.strokeStyle="#2ecc71";rg.lineWidth=2;rg.strokeRect(x,y,w,h)}}
+function rawPt(e){const b=rc.getBoundingClientRect();return[(e.clientX-b.left)*rc.width/b.width,(e.clientY-b.top)*rc.height/b.height]}
+rc.onmousedown=e=>{if(!rawImg)return;const[x,y]=rawPt(e);rawDrag={x0:x,y0:y,x1:x,y1:y};e.preventDefault()};
+window.addEventListener("mousemove",e=>{if(!rawDrag)return;const[x,y]=rawPt(e);rawDrag.x1=Math.max(0,Math.min(rc.width,x));rawDrag.y1=Math.max(0,Math.min(rc.height,y));rawDraw()});
+window.addEventListener("mouseup",()=>{if(!rawDrag)return;const d=rawDrag;rawDrag=null;
+ if(Math.abs(d.x1-d.x0)>6&&Math.abs(d.y1-d.y0)>4){rawSel=d;$("rawMsg").textContent=`Vùng chọn: ${Math.round(Math.abs(d.x1-d.x0)/rawScale)}×${Math.round(Math.abs(d.y1-d.y0)/rawScale)} px — gõ biển số rồi Enter.`}
+ rawDraw();$("rawLabel").focus()});
+function rawClearSel(){rawSel=null;$("rawMsg").textContent="";rawDraw()}
+function rawPrev(){if(rawI>0){rawI--;rawLoad()}}
+function rawSkip(){if(rawI<rawQ.length){rawI++;rawLoad()}}
+$("rawLabel").addEventListener("keydown",e=>{if(e.key=="Enter"){e.preventDefault();rawSave()}else if(e.key=="Escape")rawClearSel()});
+async function rawSave(){const msg=$("rawMsg");
+ if(!rawImg)return msg.innerHTML='<span class="bad">Chưa có ảnh.</span>';
+ if(!rawSel)return msg.innerHTML='<span class="bad">Hãy quét chuột chọn vùng biển số trước.</span>';
+ const label=$("rawLabel").value.trim();if(!label)return msg.innerHTML='<span class="bad">Hãy nhập biển số.</span>';
+ const x=Math.min(rawSel.x0,rawSel.x1)/rawScale,y=Math.min(rawSel.y0,rawSel.y1)/rawScale,w=Math.abs(rawSel.x1-rawSel.x0)/rawScale,h=Math.abs(rawSel.y1-rawSel.y0)/rawScale;
+ const cc=document.createElement("canvas");cc.width=Math.round(w);cc.height=Math.round(h);
+ cc.getContext("2d").drawImage(rawImg,Math.round(x),Math.round(y),cc.width,cc.height,0,0,cc.width,cc.height);   // cắt trên ảnh GỐC (không mất độ phân giải)
+ const blob=await new Promise(r=>cc.toBlob(r,"image/png"));const fd=new FormData();fd.append("file",blob,"crop.png");fd.append("label",label);
+ const r=await (await fetch("/api/raw/save",{method:"POST",body:fd})).json();
+ if(r.error)return msg.innerHTML=`<span class="bad">${r.error}</span>`;
+ rawSaved++;rawI++;rawLoad();$("rawMsg").innerHTML=`<span class="ok">Đã lưu ${r.name}</span>`;rawList()}
+async function rawList(){const r=await (await fetch("/api/raw/list")).json();$("rawCount").textContent=`(${r.files.length} ảnh chờ chuyển)`;
+ $("rawList").innerHTML=r.files.slice(-60).reverse().map(n=>`<div class="cell"><img src="/raw/${encodeURIComponent(n)}?${Date.now()}" style="object-fit:contain"><div style="font-size:11px">${n.replace(".png","")}</div><button class="s" style="padding:1px 6px" onclick="rawDel('${n}')">Xoá</button></div>`).join("")}
+async function rawDel(n){await J("/api/raw/delete",{name:n});rawList()}
+async function rawImport(){$("rawImportOut").textContent="Đang chuyển…";const r=await J("/api/raw/import",{holdout:+$("rawHold").value,suggest:$("rawSuggest").checked});
+ $("rawImportOut").innerHTML=(r.results.length?"<table>"+r.results.map(x=>`<tr><td>${x.file}</td><td>${x.label}</td><td>${x.chars||""}</td><td>${x.status}</td></tr>`).join("")+"</table>":"Không có ảnh nào chờ chuyển.")+`<p class="m">Mở tab "Dữ liệu" để duyệt/chấp nhận ký tự.</p>`;rawList();refresh()}
+rawPos();rawList();
+refresh();
+</script></body></html>

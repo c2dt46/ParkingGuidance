@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""
+Huan luyen them (fine-tune) BO DO BIEN SO (YOLO11, 1 lop "license_plate") tu cac anh da gan khung o tab "Train bien so" cua ung dung.
+
+Duoc ung dung goi o MOT TIEN TRINH RIENG (uu tien thap), chi khi bam Train:
+    python train_plate.py --samples <data/plate-train/samples> --out <data/plate-train/run> --status <train-status.json> \
+        --base yolo11n.pt [--current <model dang chay .onnx/.pt>] [--epochs 40] [--imgsz 640] [--device cpu] [--batch 8] [--threads 0]
+
+Quy trinh: dung bo du lieu YOLO tu index.json (CHI anh da duyet; chia train/val co dinh theo ma anh) -> do model hien tai (neu do duoc)
+tren tap val -> fine-tune tu --base -> do model moi tren tap val -> xuat ONNX (best.onnx) + best.pt vao --out. Tien do ghi vao --status (JSON).
+
+ONNX xuat ra co dang [1, 5, 8400] (cx, cy, w, h, diem) — OnnxPlateDetector cua ung dung doc duoc ngay.
+Khong lat ngang anh khi huan luyen (fliplr = 0) vi bien so bi lat guong khong con la bien so.
+
+Yeu cau: pip install ultralytics   (giay phep AGPL-3.0 cua Ultralytics - xem README.md)
+"""
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import sys
+import time
+
+CLASS_NAME = "license_plate"
+VAL_PERCENT = 20          # ~20% anh vao tap kiem tra (co dinh theo ma anh nen lan train sau khong bi lan)
+MIN_VAL = 2
+
+
+def write_status(path, **kw):
+    """Ghi trang thai nguyen tu (ung dung doc de hien thi)."""
+    data = {}
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+    except Exception:
+        data = {}
+    data.update(kw)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def is_val(sample_id):
+    return int(hashlib.sha1(sample_id.encode()).hexdigest()[:8], 16) % 100 < VAL_PERCENT
+
+
+def build_dataset(samples_dir, out_dir):
+    """Dung thu muc du lieu YOLO tu index.json. Tra ve (duong dan data.yaml, so lieu)."""
+    with open(os.path.join(samples_dir, "index.json"), "r", encoding="utf-8") as f:
+        index = json.load(f)
+    reviewed = [e for e in index if e.get("reviewed")]
+    if not reviewed:
+        raise RuntimeError("Chưa có ảnh nào đã duyệt.")
+
+    ds = os.path.join(out_dir, "dataset")
+    if os.path.isdir(ds):
+        shutil.rmtree(ds)
+    for split in ("train", "val"):
+        os.makedirs(os.path.join(ds, "images", split))
+        os.makedirs(os.path.join(ds, "labels", split))
+
+    splits = {e["id"]: ("val" if is_val(e["id"]) else "train") for e in reviewed}
+    if sum(1 for s in splits.values() if s == "val") < MIN_VAL and len(reviewed) >= 5:
+        # qua it anh vao val: chuyen bot vai anh (theo ma anh) sang val de co so do dang tin
+        for sid in sorted(splits)[:MIN_VAL]:
+            splits[sid] = "val"
+    if not any(s == "train" for s in splits.values()):
+        for sid in list(splits)[:1]:
+            splits[sid] = "train"
+
+    counts = {"train": 0, "val": 0, "negatives": 0, "boxes": 0}
+    for e in reviewed:
+        sid, ext = e["id"], e.get("ext", ".jpg")
+        src = os.path.join(samples_dir, sid + ext)
+        if not os.path.exists(src):
+            continue
+        split = splits[sid]
+        dst = os.path.join(ds, "images", split, sid + ext)
+        try:
+            os.link(src, dst)                 # nhanh, khong ton cho; khac o dia thi chep
+        except OSError:
+            shutil.copy2(src, dst)
+
+        w, h = float(e.get("width") or 0), float(e.get("height") or 0)
+        if w <= 0 or h <= 0:
+            import cv2
+            im = cv2.imread(src)
+            h, w = im.shape[:2]
+        lines = []
+        for b in e.get("boxes", []):
+            x1, y1 = max(0.0, min(b["x1"], b["x2"])), max(0.0, min(b["y1"], b["y2"]))
+            x2, y2 = min(w, max(b["x1"], b["x2"])), min(h, max(b["y1"], b["y2"]))
+            if x2 - x1 < 2 or y2 - y1 < 2:
+                continue
+            lines.append(f"0 {(x1 + x2) / 2 / w:.6f} {(y1 + y2) / 2 / h:.6f} {(x2 - x1) / w:.6f} {(y2 - y1) / h:.6f}")
+        with open(os.path.join(ds, "labels", split, sid + ".txt"), "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + ("\n" if lines else ""))       # file rong = anh khong co bien (mau am)
+        counts[split] += 1
+        counts["boxes"] += len(lines)
+        if not lines:
+            counts["negatives"] += 1
+
+    yaml_path = os.path.join(ds, "data.yaml")
+    with open(yaml_path, "w", encoding="utf-8") as f:
+        f.write(f"path: {ds.replace(os.sep, '/')}\ntrain: images/train\nval: images/val\nnames:\n  0: {CLASS_NAME}\n")
+    return yaml_path, counts
+
+
+def metrics_of(res):
+    try:
+        b = res.box
+        return {"map50": float(b.map50), "map5095": float(b.map), "precision": float(b.mp), "recall": float(b.mr)}
+    except Exception:
+        return None
+
+
+def parse_args(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--samples", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--status", required=True)
+    ap.add_argument("--base", default="yolo11n.pt", help="trong so xuat phat (.pt)")
+    ap.add_argument("--fallback-base", default="", help="(khong dung de do — model goc la COCO, khong co lop bien so)")
+    ap.add_argument("--current", default="", help="model bien so dang chay (.onnx/.pt) de so sanh; trong = khong so sanh duoc")
+    ap.add_argument("--epochs", type=int, default=40)
+    ap.add_argument("--imgsz", type=int, default=640)
+    ap.add_argument("--device", default="cpu")
+    ap.add_argument("--batch", type=int, default=8)
+    ap.add_argument("--threads", type=int, default=0)
+    return ap.parse_args(argv)
+
+
+def main(argv=None):
+    a = parse_args(argv)
+    os.makedirs(a.out, exist_ok=True)
+    started = time.strftime("%Y-%m-%d %H:%M:%S")
+    write_status(a.status, state="preparing", message="Đang chuẩn bị dữ liệu…", epoch=0, epochs=a.epochs, startedAt=started)
+
+    try:
+        try:
+            from ultralytics import YOLO
+        except ImportError:
+            raise RuntimeError("Chưa cài thư viện huấn luyện. Chạy: pip install ultralytics")
+
+        if a.threads > 0:
+            try:
+                import torch
+                torch.set_num_threads(a.threads)
+            except Exception:
+                pass
+
+        data_yaml, counts = build_dataset(a.samples, a.out)
+        write_status(a.status, images={"train": counts["train"], "val": counts["val"], "negatives": counts["negatives"], "boxes": counts["boxes"]})
+        workers = max(1, min(4, a.threads if a.threads > 0 else 2))
+
+        # 1) do bo do bien so hien tai tren tap kiem tra (neu co model ONNX/PT de do; bo do Darknet mac dinh thi khong do duoc)
+        write_status(a.status, state="evaluating-base", message="Đang đo bộ dò biển hiện tại trên tập kiểm tra…")
+        base_metrics = None
+        if a.current:
+            try:
+                res = YOLO(a.current).val(data=data_yaml, imgsz=a.imgsz, batch=a.batch, device=a.device, workers=workers, plots=False, verbose=False)
+                base_metrics = metrics_of(res)
+            except Exception as ex:
+                print(f"[train_plate] khong do duoc {a.current}: {ex}", file=sys.stderr)
+        write_status(a.status, metrics={"base": base_metrics})
+
+        # 2) huan luyen
+        write_status(a.status, state="training", message="Đang huấn luyện…")
+        model = YOLO(a.base)
+
+        def on_epoch_end(trainer):
+            try:
+                write_status(a.status, epoch=int(trainer.epoch) + 1, epochs=int(trainer.epochs),
+                             message=f"Đang huấn luyện — epoch {int(trainer.epoch) + 1}/{int(trainer.epochs)}")
+            except Exception:
+                pass
+
+        model.add_callback("on_fit_epoch_end", on_epoch_end)
+        n_train = counts["train"]
+        model.train(
+            data=data_yaml, epochs=a.epochs, imgsz=a.imgsz, batch=a.batch, device=a.device, workers=workers,
+            project=a.out, name="train", exist_ok=True, patience=12, plots=False, verbose=False,
+            fliplr=0.0,                                  # bien so lat guong khong con la bien so
+            freeze=10 if n_train < 300 else 0,           # it anh: giu nguyen phan "mat" (backbone) de khoi quen
+        )
+
+        best_pt = os.path.join(a.out, "train", "weights", "best.pt")
+        if not os.path.exists(best_pt):
+            raise RuntimeError("Huấn luyện xong nhưng không thấy best.pt.")
+
+        # 3) do model moi + xuat ONNX
+        write_status(a.status, state="evaluating-new", message="Đang đo model mới trên tập kiểm tra…")
+        best = YOLO(best_pt)
+        new_metrics = metrics_of(best.val(data=data_yaml, imgsz=a.imgsz, batch=a.batch, device=a.device, workers=workers, plots=False, verbose=False))
+
+        write_status(a.status, state="exporting", message="Đang xuất model ONNX…", metrics={"base": base_metrics, "new": new_metrics})
+        onnx = best.export(format="onnx", imgsz=a.imgsz, opset=12, simplify=False, dynamic=False)
+        shutil.copy2(str(onnx), os.path.join(a.out, "best.onnx"))
+        shutil.copy2(best_pt, os.path.join(a.out, "best.pt"))
+
+        write_status(a.status, state="done", message="Hoàn tất.", epoch=a.epochs, finishedAt=time.strftime("%Y-%m-%d %H:%M:%S"),
+                     metrics={"base": base_metrics, "new": new_metrics}, onnx=True)
+        return 0
+    except Exception as ex:
+        write_status(a.status, state="error", message=str(ex), error=str(ex), finishedAt=time.strftime("%Y-%m-%d %H:%M:%S"))
+        print(f"[train_plate] loi: {ex}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

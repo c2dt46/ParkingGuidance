@@ -1,0 +1,82 @@
+@page "/Tasks/Tags"
+@{
+    ViewData["Title"] = "Tags";
+}
+
+<div class="page-header">
+    <h1><span data-i18n="nav.tasks">TASKS</span> — <span data-i18n="tag.head">Tags</span></h1>
+</div>
+
+<div class="source-tabs">
+    <button class="tab-btn active" data-tab="system"><span class="ico">⚙️</span> <span data-i18n="tag.tabSystem">System tags</span></button>
+    <button class="tab-btn" data-tab="project"><span class="ico">🏷️</span> <span data-i18n="tag.tabProject">Project tags</span></button>
+</div>
+
+<!-- =============== TAB: SYSTEM TAGS (chỉ đọc) =============== -->
+<section id="tab-system" class="panel">
+    <div class="hint small" style="margin-top:0" data-i18n="tag.sysHint">Tag có sẵn của hệ thống, chỉ đọc. Do 1 luồng nền riêng cập nhật, không đụng tới camera, cảm biến, LED hay dữ liệu bãi xe nên không ảnh hưởng luồng chính.</div>
+    <div id="tgSysStatus" class="tg-status"></div>
+    <table class="data-table tg-table" id="tgSysTable">
+        <thead>
+            <tr>
+                <th style="width:50px" data-i18n="tag.colNo">STT</th>
+                <th data-i18n="tag.colName">Tên</th>
+                <th style="width:110px" data-i18n="tag.colValue">Giá trị</th>
+                <th style="width:100px" data-i18n="tag.colType">Kiểu</th>
+                <th data-i18n="tag.colDesc">Mô tả</th>
+                <th style="width:80px" data-i18n="tag.colScope">Phạm vi</th>
+            </tr>
+        </thead>
+        <tbody id="tgSysBody"></tbody>
+    </table>
+</section>
+
+<!-- =============== TAB: PROJECT TAGS (người dùng khai báo) =============== -->
+<section id="tab-project" class="panel" style="display:none;">
+    <div class="hint small" style="margin-top:0" data-i18n="tag.projHint">Tag do bạn khai báo. Chọn 1 dòng để sửa hoặc xoá. Tên gồm chữ, số, gạch dưới và không được trùng System tag.</div>
+
+    <div class="tg-toolbar">
+        <button id="tgAdd" class="btn primary btn-sm"><span class="ico">➕</span> <span data-i18n="tag.add">Thêm tag</span></button>
+        <button id="tgEdit" class="btn secondary btn-sm" disabled><span class="ico">✏️</span> <span data-i18n="tag.edit">Sửa</span></button>
+        <button id="tgDel" class="btn secondary btn-sm" disabled><span class="ico">🗑️</span> <span data-i18n="tag.delete">Xoá</span></button>
+        <span id="tgProjState" class="hint small" style="margin:0"></span>
+    </div>
+
+    <div id="tgForm" class="tg-form" style="display:none;">
+        <h3 id="tgFormTitle" class="tg-form-title"></h3>
+        <div class="tg-form-grid">
+            <div class="prop-field"><label for="TgName" data-i18n="tag.colName">Tên</label><input id="TgName" type="text" maxlength="64" autocomplete="off" spellcheck="false" /></div>
+            <div class="prop-field"><label for="TgType" data-i18n="tag.colType">Kiểu</label>
+                <select id="TgType"><option>Integer</option><option>Boolean</option><option>Real</option><option>String</option></select></div>
+            <div class="prop-field"><label for="TgValue" data-i18n="tag.colValue">Giá trị</label>
+                <input id="TgValue" type="text" maxlength="255" autocomplete="off" />
+                <select id="TgValueBool" style="display:none"><option value="0">0</option><option value="1">1</option></select></div>
+            <div class="prop-field"><label for="TgScope" data-i18n="tag.colScope">Phạm vi</label>
+                <select id="TgScope"><option>Local</option><option>Global</option></select></div>
+            <div class="prop-field" style="grid-column:1/-1"><label for="TgDesc" data-i18n="tag.colDesc">Mô tả</label><input id="TgDesc" type="text" maxlength="200" /></div>
+        </div>
+        <div class="tg-toolbar">
+            <button id="tgSave" class="btn primary btn-sm"><span class="ico">💾</span> <span data-i18n="tag.save">Lưu</span></button>
+            <button id="tgCancel" class="btn secondary btn-sm"><span data-i18n="tag.cancel">Huỷ</span></button>
+            <span id="tgFormState" class="hint small" style="margin:0"></span>
+        </div>
+    </div>
+
+    <table class="data-table tg-table" id="tgProjTable">
+        <thead>
+            <tr>
+                <th style="width:50px" data-i18n="tag.colNo">STT</th>
+                <th data-i18n="tag.colName">Tên</th>
+                <th style="width:110px" data-i18n="tag.colValue">Giá trị</th>
+                <th style="width:100px" data-i18n="tag.colType">Kiểu</th>
+                <th data-i18n="tag.colDesc">Mô tả</th>
+                <th style="width:80px" data-i18n="tag.colScope">Phạm vi</th>
+            </tr>
+        </thead>
+        <tbody id="tgProjBody"></tbody>
+    </table>
+</section>
+
+@section Scripts {
+    <script src="~/js/tasksTags.js"></script>
+}

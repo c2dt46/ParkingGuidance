@@ -1,0 +1,37 @@
+@page "/Search"
+@{
+    ViewData["Title"] = "Tìm vị trí xe của bạn";
+}
+
+<div class="kiosk">
+    <h1>Tìm vị trí xe của bạn</h1>
+    <p class="hint">Nhập ít nhất 4 ký tự cuối của biển số xe</p>
+
+    <input id="plateInput" class="plate-input" readonly />
+
+    <div class="keypad">
+        <button class="key" data-key="1">1</button>
+        <button class="key" data-key="2">2</button>
+        <button class="key" data-key="3">3</button>
+        <button class="key" data-key="4">4</button>
+        <button class="key" data-key="5">5</button>
+        <button class="key" data-key="6">6</button>
+        <button class="key" data-key="7">7</button>
+        <button class="key" data-key="8">8</button>
+        <button class="key" data-key="9">9</button>
+        <button class="key back">⌫</button>
+        <button class="key" data-key="0">0</button>
+        <button class="key clear">✕</button>
+    </div>
+
+    <div class="kiosk-actions">
+        <button id="clearBtn" class="btn secondary">✕ Xóa</button>
+        <button id="searchBtn" class="btn primary">🔍 Tìm xe</button>
+    </div>
+
+    <div id="results" class="results"></div>
+</div>
+
+@section Scripts {
+    <script src="~/js/search.js"></script>
+}

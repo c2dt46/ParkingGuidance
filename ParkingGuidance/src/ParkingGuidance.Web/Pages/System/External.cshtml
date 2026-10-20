@@ -1,0 +1,71 @@
+@page "/System/External"
+@{
+    ViewData["Title"] = "Thiết bị ngoài";
+}
+
+<div class="page-header">
+    <h1><span data-i18n="nav.device">Thiết bị</span> — Thiết bị ngoài</h1>
+</div>
+
+<div class="source-tabs">
+    <button class="tab-btn active" data-mbtab="server">🖧 Modbus TCP/IP — Server</button>
+    <button class="tab-btn" data-mbtab="client">🔌 Modbus TCP/IP — Client</button>
+</div>
+
+<!-- =============== Server: chương trình mở cổng, thiết bị ngoài kết nối tới =============== -->
+<section id="mbServerTab" class="panel mb-panel">
+    <div class="hint small">
+        <b>Chế độ Server</b>: chương trình mở các cổng TCP bên dưới; PLC / SCADA / thiết bị ngoài kết nối tới các cổng này để đọc / ghi dữ liệu.
+        Cổng mặc định của Modbus TCP là 502. Bấm <b>Lưu</b> là cổng được mở / đóng ngay. Chương trình trả lời lệnh đọc thanh ghi (03, 04) và ghi thanh ghi (06, 16)
+        trên bảng thanh ghi riêng của từng cổng (hiện toàn 0; dữ liệu cụ thể sẽ gán sau). Cần cho phép cổng trong tường lửa; Modbus không có xác thực nên chỉ dùng trong mạng tin cậy.
+    </div>
+    <div class="tg-toolbar">
+        <button id="mbSvAdd" class="btn primary btn-sm"><span class="ico">➕</span> Thêm Server</button>
+        <button id="mbSvSave" class="btn secondary btn-sm"><span class="ico">💾</span> Lưu</button>
+        <span id="mbSvState" class="hint small" style="margin:0"></span>
+    </div>
+    <table class="data-table tg-table mb-table">
+        <thead><tr><th style="width:56px">#</th><th style="width:70px">Bật</th><th style="width:170px">Cổng sẽ mở</th><th>Mô tả</th><th style="width:260px">Trạng thái</th><th style="width:70px"></th></tr></thead>
+        <tbody id="mbSvBody"></tbody>
+    </table>
+</section>
+
+<!-- =============== Client: chương trình kết nối tới thiết bị ngoài và ghi biến MS vào thanh ghi =============== -->
+<section id="mbClientTab" class="panel mb-panel" style="display:none;">
+    <div class="hint small">
+        <b>Chế độ Client</b>: chương trình chủ động kết nối tới từng thiết bị bên dưới theo <b>địa chỉ IP</b> và <b>cổng</b> của thiết bị,
+        rồi cứ mỗi <b>chu kỳ gửi</b> ghi giá trị các biến (MS, MC) đã gán (bấm <b>Biến</b> ở từng dòng) vào các thanh ghi của thiết bị.
+        Unit ID là địa chỉ slave của thiết bị (mặc định 1). Nhiều thiết bị hoặc chu kỳ rất ngắn thì tải tăng; thường 500–1000 ms là đủ.
+    </div>
+    <div class="tg-toolbar">
+        <button id="mbClAdd" class="btn primary btn-sm"><span class="ico">➕</span> Thêm Client</button>
+        <button id="mbClSave" class="btn secondary btn-sm"><span class="ico">💾</span> Lưu</button>
+        <span id="mbClState" class="hint small" style="margin:0"></span>
+    </div>
+    <table class="data-table tg-table mb-table">
+        <thead><tr><th style="width:44px">#</th><th style="width:56px">Bật</th><th style="width:160px">Địa chỉ IP thiết bị</th><th style="width:100px">Cổng</th><th style="width:84px">Unit ID</th><th style="width:130px">Chu kỳ gửi (ms)</th><th>Mô tả</th><th style="width:190px">Trạng thái</th><th style="width:150px"></th></tr></thead>
+        <tbody id="mbClBody"></tbody>
+    </table>
+
+    <div id="mbMapPanel" class="tg-form" style="display:none;">
+        <h3 id="mbMapTitle" class="tg-form-title"></h3>
+        <div class="hint small">
+            Mỗi chu kỳ, giá trị của biến (MS hoặc MC) được ghi vào <b>thanh ghi holding</b> (16 bit, 0–65535) tại địa chỉ bên dưới.
+            Địa chỉ tính từ 0 theo giao thức (địa chỉ 0 = thanh ghi 40001 trong cách gọi cũ). Biến chưa có giá trị thì bỏ qua, không ghi đè dữ liệu cũ trên thiết bị.
+        </div>
+        <div class="tg-toolbar">
+            <button id="mbMapAdd" class="btn primary btn-sm" type="button"><span class="ico">➕</span> Thêm dòng</button>
+            <button id="mbMapAll" class="btn secondary btn-sm" type="button" title="Thêm các biến chưa gán, địa chỉ nối tiếp sau địa chỉ lớn nhất"><span class="ico">📋</span> Thêm tất cả biến</button>
+            <button id="mbMapClose" class="btn secondary btn-sm" type="button">Đóng</button>
+            <span id="mbMapState" class="hint small" style="margin:0"></span>
+        </div>
+        <table class="data-table tg-table mb-table">
+            <thead><tr><th>Biến (MS / MC)</th><th style="width:200px">Địa chỉ thanh ghi</th><th style="width:70px"></th></tr></thead>
+            <tbody id="mbMapBody"></tbody>
+        </table>
+    </div>
+</section>
+
+@section Scripts {
+    <script src="~/js/externalModbus.js"></script>
+}

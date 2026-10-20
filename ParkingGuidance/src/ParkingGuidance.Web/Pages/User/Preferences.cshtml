@@ -1,0 +1,147 @@
+@page "/User/Preferences"
+@{
+    ViewData["Title"] = "Giao diện & ngôn ngữ";
+}
+
+<div class="page-header">
+    <h1 data-i18n="pref.title">Người dùng — Giao diện &amp; ngôn ngữ</h1>
+</div>
+<div class="hint small" data-i18n="pref.hint">Thay đổi có hiệu lực ngay. Chọn bên dưới là áp dụng riêng cho máy này hay cho mọi máy.</div>
+
+<div class="prop-field" style="margin-top:16px">
+    <label data-i18n="pref.scope">Áp dụng cho</label>
+    <div class="pref-seg" id="prefScope">
+        <button data-v="local" data-i18n="pref.local">🖥️ Chỉ máy này</button>
+        <button data-v="global" data-i18n="pref.global">🌐 Mọi máy (lưu trên server)</button>
+    </div>
+    <div class="hint small" id="prefScopeHint" style="margin-top:6px"></div>
+</div>
+
+<div class="pref-grid">
+    <div class="prop-field">
+        <label data-i18n="pref.theme">Màu nền</label>
+        <div class="pref-seg" id="prefTheme">
+            <button data-v="dark" data-i18n="pref.dark">🌙 Tối</button>
+            <button data-v="light" data-i18n="pref.light">☀️ Sáng</button>
+            <button data-v="auto" data-i18n="pref.auto">🖥️ Theo hệ thống</button>
+        </div>
+    </div>
+
+    <div class="prop-field">
+        <label data-i18n="pref.lang">Ngôn ngữ</label>
+        <div class="pref-seg" id="prefLang">
+            <button data-v="vi">🇻🇳 Tiếng Việt</button>
+            <button data-v="en">🇬🇧 English</button>
+        </div>
+    </div>
+
+    <div class="prop-field">
+        <label for="prefFont" data-i18n="pref.font">Font chữ</label>
+        <select id="prefFont">
+            <option value="segoe">Segoe UI (mặc định)</option>
+            <option value="roboto">Roboto</option>
+            <option value="arial">Arial</option>
+            <option value="verdana">Verdana</option>
+            <option value="georgia">Georgia (có chân)</option>
+            <option value="mono">Consolas (đơn cách)</option>
+        </select>
+    </div>
+
+    <div class="prop-field">
+        <label for="prefSize"><span data-i18n="pref.size">Cỡ chữ</span>: <b id="prefSizeVal">100%</b></label>
+        <input id="prefSize" type="range" min="85" max="130" step="5" />
+    </div>
+
+    <div class="prop-field">
+        <label for="prefAccent" data-i18n="pref.accent">Màu nhấn</label>
+        <input id="prefAccent" type="color" />
+    </div>
+</div>
+
+<div class="prop-field" style="margin-top:20px">
+    <label for="browserSelect">🌐 Trình duyệt mở giao diện Giám sát</label>
+    <div class="pref-browser">
+        <select id="browserSelect" title="Nếu trình duyệt được chọn không có trên máy sẽ tự dùng trình duyệt mặc định."></select>
+        <button id="openBrowserBtn" class="btn secondary" title="Mở trang Giám sát bằng trình duyệt đã chọn (không có thì dùng trình duyệt mặc định)">🌐 Mở</button>
+        <span id="browserStatus" class="header-status" role="status"></span>
+    </div>
+    <div class="hint small">Lựa chọn được lưu trên máy chủ, không mất khi khởi động lại.</div>
+</div>
+
+<div class="prop-field" style="margin-top:20px">
+    <label>🪟 Hiển thị / ẩn các phần của trang web</label>
+    <div class="pref-seg" id="prefView">
+        <button type="button" id="prefSidebarBtn"></button>
+        <button type="button" id="prefFullBtn"></button>
+    </div>
+    <div class="hint small" style="margin-top:6px">
+        Ẩn thanh menu bên trái để khung làm việc rộng hơn. "Toàn màn hình" sẽ ẩn thanh tab và thanh địa chỉ của trình duyệt (giống F11).
+        Cài đặt này chỉ áp dụng riêng cho máy này. Khi đã ẩn, dùng 2 nút nhỏ ☰ ⛶ ở góc dưới bên trái màn hình để hiện lại.
+    </div>
+</div>
+
+<div class="pref-preview">
+    <div class="hint small" data-i18n="pref.preview">Xem trước</div>
+    <div class="pref-sample" data-i18n="pref.sample">Parking Guidance — AaBbCc 0123456789 — Hướng dẫn đỗ xe</div>
+    <button class="btn primary btn-sm">💾 OK</button>
+</div>
+
+<div style="margin-top:16px">
+    <button id="prefReset" class="btn btn-sm" data-i18n="pref.reset">↩️ Khôi phục mặc định</button>
+</div>
+<div id="prefStatus" class="hint small" style="margin-top:10px"></div>
+<div class="hint small" style="margin-top:10px" data-i18n="pref.note">Lưu ý: ngôn ngữ hiện áp dụng cho menu và trang này; các trang khác sẽ được dịch dần khi bổ sung bản dịch.</div>
+
+@section Scripts {
+<script src="~/js/browserPicker.js"></script>
+<script>
+    const P = window.PGPrefs;
+    const status = document.getElementById('prefStatus');
+    function sync() {
+        const p = P.get();
+        document.querySelectorAll('#prefScope button').forEach(b => b.classList.toggle('active', b.dataset.v === p.scope));
+        document.querySelectorAll('#prefTheme button').forEach(b => b.classList.toggle('active', b.dataset.v === p.theme));
+        document.querySelectorAll('#prefLang button').forEach(b => b.classList.toggle('active', b.dataset.v === p.lang));
+        document.getElementById('prefFont').value = p.font;
+        document.getElementById('prefSize').value = p.size;
+        document.getElementById('prefSizeVal').textContent = p.size + '%';
+        document.getElementById('prefAccent').value = p.accent;
+        document.getElementById('prefScopeHint').textContent = p.scope === 'global'
+            ? P.t('pref.scopeHintGlobal', 'Mọi máy đang ở chế độ "Mọi máy" sẽ lấy cài đặt này từ server mỗi khi mở hoặc quay lại trang.')
+            : P.t('pref.scopeHintLocal', 'Máy này dùng cài đặt riêng; các máy khác không bị ảnh hưởng.');
+    }
+    // Moi lan doi: ap dung ngay; neu pham vi la "Moi may" thi luu len server va bao ket qua
+    async function change(patch) {
+        const p = P.set(patch); sync();
+        const scope = P.get().scope, time = new Date().toLocaleTimeString(P.get().lang === 'en' ? 'en-GB' : 'vi-VN');
+        try { await p; status.textContent = P.t(scope === 'global' ? 'pref.saved' : 'pref.savedLocal',
+            scope === 'global' ? '✅ Đã lưu cho mọi máy lúc ' : '✅ Đã lưu trên máy này lúc ') + time; }
+        catch (err) { status.textContent = P.t('pref.fail', '⚠️ Không lưu được lên server: ') + err.message; }
+    }
+    document.getElementById('prefScope').addEventListener('click', async e => {
+        if (!e.target.dataset.v) return;
+        try { await P.setScope(e.target.dataset.v); status.textContent = ''; }
+        catch (err) { status.textContent = P.t('pref.fail', '⚠️ Không lưu được lên server: ') + err.message; }
+        sync();
+    });
+    document.getElementById('prefTheme').addEventListener('click', e => { if (e.target.dataset.v) change({ theme: e.target.dataset.v }); });
+    document.getElementById('prefLang').addEventListener('click', e => { if (e.target.dataset.v) change({ lang: e.target.dataset.v }); });
+    document.getElementById('prefFont').addEventListener('change', e => change({ font: e.target.value }));
+    document.getElementById('prefSize').addEventListener('input', e => change({ size: +e.target.value }));
+    document.getElementById('prefAccent').addEventListener('input', e => change({ accent: e.target.value }));
+    document.getElementById('prefReset').addEventListener('click', () => change(P.DEFAULTS));
+    function syncView() {
+        const V = window.PGView;
+        document.getElementById('prefSidebarBtn').textContent = V.isSidebarHidden() ? '☰ Hiện thanh menu trái' : '☰ Ẩn thanh menu trái';
+        document.getElementById('prefFullBtn').textContent = V.isFullscreen() ? '⛶ Thoát toàn màn hình' : '⛶ Toàn màn hình (ẩn thanh trình duyệt)';
+        document.getElementById('prefSidebarBtn').classList.toggle('active', V.isSidebarHidden());
+        document.getElementById('prefFullBtn').classList.toggle('active', V.isFullscreen());
+    }
+    document.getElementById('prefSidebarBtn').addEventListener('click', () => { window.PGView.toggleSidebar(); syncView(); });
+    document.getElementById('prefFullBtn').addEventListener('click', async () => { await window.PGView.toggleFullscreen(); syncView(); });
+    document.addEventListener('pgview', syncView);
+    syncView();
+    document.addEventListener('pgprefs', sync);   // server vua tra ve gia tri moi
+    sync();
+</script>
+}

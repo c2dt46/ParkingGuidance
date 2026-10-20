@@ -1,0 +1,8 @@
+flask>=3.0
+numpy
+opencv-python
+pillow
+onnxruntime
+onnx
+# PyTorch: cài theo hướng dẫn tại https://pytorch.org (bản CPU là đủ; có GPU NVIDIA thì chọn bản CUDA)
+torch

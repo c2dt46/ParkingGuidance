@@ -1,0 +1,307 @@
+@page "/System/Sensors"
+@{
+    ViewData["Title"] = "Cảm biến";
+}
+
+<div class="page-header">
+    <h1><span data-i18n="nav.device">Thiết bị</span> — <span data-i18n="nav.sen">Cảm biến</span></h1>
+</div>
+
+<div class="source-tabs">
+    <button class="tab-btn active" data-tab="cfg">⚙️ Cấu hình</button>
+    <button class="tab-btn" data-tab="mon">📡 Giám sát</button>
+    <button class="tab-btn" data-tab="data">📊 Dữ liệu</button>
+    <button class="tab-btn" data-tab="test">🔍 Thử khung dữ liệu</button>
+</div>
+
+<!-- =============== TAB 1: Cấu hình — Loại cảm biến + cài đặt kết nối =============== -->
+<div id="cfgTab" class="sys-tab-panel active">
+<!-- =============== Loại cảm biến + cài đặt kết nối =============== -->
+<section class="panel">
+    <h2>Loại cảm biến</h2>
+    <div class="sn-types">
+        <label class="sn-type"><input type="radio" name="SensorType" value="Pm200" checked />
+            <span><b>MGT200</b> <small>(mặc định)</small><br /><small>PC kết nối tới converter và hỏi lần lượt từng ZCU (tối đa 32 ZCU × 160 cảm biến).</small></span></label>
+        <label class="sn-type"><input type="radio" name="SensorType" value="Keytop" />
+            <span><b>Keytop</b><br /><small>PC mở server TCP, các Keytop tự gửi trạng thái tới (tối đa 85 Keytop × 60 cảm biến).</small></span></label>
+    </div>
+
+    <div id="pm200Box" class="sn-box">
+        <div class="sn-row">
+            <div class="prop-field"><label for="Pm200Ip">IP converter MGT200</label><input id="Pm200Ip" type="text" maxlength="15" placeholder="192.168.0.7" /></div>
+            <div class="prop-field"><label for="Pm200Port">Port converter</label><input id="Pm200Port" type="number" min="1" max="65535" placeholder="8888" /></div>
+            <div class="prop-field"><label for="Pm200Wait">Chờ trả lời tối đa (ms)</label><input id="Pm200Wait" type="number" min="100" max="2000" step="50" title="Thời gian chờ ZCU trả lời sau mỗi lệnh hỏi (100–2000 ms)" /></div>
+        </div>
+        <div class="sn-sub">Kích hoạt ZCU (chỉ ZCU được tích mới được quét)
+            <button id="SnAll" type="button" class="btn secondary btn-sm">Chọn hết</button>
+            <button id="SnNone" type="button" class="btn secondary btn-sm">Bỏ hết</button>
+        </div>
+        <div id="zcuEnable" class="sn-enable"></div>
+    </div>
+
+    <div id="keytopBox" class="sn-box" style="display:none">
+        <div class="sn-row">
+            <div class="prop-field"><label for="KeytopPort">Port server (PC lắng nghe)</label><input id="KeytopPort" type="number" min="1" max="65535" placeholder="7777" /></div>
+            <div class="prop-field"><label for="KeytopIp0">IP của Keytop đầu tiên (ZCU0)</label><input id="KeytopIp0" type="text" maxlength="15" placeholder="192.168.0.100" /></div>
+            <div class="prop-field"><label for="KeytopCount">Số lượng Keytop (1–85)</label><input id="KeytopCount" type="number" min="1" max="85" /></div>
+            <div class="prop-field"><label for="KeytopTimeout">Timeout mất kết nối (giây)</label><input id="KeytopTimeout" type="number" min="5" max="3600" title="Quá thời gian này không nhận được dữ liệu từ 1 Keytop thì coi là mất kết nối" /></div>
+        </div>
+        <div class="hint small">Số thứ tự Keytop = octet cuối của IP thiết bị gửi tới trừ octet cuối của IP ZCU0 (cùng dải /24). Ví dụ ZCU0 = 192.168.0.100 thì thiết bị 192.168.0.102 là ZCU 2.</div>
+    </div>
+
+    <div class="sn-actions">
+        <button id="SnSave" class="btn primary btn-sm"><span class="ico">💾</span> Lưu cài đặt</button>
+        <span id="SnSaveState" class="hint small"></span>
+    </div>
+    <div class="hint small">Lưu xong có hiệu lực ngay: chương trình tự đóng kết nối cũ và kết nối lại theo cài đặt mới.</div>
+</section>
+
+</div>
+
+<!-- =============== TAB 2: Giám sát — trạng thái từng ZCU / cảm biến + Cài đặt cảm biến MGT200 =============== -->
+<div id="monTab" class="sys-tab-panel">
+<!-- =============== Giám sát =============== -->
+<section class="panel">
+    <h2>Giám sát</h2>
+    <div id="snConn" class="sn-conn"></div>
+    <div id="snTotals" class="sn-totals"></div>
+
+    <div id="snDevices" class="sn-devices"></div>
+
+    <div id="snDetail" class="sn-detail">
+        <div id="snDetailHead" class="sn-detail-head"></div>
+        <div id="snGrid" class="sn-grid"></div>
+        <div class="sn-legend">
+            <span><i class="sn-cell s0"></i>Trống</span>
+            <span><i class="sn-cell s1"></i>Có xe</span>
+            <span><i class="sn-cell s2"></i>Lỗi</span>
+            <span><i class="sn-cell sU"></i>Chưa có dữ liệu</span>
+            <span><i class="sn-cell off"></i>Mất kết nối</span>
+        </div>
+        <div id="snFrame" class="sn-frame"></div>
+    </div>
+</section>
+
+<!-- =============== Cài đặt cảm biến MGT200 (PM200Setting › Cài đặt cảm biến) =============== -->
+<section id="cmdPanel" class="panel" style="display:none">
+    <h2>Cài đặt cảm biến MGT200</h2>
+    <div class="sn-cmdlayout">
+        <div class="sn-cmdform">
+    <div class="sn-row">
+            <div class="prop-field"><label for="CmdZcu">Chọn ZCU</label><select id="CmdZcu"></select></div>
+            <div class="prop-field"><label for="CmdCommand">Chọn lệnh</label><select id="CmdCommand"></select></div>
+            <div class="prop-field"><label for="CmdChannel">Chọn Line</label><select id="CmdChannel"></select></div>
+            <div id="CmdSensorWrap" class="prop-field"><label for="CmdSensor">Chọn cảm biến</label><select id="CmdSensor"></select></div>
+            <div id="CmdDataWrap" class="prop-field" style="display:none"><label id="CmdDataLabel" for="CmdData">Dữ liệu</label><select id="CmdData"></select></div>
+        </div>
+        <div id="CmdHint" class="hint small" style="margin-top:0"></div>
+
+        <div class="sn-actions">
+            <button id="CmdRun" class="btn primary btn-sm"><span class="ico">▶️</span> Thực hiện</button>
+            <label id="CmdAutoWrap" class="sn-en" style="display:none"><input id="CmdAuto" type="checkbox" /> Đọc liên tục</label>
+            <span id="CmdState" class="hint small"></span>
+        </div>
+        </div>
+        <div id="CmdFigure" class="sn-figure" style="display:none">
+        <!-- Sơ đồ lắp đặt: lệnh 1 (Ground auto set), 2 (Ground manual set), 4 (Ground threshold set) -->
+        <div id="figGround" class="fig-wrap" style="display:none">
+            <svg id="figGroundSvg" class="fig-ground" viewBox="0 0 640 350" role="img" aria-label="Sơ đồ lắp đặt cảm biến MGT200 và các thông số khoảng cách mặt đất">
+                <defs>
+                    <linearGradient id="figBg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0f1a33"/><stop offset="1" stop-color="#0a1226"/></linearGradient>
+                    <linearGradient id="figBeam" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fb923c" stop-opacity=".65"/><stop offset="1" stop-color="#fb923c" stop-opacity=".04"/></linearGradient>
+                    <linearGradient id="figCar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff8a3d"/><stop offset=".55" stop-color="#ea580c"/><stop offset="1" stop-color="#b43c08"/></linearGradient>
+                    <linearGradient id="figGlass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#cbd5e1"/><stop offset="1" stop-color="#64748b"/></linearGradient>
+                    <linearGradient id="figFloor" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#334155"/><stop offset="1" stop-color="#1e293b"/></linearGradient>
+                    <marker id="figArrG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#34d399"/></marker>
+                </defs>
+
+                <rect x="1" y="1" width="638" height="348" rx="14" fill="url(#figBg)" stroke="#223052"/>
+
+                <!-- Trần, tường, nền nhà -->
+                <rect x="48" y="22" width="544" height="10" rx="2" fill="#64748b"/>
+                <rect x="582" y="22" width="10" height="278" fill="#64748b"/>
+                <rect x="48" y="296" width="544" height="6" rx="2" fill="url(#figFloor)"/>
+
+                <!-- Cảm biến treo trần -->
+                <line x1="130" y1="32" x2="130" y2="54" stroke="#94a3b8" stroke-width="2"/>
+                <rect x="110" y="54" width="40" height="15" rx="4" fill="#475569" stroke="#94a3b8" stroke-width="1"/>
+                <ellipse cx="130" cy="72" rx="15" ry="7" fill="#1e293b" stroke="#94a3b8" stroke-width="1"/>
+                <circle cx="130" cy="72" r="4" fill="#ef4444"/>
+                <line x1="130" y1="78" x2="130" y2="296" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5 5" opacity=".75"/>
+
+                <!-- Chùm tia -->
+                <polygon points="130,72 234,230 338,176" fill="url(#figBeam)"/>
+
+                <!-- Ô tô -->
+                <ellipse cx="362" cy="299" rx="214" ry="5" fill="#000" opacity=".35"/>
+                <path d="M170,270 L170,248 C170,240 178,236 190,234 L232,226 C262,198 292,176 340,174 L440,174 C478,174 506,198 520,216 L540,222 C548,224 552,234 552,248 L552,270 Z" fill="url(#figCar)"/>
+                <path d="M176,252 L548,252" stroke="#fdba74" stroke-opacity=".55" stroke-width="1.5" fill="none"/>
+                <path d="M258,222 C280,198 304,184 340,182 L388,182 L388,222 Z" fill="url(#figGlass)"/>
+                <path d="M398,182 L438,182 C458,184 476,198 488,222 L398,222 Z" fill="url(#figGlass)"/>
+                <path d="M393,182 L393,248" stroke="#7c2d12" stroke-width="1.5" fill="none"/>
+                <rect x="404" y="234" width="22" height="4" rx="2" fill="#7c2d12"/>
+                <path d="M171,243 L190,239 L190,250 L171,252 Z" fill="#fde68a"/>
+                <rect x="544" y="236" width="8" height="11" rx="2" fill="#ef4444"/>
+                <g>
+                    <circle cx="236" cy="270" r="31" fill="#0a1226"/>
+                    <circle cx="236" cy="270" r="25" fill="#111827"/>
+                    <circle cx="236" cy="270" r="15" fill="#94a3b8"/>
+                    <circle cx="236" cy="270" r="9" fill="#475569"/>
+                    <circle cx="236" cy="270" r="3" fill="#cbd5e1"/>
+                    <circle cx="486" cy="270" r="31" fill="#0a1226"/>
+                    <circle cx="486" cy="270" r="25" fill="#111827"/>
+                    <circle cx="486" cy="270" r="15" fill="#94a3b8"/>
+                    <circle cx="486" cy="270" r="9" fill="#475569"/>
+                    <circle cx="486" cy="270" r="3" fill="#cbd5e1"/>
+                </g>
+                <polygon points="516,296 538,296 538,283" fill="#475569"/>
+
+                <!-- Trục đo tới mặt đất -->
+                <line x1="130" y1="72" x2="440" y2="296" stroke="#0a1226" stroke-width="5" stroke-linecap="round" opacity=".6"/>
+                <line x1="130" y1="72" x2="440" y2="296" stroke="#60a5fa" stroke-width="2" stroke-linecap="round"/>
+
+                <!-- ② Ground manual set: khoảng cách cảm biến → mặt đất (kích thước song song với trục đo) -->
+                <g class="g-manual">
+                    <line x1="130" y1="72" x2="151" y2="43" stroke="#34d399" stroke-width="1" stroke-dasharray="3 3"/>
+                    <line x1="440" y1="296" x2="461" y2="267" stroke="#34d399" stroke-width="1" stroke-dasharray="3 3"/>
+                    <line x1="151" y1="43" x2="461" y2="267" stroke="#0a1226" stroke-width="5" opacity=".7"/>
+                    <line x1="151" y1="43" x2="461" y2="267" stroke="#34d399" stroke-width="2" marker-start="url(#figArrG)" marker-end="url(#figArrG)"/>
+                    <rect x="236" y="128" width="140" height="26" rx="13" fill="#0a1226" stroke="#34d399" stroke-width="1.5"/>
+                    <text x="306" y="145.5" text-anchor="middle" fill="#6ee7b7" font-size="12.5" font-weight="700">Ground manual set</text>
+                </g>
+
+                <!-- ③ Ground threshold set: ngưỡng chiều cao nhận diện tính từ mặt đất -->
+                <g class="g-thresh">
+                    <line x1="335" y1="220" x2="440" y2="296" stroke="#0a1226" stroke-width="9" stroke-linecap="round" opacity=".6"/>
+                    <line x1="335" y1="220" x2="440" y2="296" stroke="#fbbf24" stroke-width="5" stroke-linecap="round"/>
+                    <line x1="326" y1="232" x2="344" y2="208" stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round"/>
+                    <rect x="327" y="226" width="164" height="26" rx="13" fill="#0a1226" stroke="#fbbf24" stroke-width="1.5"/>
+                    <text x="409" y="243.5" text-anchor="middle" fill="#fcd34d" font-size="12.5" font-weight="700">Ground threshold set</text>
+                </g>
+
+                <!-- ① Ground auto set: cảm biến tự đo mặt đất -->
+                <g class="g-auto">
+                    <circle cx="440" cy="296" r="13" fill="#3b82f6" opacity=".25"/>
+                    <circle cx="440" cy="296" r="7" fill="#3b82f6" stroke="#fff" stroke-width="2"/>
+                    <line x1="440" y1="304" x2="440" y2="316" stroke="#60a5fa" stroke-width="1.5"/>
+                    <rect x="384" y="316" width="112" height="26" rx="13" fill="#0a1226" stroke="#60a5fa" stroke-width="1.5"/>
+                    <text x="440" y="333.5" text-anchor="middle" fill="#93c5fd" font-size="12.5" font-weight="700">Ground auto set</text>
+                </g>
+            </svg>
+            <div id="figGroundLegend" class="fig-legend">
+                <div class="lg lg-auto"><i></i><span><b>Ground auto set</b> — cảm biến tự đo và lưu khoảng cách tới mặt đất.</span></div>
+                <div class="lg lg-manual"><i></i><span><b>Ground manual set</b> — khoảng cách từ cảm biến tới mặt đất, đặt tay <b>100–600 cm</b>.</span></div>
+                <div class="lg lg-thresh"><i></i><span><b>Ground threshold set</b> — chiều cao nhận diện tính từ mặt đất, <b>0–200 cm</b>.</span></div>
+            </div>
+        </div>
+
+        <!-- Bảng màu đèn: lệnh 6 (Lamp Mode Set) -->
+        <div id="figColor" class="fig-wrap" style="display:none">
+            <div class="fig-colorgrid">
+                <table class="fig-table"><thead><tr><th>Lựa chọn</th><th>Trạng thái trống</th><th>Trạng thái đỗ</th></tr></thead><tbody id="colorBody1"></tbody></table>
+                <table class="fig-table"><thead><tr><th>Lựa chọn</th><th>Trạng thái trống</th><th>Trạng thái đỗ</th></tr></thead><tbody id="colorBody2"></tbody></table>
+            </div>
+        </div>
+        </div>
+    </div>
+
+    <div id="distBox" style="display:none">
+        <div id="distGrid" class="sn-dist"></div>
+    </div>
+    <pre id="CmdOut" class="sn-testout"></pre>
+</section>
+
+</div>
+
+<!-- =============== TAB 3: Dữ liệu — biến MS (mỗi biến đếm 1 trạng thái trên các cảm biến được chỉ định) =============== -->
+<div id="dataTab" class="sys-tab-panel">
+<section class="panel">
+    <h2>Dữ liệu MS — biến tổng hợp từ cảm biến</h2>
+    <div class="hint small" style="margin-top:0">
+        Mỗi <b>biến MS</b> chỉ đếm <b>một trạng thái</b> — <b>Có chỗ đỗ</b> (cảm biến Trống), <b>Không có chỗ đỗ</b> (cảm biến Có xe) hoặc <b>Lỗi</b> —
+        trên các cảm biến bạn chỉ định. Không cần mỗi cảm biến một biến: chỉ cần <b>1 biến</b> cho cả nhóm cảm biến; cần đếm riêng (theo khu, theo tầng…) hoặc đếm trạng thái khác thì tạo thêm biến.
+        Giá trị cập nhật theo trạng thái cảm biến thật; biến được lưu lại khi tắt/mở chương trình.
+    </div>
+
+    <div class="tg-toolbar">
+        <button id="dvAdd" class="btn primary btn-sm"><span class="ico">➕</span> Thêm biến</button>
+        <button id="dvEdit" class="btn secondary btn-sm" disabled><span class="ico">✏️</span> Sửa</button>
+        <button id="dvDel" class="btn secondary btn-sm" disabled><span class="ico">🗑️</span> Xoá</button>
+        <span id="dvState" class="hint small" style="margin:0"></span>
+    </div>
+
+    <div id="dvForm" class="tg-form" style="display:none;">
+        <h3 id="dvFormTitle" class="tg-form-title"></h3>
+        <div class="tg-form-grid">
+            <div class="prop-field" style="grid-column:1/-1"><label for="DvCount">Đếm trạng thái</label>
+                <div class="dv-state-row">
+                    <select id="DvCount" style="min-width:270px">
+                        <option value="">— Chưa chọn —</option>
+                        <option value="Free">Có chỗ đỗ (cảm biến Trống)</option>
+                        <option value="Occupied">Không có chỗ đỗ (cảm biến Có xe)</option>
+                        <option value="Error">Lỗi</option>
+                    </select>
+                    <div class="dv-legend" id="dvLegend">
+                        <span data-st="Free"><i class="dv-sw s0"></i>Còn trống (Có chỗ đỗ)</span>
+                        <span data-st="Occupied"><i class="dv-sw s1"></i>Đã đỗ (Không có chỗ đỗ)</span>
+                        <span data-st="Error"><i class="dv-sw s2"></i>Lỗi</span>
+                        <span><i class="dv-sw np"></i>Không chọn</span>
+                    </div>
+                </div></div>
+            <div class="prop-field" style="grid-column:1/-1"><label for="DvDesc">Mô tả</label><input id="DvDesc" type="text" maxlength="200" /></div>
+        </div>
+
+        <div class="sn-sub"><b>Chọn các cảm biến được đếm</b> — bấm vào ô, kéo chuột, hoặc bấm một ô rồi giữ <b>Shift</b> + bấm ô khác để chọn/bỏ cả đoạn trong cùng Line. Chọn ZCU ở hàng nút bên dưới.
+            <button id="DvSelAll" class="btn secondary btn-sm" type="button">Chọn tất cả</button>
+            <button id="DvSelNone" class="btn secondary btn-sm" type="button">Bỏ chọn tất cả</button></div>
+        <div id="dvDevices" class="sn-devices"></div>
+        <div class="sn-sub"><b id="dvDevTitle"></b>
+            <button id="DvDevAll" class="btn secondary btn-sm" type="button">Chọn cả ZCU này</button>
+            <button id="DvDevNone" class="btn secondary btn-sm" type="button">Bỏ chọn ZCU này</button></div>
+        <div id="dvGrid" class="sn-grid dv-grid"></div>
+        <div id="dvPickSummary" class="hint small"></div>
+
+        <div class="tg-toolbar">
+            <button id="dvSave" class="btn primary btn-sm"><span class="ico">💾</span> Lưu</button>
+            <button id="dvCancel" class="btn secondary btn-sm">Huỷ</button>
+            <span id="dvFormState" class="hint small" style="margin:0"></span>
+        </div>
+    </div>
+
+    <table class="data-table tg-table" id="dvTable">
+        <thead>
+            <tr>
+                <th style="width:50px">STT</th>
+                <th>Tên</th>
+                <th style="width:60px">Loại</th>
+                <th>Đếm trạng thái</th>
+                <th>Cảm biến chỉ định</th>
+                <th style="width:190px">Giá trị</th>
+                <th>Mô tả</th>
+            </tr>
+        </thead>
+        <tbody id="dvBody"><tr><td colspan="7" class="hint small">Chưa có biến nào — bấm "Thêm biến".</td></tr></tbody>
+    </table>
+</section>
+</div>
+
+<!-- =============== TAB 4 (cuối): Thử khung dữ liệu =============== -->
+<div id="testTab" class="sys-tab-panel">
+<!-- =============== Thử khung dữ liệu =============== -->
+<section class="panel">
+    <h2>Thử khung dữ liệu</h2>
+    <div class="hint small" style="margin-top:0">Dán 1 khung dữ liệu để xem chương trình hiểu thế nào (chỉ phân tích, không đưa vào trạng thái thật). Loại cảm biến theo lựa chọn ở tab <b>Cấu hình</b>: <b id="SnTestType">MGT200</b>.</div>
+    <textarea id="SnTestFrame" rows="3" class="sn-textarea" placeholder="Keytop: (f2)(g2)(h2)(i2)(j2)  —  MGT200: dán khung ZCU trả về"></textarea>
+    <div class="sn-actions">
+        <button id="SnTest" class="btn secondary btn-sm"><span class="ico">🔍</span> Phân tích</button>
+        <span id="SnTestState" class="hint small"></span>
+    </div>
+    <pre id="SnTestOut" class="sn-testout"></pre>
+</section>
+
+</div>
+
+@section Scripts {
+    <script src="~/js/systemSensors.js"></script>
+    <script src="~/js/sensorData.js"></script>
+}
