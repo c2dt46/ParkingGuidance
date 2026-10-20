@@ -825,7 +825,13 @@ body.layout-run-mode .layout-el-line { pointer-events: none; }
 /* ---- Cảm biến: bố cục theo bề rộng ---- */
 /* Kích hoạt ZCU: 2 hàng × 16 ô */
 .sn-enable { grid-template-columns: repeat(16, minmax(0, 1fr)); max-width: none; }
-.sn-enable .sn-en { justify-content: center; }
+.sn-enable { gap: 8px; }
+.sn-enable .sn-en { justify-content: center; gap: 10px; box-sizing: border-box; height: 42px; padding: 0 10px; font-size: 14px; font-weight: 600; line-height: 1; user-select: none; transition: background .12s, border-color .12s; }
+/* Checkbox to và đều nhau (cùng 22x22px, không bị co giãn) */
+.sn-enable .sn-en input[type="checkbox"] { width: 22px; height: 22px; min-width: 22px; flex: 0 0 22px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.sn-enable .sn-en:hover { border-color: var(--accent); }
+.sn-enable .sn-en:has(input:checked) { border-color: var(--accent); background: rgba(59,130,246,.18); }
+.sn-enable .sn-en:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Hàng nút ZCU của MGT200 và lưới cảm biến cùng giãn hết bề rộng */
 .sn-devices.pm { display: grid; grid-template-columns: repeat(32, minmax(0, 1fr)); gap: 6px; }
 .sn-devices.pm .sn-dev { min-width: 0; padding: 8px 0; }
