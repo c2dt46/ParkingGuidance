@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\DELL\\Downloads\\New folder (2)\\PGS\\ParkingGuidance_updated_5\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.LedBridge\\ParkingGuidance.LedBridge.csproj": {}
+    "E:\\Google Driver Data\\Phai sao luu\\Du an\\Megatech\\Phan mem huong dan do xe V2\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.LedBridge\\ParkingGuidance.LedBridge.csproj": {}
   },
   "projects": {
-    "C:\\Users\\DELL\\Downloads\\New folder (2)\\PGS\\ParkingGuidance_updated_5\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.LedBridge\\ParkingGuidance.LedBridge.csproj": {
+    "E:\\Google Driver Data\\Phai sao luu\\Du an\\Megatech\\Phan mem huong dan do xe V2\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.LedBridge\\ParkingGuidance.LedBridge.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\DELL\\Downloads\\New folder (2)\\PGS\\ParkingGuidance_updated_5\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.LedBridge\\ParkingGuidance.LedBridge.csproj",
+        "projectUniqueName": "E:\\Google Driver Data\\Phai sao luu\\Du an\\Megatech\\Phan mem huong dan do xe V2\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.LedBridge\\ParkingGuidance.LedBridge.csproj",
         "projectName": "ParkingGuidance.LedBridge",
-        "projectPath": "C:\\Users\\DELL\\Downloads\\New folder (2)\\PGS\\ParkingGuidance_updated_5\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.LedBridge\\ParkingGuidance.LedBridge.csproj",
+        "projectPath": "E:\\Google Driver Data\\Phai sao luu\\Du an\\Megatech\\Phan mem huong dan do xe V2\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.LedBridge\\ParkingGuidance.LedBridge.csproj",
         "packagesPath": "C:\\Users\\DELL\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\DELL\\Downloads\\New folder (2)\\PGS\\ParkingGuidance_updated_5\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.LedBridge\\obj\\",
+        "outputPath": "E:\\Google Driver Data\\Phai sao luu\\Du an\\Megatech\\Phan mem huong dan do xe V2\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.LedBridge\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

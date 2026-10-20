@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ParkingGuidance.LedBridge")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4ce1e0b72eead5433a782e81458c0dcb7bd7f2bd")]
 [assembly: System.Reflection.AssemblyProductAttribute("ParkingGuidance.LedBridge")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ParkingGuidance.LedBridge")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
