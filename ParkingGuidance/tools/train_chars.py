@@ -35,9 +35,12 @@ import sys
 import cv2
 import numpy as np
 
+from seg_text import segment_with_text      # tach ky tu CO DUNG CHUOI DUNG (seg_text.py) - gan nhan tu dong cho ca bien kho
+
 ALPHABET = "ABCDEFGHKLMNPRSTUVXYZ0123456789"      # PHAI trung bang ky tu trong YoloCharReader.cs / CnnPlateReader.cs
 VAL_PERCENT = 20
 LOW_CONTRAST_STD = 45.0
+SEG_GATE = 2.0        # diem tin cay toi da cua tach ky tu moi (thap = chac chan hon). 1.5 -> ~98% nhan dung, 2.0 -> ~95%, 4.0 -> ~94% nhung phu nhieu hon
 
 
 # --------------------------------------------------------------------------------------------- xep dong (giong YoloCharReader.GroupRows)
@@ -87,7 +90,7 @@ def _components(binary):
     return out
 
 
-def auto_label(img_bgr, text):
+def _auto_label_classic(img_bgr, text):
     """Tach ky tu co dien; tra ve [(x, y, w, h, cls)] theo toa do anh goc neu so thanh phan == len(text), nguoc lai None."""
     gray0 = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     f = min(max(110.0 / gray0.shape[0], 1.0), 6.0)
@@ -107,6 +110,18 @@ def auto_label(img_bgr, text):
             ordered = [t[3] for row in rows for t in row]
             return [(x / f, y / f, w / f, h / f, ALPHABET.index(ch)) for (x, y, w, h), ch in zip(ordered, text)]
     return None
+
+
+def auto_label(img_bgr, text):
+    """Gan nhan tu dong khung tung ky tu. Uu tien tach co dung chuoi dung (seg_text.py: boc khung vien, cat chu dinh, ep du so ky tu,
+    thu 1/2 dong); chi nhan khi diem tin cay <= SEG_GATE. Khong dat thi quay lai cach co dien cu (chi nhan khi so thanh phan == so ky tu)."""
+    try:
+        res, score = segment_with_text(img_bgr, text, return_score=True)
+    except Exception:
+        res, score = None, 9e9
+    if res is not None and score <= SEG_GATE and len(res) == len(text):
+        return [(x, y, w, h, ALPHABET.index(text[i])) for x, y, w, h, i in res]
+    return _auto_label_classic(img_bgr, text)
 
 
 # --------------------------------------------------------------------------------------------- dung bo du lieu YOLO
@@ -299,6 +314,7 @@ def compare_with_tesseract(model, val_items, imgsz, device, tess_cmd):
 
 
 def main():
+    global SEG_GATE
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--corrections", required=True, help="thu muc <DataDirectory>/simulation/corrections (index.json + <id>.png)")
     ap.add_argument("--out", required=True, help="thu muc lam viec (dataset + ket qua train)")
@@ -310,12 +326,14 @@ def main():
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--threads", type=int, default=0)
     ap.add_argument("--min-plates", type=int, default=30, help="so bien toi thieu de train (mac dinh 30)")
+    ap.add_argument("--seg-gate", type=float, default=SEG_GATE, help="nguong diem tin cay cua tach ky tu tu dong (mac dinh 2.0; 1.5 chat hon, 4.0 long hon)")
     ap.add_argument("--dataset-only", action="store_true", help="chi dung bo du lieu YOLO roi dung (khong train)")
     ap.add_argument("--compare-tesseract", action="store_true", help="so sanh YOLO voi Tesseract tren tap val sau khi train")
     ap.add_argument("--tesseract-cmd", default="", help="duong dan tesseract.exe neu khong nam trong PATH")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
+    SEG_GATE = args.seg_gate
     yaml_path, st, val_items = build_dataset(args.corrections, args.out, 1 if args.dataset_only else args.min_plates)
     print(f"[du lieu] {st['entries']} mau: khoanh tay {st['hand']}, tu gan nhan {st['auto']}, bo qua {st['skipped']} "
           f"(khong tach dung — hay khoanh tay) | train {st['train']}, val {st['val']}, tong {st['chars']} ky tu")

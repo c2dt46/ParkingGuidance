@@ -41,11 +41,10 @@ public class CameraFrameProcessor : ICameraFrameProcessor
         // Model chua nap duoc: KHONG the ket luan "vung khong co xe" (neu khong, moi xe dang do se bi coi la da roi di)
         if (!_detector.IsReady) return 0;
 
-        // Do xe va do khung bien SONG SONG tren ca khung; bien nam hoan toan ngoai moi xe thi khong hop le (bi bo)
+        // Chi do XE tren ca khung. Khung bien chi duoc do SAU, trong vung tung xe, va chi cho xe thuc su can doc bien (xem RegisterOne)
         var st = _settings.Current;
-        var (detections, plateBoxes) = FrameAnalysis.DetectParallel(_detector, _anpr, frame, st, detectPlates: true);
-        var plateAssign = FrameAnalysis.AssignPlates(
-            detections.Select(d => d.Box).ToList(), plateBoxes, st.PlateMinOverlap ?? 0.1f);
+        var detections = FrameAnalysis.DetectVehicles(_detector, frame, st);
+        var vehicleBoxes = detections.Select(d => d.Box).ToList();
         int registered = 0;
 
         if (zones.Count > 0)
@@ -64,8 +63,7 @@ public class CameraFrameProcessor : ICameraFrameProcessor
                 occupiedZoneIds.Add(a.Zone.Id);
 
                 _parking.EnsureSlot(key, floor ?? "B1", zone);
-                plateAssign.TryGetValue(a.VehicleIndex, out var plateBox);
-                await RegisterOne(cameraId, key, frame, detections[a.VehicleIndex], plateBox, ct, manual);
+                await RegisterOne(cameraId, key, frame, detections[a.VehicleIndex], vehicleBoxes, a.VehicleIndex, ct, manual);
                 registered++;
             }
 
@@ -96,8 +94,7 @@ public class CameraFrameProcessor : ICameraFrameProcessor
         {
             // Kieu cu (khong co vung): don gian hoa, chi gan xe co do tin cay cao nhat vao 1 o co dinh
             var best = detections.OrderByDescending(d => d.Confidence).First();
-            plateAssign.TryGetValue(detections.IndexOf(best), out var bestPlateBox);
-            await RegisterOne(cameraId, legacySlotId, frame, best, bestPlateBox, ct, manual);
+            await RegisterOne(cameraId, legacySlotId, frame, best, vehicleBoxes, detections.IndexOf(best), ct, manual);
             registered = 1;
         }
 
@@ -105,7 +102,8 @@ public class CameraFrameProcessor : ICameraFrameProcessor
     }
 
     private async Task RegisterOne(
-        string cameraId, string slotId, Mat frame, DetectionResult vehicle, BoundingBox? plateBox, CancellationToken ct, bool manual = false)
+        string cameraId, string slotId, Mat frame, DetectionResult vehicle, IReadOnlyList<BoundingBox> vehicleBoxes, int vehicleIndex,
+        CancellationToken ct, bool manual = false)
     {
         // Chi doc bien khi (1) xe da dung yen so voi lan xu ly truoc, va (2) bien cua xe dang do chua duoc chot.
         // Khong doc thi PlateNumber = null -> RegisterDetection giu nguyen bien da biet cua phien.
@@ -115,9 +113,12 @@ public class CameraFrameProcessor : ICameraFrameProcessor
         _lastBoxes[slotId] = vehicle.Box;
         if (stable && (manual || _parking.NeedsPlateRead(slotId)))
         {
+            // Do khung bien CHI trong vung xe nay (cat tu anh goc, noi ra ngoai khung xe 1 chut) va chi khi that su can doc:
+            // xe da chot bien thi khong ton CPU do bien o moi lan xu ly.
+            var plateBox = FrameAnalysis.DetectPlateForVehicle(_anpr, frame, vehicleBoxes, vehicleIndex, _settings.Current.PlateMinOverlap ?? 0.1f);
             if (plateBox is not null)
             {
-                // Co khung bien nam trong khung xe: chi doc ky tu tai khung do (nhanh, khong tim lai tren ca xe)
+                // Co khung bien thuoc xe nay: chi doc ky tu tai khung do (nhanh, khong tim lai tren ca xe)
                 var (plate, conf, pb) = _anpr.ReadPlateAt(frame, plateBox);
                 vehicle.PlateNumber = plate;
                 vehicle.PlateConfidence = conf;

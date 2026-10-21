@@ -96,7 +96,7 @@ public class SimulationApiController : ControllerBase
                 float minOverlap = st.PlateMinOverlap ?? 0.1f;
                 bool fullSearch = (st.PlateFullSearch ?? 0) != 0;
 
-                // Do xe va do khung bien SONG SONG tren ca anh; bien nam hoan toan ngoai moi xe thi khong hop le (bi bo)
+                // Do xe tren ca anh, roi do khung bien trong vung tung xe; bien khong thuoc xe nao thi khong hop le (bi bo)
                 List<DetectionResult> detected;
                 List<BoundingBox> plateBoxes;
                 if (plateOnly)
@@ -106,7 +106,7 @@ public class SimulationApiController : ControllerBase
                 }
                 else
                 {
-                    var (veh, pls) = FrameAnalysis.DetectParallel(_detector, _anpr, mat, st, detectPlates: true, vehicleConf: threshold);
+                    var (veh, pls) = FrameAnalysis.DetectWithPlates(_detector, _anpr, mat, st, detectPlates: true, vehicleConf: threshold);
                     detected = veh.OrderBy(d => d.Box.X1).ToList();
                     plateBoxes = pls;
                 }

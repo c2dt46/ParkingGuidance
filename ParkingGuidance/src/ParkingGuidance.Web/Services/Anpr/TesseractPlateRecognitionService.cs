@@ -408,7 +408,7 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
             var refined = RefineRectFromChars(best, rect, frame.Width, frame.Height);
             var box = new BoundingBox { X1 = refined.X, Y1 = refined.Y, X2 = refined.X + refined.Width, Y2 = refined.Y + refined.Height };
             SaveDebug(frame, refined, best.Pretty, best.BestConfidence);
-            return (best.Pretty, best.BestConfidence, box);
+            return (PlateNormalizer.Apply(best.Pretty), best.BestConfidence, box);
         }
     }
 
@@ -518,7 +518,7 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
             Y2 = bestRect.Y + bestRect.Height
         };
         SaveDebug(vehicleCrop, bestRect, best.Pretty, best.BestConfidence);
-        return (best.Pretty, best.BestConfidence, box);
+        return (PlateNormalizer.Apply(best.Pretty), best.BestConfidence, box);
     }
 
     /// <summary>

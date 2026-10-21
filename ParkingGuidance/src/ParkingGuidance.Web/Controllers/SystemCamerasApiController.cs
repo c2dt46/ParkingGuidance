@@ -446,9 +446,9 @@ public class SystemCamerasApiController : ControllerBase
         var regItems = new List<(string Key, DetectionResult Det)>(); // xe da gan vung (de ghi nhan vao bai do neu bat 'register')
         var (vehicles, results) = await _scheduler.RunInteractiveAsync($"Chay thu nhan dien ({camera.IpAddress})", qct =>
         {
-        // Cung luong voi nen: do xe va do khung bien SONG SONG, bien nam ngoai moi xe bi bo
+        // Cung luong voi nen: do xe, roi do khung bien trong vung tung xe; bien khong thuoc xe nao bi bo
         var st = _settings.Current;
-        var (detected, plateBoxes) = FrameAnalysis.DetectParallel(_detector, _anpr, mat, st, detectPlates: true);
+        var (detected, plateBoxes) = FrameAnalysis.DetectWithPlates(_detector, _anpr, mat, st, detectPlates: true);
         var plateAssign = FrameAnalysis.AssignPlates(detected.Select(d => d.Box).ToList(), plateBoxes, st.PlateMinOverlap ?? 0.1f);
         var rows = new List<TestDetectVehicleResult>();
 
