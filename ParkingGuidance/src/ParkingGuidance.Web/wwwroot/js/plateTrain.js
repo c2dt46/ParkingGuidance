@@ -25,6 +25,17 @@
     let lastRunning = false;
 
     const canvas = $('ptCanvas'), ctx = canvas.getContext('2d');
+
+    // ---- zoom bang chuot PHAI + chon khung bang 4 diem (xem trainZoom.js) ----
+    const QUAD_KEY = 'pg.plate.quadMode';
+    let quadMode = true;                   // true: chuot trai bam 4 GOC cua bien -> khung om sat dung bien; false: keo khung chu nhat
+    try { quadMode = localStorage.getItem(QUAD_KEY) !== '0'; } catch { /* che do rieng tu */ }
+    let pts = [];                          // cac diem dang chon (toi da 4) o che do 4 diem — px anh goc
+    const view = PgZoom.attach(canvas, {
+        size: () => (img && cur ? { w: cur.width, h: cur.height } : null),
+        onChange: v => { scale = v.scale(); redraw(); },
+        bar: { quad: { get: () => quadMode, set: on => { quadMode = on; pts = []; try { localStorage.setItem(QUAD_KEY, on ? '1' : '0'); } catch { /* bo qua */ } } } },
+    });
     const tabActive = () => !!window.pgTrainNav && window.pgTrainNav.isActive('plate');   // tab lon Train dang mo VA tab con "Train bien so" dang hien (xem trainHub.js)
 
     async function jfetch(url, opts) {
@@ -140,24 +151,25 @@
         scale = Math.min(maxW / cur.width, maxH / cur.height);
         canvas.width = Math.round(cur.width * scale);
         canvas.height = Math.round(cur.height * scale);
+        view.setBase(scale);
+        pts = [];
     }
     window.addEventListener('resize', () => { if (img && tabActive()) { layout(); redraw(); } });
 
-    const toImg = e => {
-        const r = canvas.getBoundingClientRect();
-        return { x: (e.clientX - r.left) * (cur.width / r.width), y: (e.clientY - r.top) * (cur.height / r.height) };
-    };
+    const toImg = e => view.toImg(e);                       // da tinh ca vung dang phong to
     const clampX = x => Math.max(0, Math.min(cur.width, x));
     const clampY = y => Math.max(0, Math.min(cur.height, y));
 
     function redraw() {
         if (!img) return;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const zoomed = view.z > 1.001, ox = zoomed ? view.vx : 0, oy = zoomed ? view.vy : 0;   // goc tren-trai vung dang xem (px anh)
+        if (zoomed) ctx.drawImage(img, ox, oy, canvas.width / scale, canvas.height / scale, 0, 0, canvas.width, canvas.height);
+        else ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         const all = drag && drag.mode === 'draw' && drag.box ? [...boxes, drag.box] : boxes;
         all.forEach((b, i) => {
             const c = COLOR;
-            const x = Math.min(b.x1, b.x2) * scale, y = Math.min(b.y1, b.y2) * scale;
+            const x = (Math.min(b.x1, b.x2) - ox) * scale, y = (Math.min(b.y1, b.y2) - oy) * scale;
             const w = Math.abs(b.x2 - b.x1) * scale, h = Math.abs(b.y2 - b.y1) * scale;
             const sel = i === selected;
             ctx.lineWidth = sel ? 3 : 2; ctx.strokeStyle = c; ctx.strokeRect(x, y, w, h);
@@ -168,6 +180,24 @@
             ctx.fillStyle = '#000'; ctx.fillText(label, x + 4, Math.max(12, y - 4));
             if (sel) [[x, y], [x + w, y], [x, y + h], [x + w, y + h]].forEach(([hx, hy]) => { ctx.fillStyle = '#fff'; ctx.fillRect(hx - 4, hy - 4, 8, 8); ctx.strokeRect(hx - 4, hy - 4, 8, 8); });
         });
+        // da giac 4 diem cua cac khung vua tao + cac diem dang chon
+        const px = v => (v - ox) * scale, py = v => (v - oy) * scale;
+        boxes.forEach(b => {
+            if (!b.quad) return;
+            ctx.save(); ctx.setLineDash([4, 3]); ctx.lineWidth = 1.5; ctx.strokeStyle = '#fff';
+            ctx.beginPath(); b.quad.forEach((q, k) => (k ? ctx.lineTo(px(q.x), py(q.y)) : ctx.moveTo(px(q.x), py(q.y)))); ctx.closePath(); ctx.stroke(); ctx.restore();
+        });
+        if (pts.length) {
+            ctx.save(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#facc15';
+            ctx.beginPath(); pts.forEach((q, k) => (k ? ctx.lineTo(px(q.x), py(q.y)) : ctx.moveTo(px(q.x), py(q.y)))); ctx.stroke();
+            pts.forEach((q, k) => {
+                ctx.beginPath(); ctx.arc(px(q.x), py(q.y), 6, 0, 7); ctx.fillStyle = '#facc15'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.stroke();
+                ctx.fillStyle = '#000'; ctx.font = 'bold 10px sans-serif'; ctx.fillText(String(k + 1), px(q.x) - 3, py(q.y) + 3.5);
+            });
+            ctx.restore();
+        }
+        view.drawOverlay(ctx);
+        view.setHint(quadMode ? (pts.length ? `đã chọn ${pts.length}/4 điểm — bấm tiếp góc còn lại (Backspace: bỏ điểm cuối · Esc: bỏ hết)` : 'chuột TRÁI: bấm 4 GÓC của biển số') : '');
         $('ptBoxInfo').textContent = boxes.length
             ? `${boxes.length} khung biển. Khung nên ôm sát biển số (biển 2 dòng: một khung chứa cả hai dòng).`
             : 'Chưa có khung nào. Nếu ảnh thật sự không có biển số, bấm “✓ Lưu & duyệt” để dạy bộ dò đây là ảnh không có biển.';
@@ -189,6 +219,18 @@
         return -1;
     }
 
+    // Che do 4 diem: bam trai vao 4 GOC cua bien -> khung = hinh chu nhat nho nhat bao tron 4 diem (om sat dung bien, ke ca bien nghieng)
+    function addPoint(p) {
+        pts.push({ x: clampX(p.x), y: clampY(p.y) });
+        if (pts.length < 4) { say('ptEditMsg', `📍 Đã chọn ${pts.length}/4 điểm — bấm tiếp các góc còn lại của biển số.`); return; }
+        const xs = pts.map(q => q.x), ys = pts.map(q => q.y);
+        const box = { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys), quad: PgZoom.orderQuad(pts).map(q => ({ x: q.x, y: q.y })) };
+        pts = [];
+        if (box.x2 - box.x1 < 6 || box.y2 - box.y1 < 6) { say('ptEditMsg', 'Bốn điểm quá gần nhau — hãy chọn lại 4 góc của biển.', true); return; }
+        boxes.push(box); selected = boxes.length - 1; dirty = true;
+        say('ptEditMsg', '✔ Đã tạo khung ôm sát biển từ 4 điểm. Cần chỉnh thì kéo góc / kéo khung; xong bấm Enter để lưu &amp; duyệt.');
+    }
+
     canvas.addEventListener('mousedown', e => {
         if (!img || e.button !== 0) return;
         const p = toImg(e);
@@ -205,7 +247,8 @@
                 drag = { mode: 'move', start: p, orig: { ...boxes[i] } };
             } else {
                 selected = -1;
-                drag = { mode: 'draw', start: p, box: null };
+                if (quadMode) addPoint(p);                          // che do 4 diem: moi lan bam trai them 1 goc cua bien
+                else drag = { mode: 'draw', start: p, box: null };
             }
         }
         redraw(); e.preventDefault();
@@ -222,10 +265,12 @@
             const nx = Math.max(0, Math.min(cur.width - w, Math.min(o.x1, o.x2) + dx));
             const ny = Math.max(0, Math.min(cur.height - h, Math.min(o.y1, o.y2) + dy));
             Object.assign(b, { x1: nx, y1: ny, x2: nx + w, y2: ny + h });
+            delete b.quad;
             dirty = true;
         } else if (drag.mode === 'resize') {
             const b = boxes[selected];
             Object.assign(b, { x1: drag.fixedX, y1: drag.fixedY, x2: clampX(p.x), y2: clampY(p.y) });
+            delete b.quad;
             dirty = true;
         }
         redraw();
@@ -253,7 +298,9 @@
         if (!tabActive() || !cur) return;
         const tag = (e.target.tagName || '').toLowerCase();
         if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
-        if (e.key === 'Delete' || e.key === 'Backspace') { delSelected(); e.preventDefault(); }
+        if (e.key === 'Escape' && pts.length) { pts = []; say('ptEditMsg', ''); redraw(); }
+        else if (e.key === 'Backspace' && pts.length) { pts.pop(); redraw(); e.preventDefault(); }
+        else if (e.key === 'Delete' || e.key === 'Backspace') { delSelected(); e.preventDefault(); }
         else if (e.key === 'Enter') { saveCurrent(true); e.preventDefault(); }
         else if (e.key === 'Escape') { selected = -1; redraw(); }
     });
@@ -275,7 +322,7 @@
         say('ptEditMsg', '⏳ Đang lưu…');
         const r = await jfetch(`${API}/samples/${cur.id}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ boxes, reviewed })
+            body: JSON.stringify({ boxes: boxes.map(b => ({ x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2 })), reviewed })
         });
         if (!r.ok) { say('ptEditMsg', esc(r.body.message || 'Không lưu được.'), true); return; }
         dirty = false;

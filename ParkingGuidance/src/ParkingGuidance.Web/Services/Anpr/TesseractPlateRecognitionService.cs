@@ -13,7 +13,7 @@ namespace ParkingGuidance.Web.Services.Anpr;
 /// (xử lý ảnh); (2) đọc chữ — bằng model OCR ONNX nếu có, bổ sung/dự phòng bằng Tesseract; (3) chuẩn hoá theo định dạng biển VN
 /// và bỏ phiếu giữa các lần đọc. Việc bỏ phiếu GIỮA CÁC KHUNG HÌNH nằm ở <c>ParkingService</c> (PlateTracker).
 /// </summary>
-public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharModelReloader, IPlateDetectorModel, IDisposable
+public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharModelReloader, IOcrModelReloader, IPlateDetectorModel, IDisposable
 {
     private readonly TesseractEngine? _engine;
     private readonly PlateTextReader? _reader;
@@ -22,7 +22,9 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
     private readonly string _customPlatePath;                  // {DataDirectory}/plate-train/active/plate.onnx
     private readonly string? _baseOnnxPath;                    // plate_detector.onnx goc (neu co) — moc so sanh khi train
     private string? _plateLoadError;
-    private readonly OnnxPlateReader? _onnxReader;
+    private OnnxPlateReader? _onnxReader;                       // CRNN+CTC doc ca chuoi — doi duoc luc dang chay: xem ReloadOcr
+    private string? _ocrPath;
+    private readonly IConfiguration _config;
     private readonly DarknetPlateDetector? _darknetDetector;   // YOLOv3-tiny do bien (repo License-Plate-Recognition)
     private YoloCharReader? _charDet;                          // (TUY CHON) bo do ky tu YOLO11 — uu tien truoc CNN phan loai; tu nap lai khi file doi
     private string _charDetPath = "";                          // file dang nap
@@ -60,6 +62,7 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
         IConfiguration config, IPersistenceService persistence, ILogger<TesseractPlateRecognitionService> logger, ISettingsService settings)
     {
         _logger = logger;
+        _config = config;
         _settings = settings;
         _customPlatePath = Path.Combine(persistence.DataDirectory, "plate-train", "active", "plate.onnx");
 
@@ -127,7 +130,11 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
         // Bo do bien da train them o tab Train bien so (neu co file) — uu tien truoc bo do mac dinh
         Reload(out _);
         var ocrPath = ResolveModel(config["Anpr:OcrModelPath"] ?? "models/plate_ocr.onnx");
-        if (ocrPath is not null) _onnxReader = OnnxPlateReader.TryCreate(ocrPath, config, _logger);
+        if (ocrPath is not null)
+        {
+            _onnxReader = OnnxPlateReader.TryCreate(ocrPath, config, _logger);
+            if (_onnxReader is not null) _ocrPath = ocrPath;
+        }
 
         // --- (Tuy chon) CNN doc ky tu + YOLOv3-tiny do bien so (model cua repo License-Plate-Recognition).
         //     Co file thi uu tien dung; Tesseract chi con la du phong khi CNN khong doc duoc gi. Tat: Anpr:UseCnn = false. ---
@@ -169,6 +176,32 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
     }
 
     public string? CurrentModelPath => _cnnPath;
+
+    // ===================================================================== IOcrModelReloader (tab Train > Train doc chuoi OCR)
+    public string? CurrentOcrModelPath => _ocrPath;
+
+    /// <summary>Nạp lại model OCR khi đang chạy. Đổi dưới <c>_ocrLock</c> như <see cref="Reload(string, out string)"/> của model ký tự,
+    /// nên huỷ model cũ ngay sau khi đổi là an toàn.</summary>
+    public bool ReloadOcr(string modelPath, out string message)
+    {
+        var fresh = OnnxPlateReader.TryCreate(modelPath, _config, _logger);
+        if (fresh is null)
+        {
+            message = "Không nạp được model OCR mới (file hỏng hoặc sai định dạng) — giữ nguyên model cũ.";
+            return false;
+        }
+
+        OnnxPlateReader? old;
+        lock (_ocrLock)
+        {
+            old = _onnxReader;
+            _onnxReader = fresh;
+            _ocrPath = modelPath;
+        }
+        old?.Dispose();
+        message = "Đã nạp lại model OCR, áp dụng ngay.";
+        return true;
+    }
 
     /// <summary>Nạp lại model ký tự khi đang chạy. Đổi dưới <c>_ocrLock</c> — lúc đó không có lần đọc nào đang dùng model cũ,
     /// nên huỷ model cũ ngay sau khi đổi là an toàn.</summary>
@@ -408,7 +441,7 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
             var refined = RefineRectFromChars(best, rect, frame.Width, frame.Height);
             var box = new BoundingBox { X1 = refined.X, Y1 = refined.Y, X2 = refined.X + refined.Width, Y2 = refined.Y + refined.Height };
             SaveDebug(frame, refined, best.Pretty, best.BestConfidence);
-            return (PlateNormalizer.Apply(best.Pretty), best.BestConfidence, box);
+            return (best.Pretty, best.BestConfidence, box);
         }
     }
 
@@ -518,7 +551,7 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
             Y2 = bestRect.Y + bestRect.Height
         };
         SaveDebug(vehicleCrop, bestRect, best.Pretty, best.BestConfidence);
-        return (PlateNormalizer.Apply(best.Pretty), best.BestConfidence, box);
+        return (best.Pretty, best.BestConfidence, box);
     }
 
     /// <summary>
@@ -741,16 +774,16 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
             var (raw, conf, lineLengths) = _onnxReader!.Read(plateCrop);
             if (raw is null) return;
 
-            var (pretty, isValid) = VietnamPlateFormatter.Normalize(raw, lineLengths);
-            if (!isValid) return;
+            var pretty = PlateNormalizer.Apply(raw, lineLengths);      // ham cua nguoi dung: null / "" = khong nhan dien duoc
+            if (pretty is null) return;
 
-            var key = Regex.Replace(pretty, "[^A-Z0-9]", "");
+            var key = Regex.Replace(pretty.ToUpperInvariant(), "[^A-Z0-9]", "");
             if (!votes.TryGetValue(key, out var vote))
                 votes[key] = vote = new PlateVote { Pretty = pretty };
 
             // Doc tin cay cao tu model chuyen dung dang 2 lan doc Tesseract; ma tinh la thi giam trong so (xem PlateTextReader)
             double weight = (conf >= OnnxTrustedConfidence ? 2.0 : 1.0) * (1.0 + conf)
-                            * (VietnamPlateFormatter.IsKnownProvinceCode(pretty) ? 1.0 : 0.4);
+                            * PlateNormalizer.Weight(pretty);
             vote.Score += weight;
             vote.BestConfidence = Math.Max(vote.BestConfidence, conf);
         }

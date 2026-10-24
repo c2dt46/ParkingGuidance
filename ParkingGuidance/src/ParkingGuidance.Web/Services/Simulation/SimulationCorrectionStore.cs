@@ -26,7 +26,6 @@ public sealed class CorrectionEntry
 /// </summary>
 public sealed class SimulationCorrectionStore
 {
-    private const string Alphabet = "ABCDEFGHKLMNPRSTUVXYZ0123456789";
     private static readonly Regex IdPattern = new("^[0-9a-f]{16}$", RegexOptions.Compiled);
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -48,13 +47,13 @@ public sealed class SimulationCorrectionStore
     public static string IdFor(string key) =>
         Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(key))).ToLowerInvariant()[..16];
 
-    /// <summary>Chỉ giữ A-Z, 0-9 (viết hoa): "51d-932.40" → "51D93240".</summary>
+    /// <summary>Chỉ giữ A-Z, 0-9 (viết hoa, Đ → D): "51d-932.40" → "51D93240".</summary>
     public static string NormalizePlate(string? s) =>
-        Regex.Replace((s ?? "").ToUpperInvariant(), "[^A-Z0-9]", "");
+        Regex.Replace((s ?? "").ToUpperInvariant().Replace('Đ', 'D'), "[^A-Z0-9]", "");
 
-    /// <summary>Biển VN: 7–9 ký tự chữ/số, không dùng I, J, O, Q, W.</summary>
+    /// <summary>Nhãn nhập tự do để dạy máy: 3–12 ký tự chữ/số, không ép theo dạng biển ô tô (biển xe máy, quân đội, công an, ngoại giao... đều được).</summary>
     public static bool IsValidPlate(string normalized) =>
-        normalized.Length is >= 7 and <= 9 && normalized.All(c => Alphabet.Contains(c));
+        normalized.Length is >= 3 and <= 12 && normalized.All(char.IsAsciiLetterOrDigit);
 
     public List<CorrectionEntry> List()
     {
@@ -70,7 +69,7 @@ public sealed class SimulationCorrectionStore
         if (string.IsNullOrWhiteSpace(key)) throw new ArgumentException("Thiếu khoá mẫu.");
         var norm = NormalizePlate(correct);
         if (!IsValidPlate(norm))
-            throw new ArgumentException($"Biển số '{norm}' không hợp lệ: cần 7–9 ký tự chữ/số, biển Việt Nam không dùng I, J, O, Q, W.");
+            throw new ArgumentException($"Biển số '{norm}' không hợp lệ: cần 3–12 ký tự chữ/số.");
         if (png is null || png.Length == 0) throw new ArgumentException("Thiếu ảnh biển số.");
 
         var id = IdFor(key);

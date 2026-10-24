@@ -59,6 +59,7 @@ builder.Services.AddSingleton<IOnvifDiscoveryService, OnvifDiscoveryService>();
 builder.Services.AddSingleton<IVehicleDetectionService, YoloVehicleDetectionService>();
 builder.Services.AddSingleton<IPlateRecognitionService, TesseractPlateRecognitionService>();
 builder.Services.AddSingleton<ICharModelReloader>(sp => (ICharModelReloader)sp.GetRequiredService<IPlateRecognitionService>());
+builder.Services.AddSingleton<IOcrModelReloader>(sp => (IOcrModelReloader)sp.GetRequiredService<IPlateRecognitionService>());
 // Bo do vung bien so (tab Train bien so): goi y khung, do, cai va nap lai model da train them khi dang chay
 builder.Services.AddSingleton<IPlateDetectorModel>(sp => (IPlateDetectorModel)sp.GetRequiredService<IPlateRecognitionService>());
 
@@ -66,6 +67,7 @@ builder.Services.AddSingleton<IPlateDetectorModel>(sp => (IPlateDetectorModel)sp
 builder.Services.AddSingleton<SimulationCorrectionStore>();
 builder.Services.AddSingleton<TrainingInboxStore>();
 builder.Services.AddSingleton<SimulationTrainer>();
+builder.Services.AddSingleton<OcrTrainer>();
 // Train xe: bo anh da gan khung + huan luyen them YOLO11 (tien trinh Python rieng, uu tien thap, chi chay khi bam Train)
 builder.Services.AddSingleton<ParkingGuidance.Web.Services.VehicleTrain.VehicleTrainStore>();
 builder.Services.AddSingleton<ParkingGuidance.Web.Services.VehicleTrain.VehicleTrainer>();

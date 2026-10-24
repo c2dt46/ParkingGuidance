@@ -10,7 +10,7 @@
     const API = '/api/system/simulation';
     const folderInput = $('simFolderInput'), filesInput = $('simFilesInput');
     const prevBtns = document.querySelectorAll('#simTab .sim-prev'), nextBtns = document.querySelectorAll('#simTab .sim-next');   // 2 cap: thanh cong cu + khung thong tin ben phai
-    const redoBtn = $('simRedoBtn'), cropBtn = $('simCropBtn'), autoBtn = $('simAutoBtn');
+    const redoBtn = $('simRedoBtn'), cropBtn = $('simCropBtn'), autoBtn = $('simAutoBtn'), inspectBtn = $('simInspectBtn');
     const canvas = $('simCanvas'), ctx = canvas.getContext('2d');
     const zoomCanvas = $('simZoomCanvas'), zctx = zoomCanvas.getContext('2d');
 
@@ -36,7 +36,7 @@
     const cards = { main: new Map(), zoom: new Map() };   // key -> { v, view }
     // Nhom nut "Them vao Train": moi loai co kho rieng ben tab Train. added[loai] = chi so anh da gui trong phien nay.
     const TRAIN_KINDS = ['vehicle', 'plate', 'char'];
-    const TRAIN_LABEL = { vehicle: 'xe', plate: 'biển', char: 'ký tự' };
+    const TRAIN_LABEL = { vehicle: 'xe', plate: 'biển', char: 'ký tự (OCR)' };
     const TRAIN_BTN_TEXT = { vehicle: 'Train xe', plate: 'Train biển', char: 'Train ký tự', all: 'Train tất cả' };
     const TRAIN_SAMPLES_API = { vehicle: '/api/system/vehicle-train/samples', plate: '/api/system/plate-train/samples' };
     const added = { vehicle: new Set(), plate: new Set(), char: new Set() };
@@ -65,6 +65,7 @@
         return `<div class="sim-veh">
             <div class="sim-veh-head">${head}</div>
             <div class="sim-veh-read">Đọc được: ${read}</div>
+            <div class="sim-veh-fix"><button type="button" class="btn secondary btn-sm sim-inspect-btn" data-view="${view.name}" data-vi="${v.index}" title="Phóng to, kéo, cắt vùng, chỉnh sáng để đối chiếu biển này với chuỗi đọc được">🔎 Soi biển</button></div>
         </div>`;
     }
 
@@ -94,12 +95,14 @@
         return hint;
     }
 
-    // Gui anh `my` sang kho Train cua 1 loai. Tra ve { ok, isNew, msg }.
+    // >>> TRAIN-RESULT-START
+    // Gui anh `my` sang kho Train cua 1 loai, roi HOI LAI may chu de XAC NHAN anh da vao kho.
+    // Tra ve { ok, isNew, msg, id?, state? ('pending'|'partial'|'done'|'todo'|'reviewed'), stat? }.
     async function sendToTrain(kind, my) {
         const file = files[my];
         try {
             if (kind === 'char') {
-                // Hang cho "Train ky tu" (kem goi y khung/ky tu tu ket qua nhan dien hien tai)
+                // Hang cho "Train ky tu / OCR" (kem goi y khung bien tu ket qua nhan dien hien tai)
                 const fd = new FormData();
                 fd.append('image', file, file.name);
                 fd.append('name', relName(file));
@@ -108,7 +111,13 @@
                 const res = await fetch(`${API}/inbox`, { method: 'POST', body: fd });
                 const body = await res.json().catch(() => ({}));
                 if (!res.ok) return { ok: false, msg: body.message || ('Lỗi ' + res.status) };
-                return { ok: true, isNew: !!body.isNew, msg: `hàng chờ ${body.count} ảnh, ${body.pending} chưa xử lý` };
+                // xac nhan: doc lai hang cho tu may chu va tim dung anh vua gui
+                const lst = await fetch(`${API}/inbox`).then(r => r.json()).catch(() => null);
+                const it = lst && (lst.items || []).find(x => x.id === body.id);
+                if (!it) return { ok: false, msg: 'máy chủ báo đã nhận nhưng không thấy ảnh trong hàng chờ — hãy tải lại trang rồi thử lại' };
+                const state = it.done ? 'done' : (it.samples ? 'partial' : 'pending');
+                return { ok: true, isNew: !!body.isNew, id: body.id, state, samples: it.samples,
+                         stat: `hàng chờ: ${lst.count} ảnh, ${lst.pending} chưa xử lý`, msg: '' };
             }
             // Train xe / Train bien so: them anh vao kho mau; may chu tu goi y khung (chua duyet) bang bo do dang chay
             const fd = new FormData();
@@ -118,11 +127,68 @@
             if (!res.ok) return { ok: false, msg: body.message || ('Lỗi ' + res.status) };
             if (body.failed && body.failed.length) return { ok: false, msg: body.failed[0].error || 'ảnh không hợp lệ' };
             const sample = body.added && body.added[0];
-            return { ok: true, isNew: !!sample, msg: sample ? `${sample.boxes} khung gợi ý, chờ bạn duyệt` : 'ảnh này đã có trong kho mẫu' };
+            const lst = await fetch(TRAIN_SAMPLES_API[kind]).then(r => r.json()).catch(() => null);
+            const items = Array.isArray(lst) ? lst : null;
+            const mine = sample && items ? items.find(x => x.id === sample.id) : null;
+            if (sample && items && !mine) return { ok: false, msg: 'máy chủ báo đã nhận nhưng không thấy ảnh trong kho — hãy tải lại trang rồi thử lại' };
+            return { ok: true, isNew: !!sample, id: sample ? sample.id : null, state: mine ? (mine.reviewed ? 'reviewed' : 'todo') : null,
+                     boxes: sample ? sample.boxes : null,
+                     stat: items ? `kho: ${items.length} ảnh, ${items.filter(x => !x.reviewed).length} chưa duyệt` : '',
+                     msg: sample ? '' : 'ảnh này đã có sẵn trong kho mẫu' };
         } catch (err) {
             return { ok: false, msg: err.message };
         }
     }
+
+    // ----- bang ket qua gui sang Train: GIU NGUYEN cho toi khi dong / gui anh khac (khong bi tin nhan khac ghi de) + nut mo thang tab Train -----
+    const trainResultEl = document.createElement('div');
+    trainResultEl.id = 'simTrainResult';
+    trainResultEl.style.display = 'none';
+    trainBtns.all.parentElement.insertAdjacentElement('afterend', trainResultEl);
+
+    function trainRowText(kind, r) {
+        if (!r.ok) return { icon: '⚠️', text: `chưa gửi được — ${r.msg}`, actions: '' };
+        const open = `<button type="button" class="btn secondary btn-sm" data-open="${kind}" data-id="${esc(r.id || '')}">➡ Mở tab Train › ${TRAIN_LABEL[kind]}</button>`;
+        if (kind === 'char') {
+            const where = r.state === 'done' ? 'ảnh này ĐÃ XỬ LÝ XONG trước đó nên đang nằm ở mục “Đã xong” (bấm ↩ để đưa lại “Chưa xử lý”)'
+                : r.state === 'partial' ? `ảnh đã có trong hàng chờ (✎ ${r.samples} mẫu, chưa xong)`
+                : r.isNew ? 'đã vào hàng chờ (⏳ chưa xử lý)' : 'ảnh đã có sẵn trong hàng chờ (⏳ chưa xử lý)';
+            const reset = r.state === 'done' ? `<button type="button" class="btn secondary btn-sm" data-reset="${esc(r.id)}">↩ Đưa lại “Chưa xử lý”</button>` : '';
+            return { icon: '✔', text: `${where} · ${r.stat}`, actions: open + reset };
+        }
+        const what = r.isNew ? `đã thêm, ${r.boxes} khung gợi ý (chưa duyệt — vào tab Train để kiểm tra khung)` : r.msg;
+        return { icon: '✔', text: `${what}${r.stat ? ' · ' + r.stat : ''}`, actions: open };
+    }
+    function showTrainResult(name, kinds, results) {
+        const rows = kinds.map((k, i) => {
+            const t = trainRowText(k, results[i]);
+            return `<div style="margin:4px 0;">${t.icon} <strong>${TRAIN_LABEL[k]}</strong>: ${esc(t.text)} ${t.actions}</div>`;
+        }).join('');
+        trainResultEl.innerHTML = `<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin:6px 0;background:var(--panel-light);">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+                <strong>🧠 Đã gửi sang Train: ${esc(name)}</strong>
+                <button type="button" class="btn secondary btn-sm" data-close title="Đóng bảng này">✕</button>
+            </div>${rows}</div>`;
+        trainResultEl.style.display = '';
+    }
+    function openTrain(kind, id) {
+        if (!window.pgTrainNav) { setStatus('Không mở được tab Train tự động — hãy bấm tab 🧠 Train.'); return; }
+        // bao cho tab Train ky tu biet anh nao can mo (dat TRUOC khi chuyen tab; neu tab dang mo san thi no tu nap lai)
+        if (kind === 'char' && id) document.dispatchEvent(new CustomEvent('pg:train-focus', { detail: { kind, id } }));
+        window.pgTrainNav.open(kind);
+    }
+    trainResultEl.addEventListener('click', async e => {
+        if (e.target.closest('[data-close]')) { trainResultEl.style.display = 'none'; return; }
+        const o = e.target.closest('[data-open]');
+        if (o) { openTrain(o.dataset.open, o.dataset.id); return; }
+        const r = e.target.closest('[data-reset]');
+        if (r) {
+            r.disabled = true;
+            const res = await fetch(`${API}/inbox/${r.dataset.reset}/done?done=false`, { method: 'POST' }).catch(() => null);
+            r.textContent = res && res.ok ? '✔ Đã đưa lại “Chưa xử lý”' : '⚠️ Không đặt lại được';
+            if (res && res.ok) document.dispatchEvent(new CustomEvent('pg:train-data-imported'));
+        }
+    });
 
     // kinds: ['vehicle'] | ['plate'] | ['char'] | tat ca. Gui lan luot tung loai, bao ket qua tung loai.
     async function addToTrain(kinds) {
@@ -132,28 +198,25 @@
         updateButtons();
         const names = kinds.map(k => TRAIN_LABEL[k]).join(', ');
         setStatus(`⏳ Đang thêm vào Train (${names})…`);
-        const parts = [];
+        const results = [];
         let failed = 0;
         try {
             for (const kind of kinds) {
                 const r = await sendToTrain(kind, my);
-                if (r.ok) {
-                    added[kind].add(my);
-                    parts.push(`✔ ${TRAIN_LABEL[kind]}: ${r.isNew ? 'đã thêm' : 'đã có sẵn'} (${r.msg})`);
-                } else {
-                    failed++;
-                    parts.push(`⚠️ ${TRAIN_LABEL[kind]}: ${r.msg}`);
-                }
+                results.push(r);
+                if (r.ok) added[kind].add(my); else failed++;
             }
-            // Tab Train xe / Train biển chi nap lai danh sach anh khi mo lan dau -> bao cho chung nap lai de thay anh vua them
-            if (kinds.some(k => k !== 'char' && added[k].has(my))) document.dispatchEvent(new CustomEvent('pg:train-data-imported'));
+            // Cac tab Train chi nap danh sach khi mo / khi nhan su kien nay -> bao de chung nap lai, ke ca hang cho Train ky tu
+            if (results.some(r => r.ok)) document.dispatchEvent(new CustomEvent('pg:train-data-imported'));
             renderFileList();
-            setStatus(`🧠 ${failed ? 'Chưa thêm hết — ' : 'Đã thêm vào Train — '}${parts.join(' · ')}. Mở tab 🧠 Train để duyệt khung / nhập ký tự.`);
+            showTrainResult(relName(files[my]), kinds, results);
+            setStatus(`🧠 ${failed ? 'Chưa thêm hết' : 'Đã gửi xong'} (${names}) — xem bảng kết quả bên dưới nút Train; bấm “Mở tab Train” để tới đúng chỗ.`);
         } finally {
             addingToTrain = false;
             updateButtons();
         }
     }
+    // <<< TRAIN-RESULT-END
     trainBtns.vehicle.addEventListener('click', () => addToTrain(['vehicle']));
     trainBtns.plate.addEventListener('click', () => addToTrain(['plate']));
     trainBtns.char.addEventListener('click', () => addToTrain(['char']));
@@ -584,11 +647,52 @@
     }
     function setStatus(msg) { $('simStatus').textContent = msg || ''; }
 
+    // ----- 🔎 Soi anh (simInspector.js): phong to / keo / cat vung / chinh sang de doi chieu bien voi chuoi doc duoc ------------------
+    function inspectorInput(viewName) {
+        const zoom = viewName === 'zoom';
+        const src = zoom ? cropCanvas : currentImg;
+        const data = zoom ? zoomResult : (results.get(idx)?.ok ? results.get(idx).data : null);
+        if (!src || idx < 0) return null;
+        const mv = zoom ? { sx: 1, sy: 1 } : mainView();
+        const rect = b => ({ x: b.x1 * mv.sx, y: b.y1 * mv.sy, w: (b.x2 - b.x1) * mv.sx, h: (b.y2 - b.y1) * mv.sy });
+        const boxes = [], targets = [];
+        (data?.vehicles || []).forEach(v => {
+            const label = `${v.index}. ` + (v.plateNumber || (v.plateStage === 'unread' ? 'chưa đọc được' : 'không dò được biển'));
+            if (v.box && !v.isRegion) boxes.push({ ...rect(v.box), color: v.plateNumber ? '#22c55e' : '#f59e0b', label });
+            if (v.plateBox) boxes.push({ ...rect(v.plateBox), color: '#38bdf8', dashed: true, label: (v.isRegion || !v.box) ? label : '' });
+            const r = v.plateBox || v.box;
+            if (!r) return;
+            targets.push({ title: `#${v.index} ${TYPE_VI[v.vehicleType] || v.vehicleType}`, rect: rect(r), hasPlateBox: !!v.plateBox,
+                           text: v.plateNumber || '', conf: v.plateNumber ? v.plateConfidence : null, stage: v.plateStage, index: v.index });
+        });
+        const name = relName(files[idx]);
+        return { source: src, title: zoom ? `${name} (vùng cắt)` : name, boxes, targets };
+    }
+    function openInspector(viewName, vehicleIndex, focus) {
+        if (!window.SimInspector) return;
+        const inp = inspectorInput(viewName);
+        if (!inp) return;
+        const start = vehicleIndex == null ? -1 : inp.targets.findIndex(t => t.index === vehicleIndex);
+        window.SimInspector.open({ ...inp, start, focus: start < 0 ? focus : undefined });
+    }
+    if (inspectBtn) inspectBtn.addEventListener('click', () => openInspector('main'));
+    ['simVehicles', 'simZoomRows'].forEach(id => $(id).addEventListener('click', e => {
+        const b = e.target.closest('.sim-inspect-btn');
+        if (b) openInspector(b.dataset.view, Number(b.dataset.vi));
+    }));
+    canvas.addEventListener('dblclick', e => {            // nhap dup vao anh: mo trinh soi, phong 4 lan tai diem do
+        if (cropMode || !currentImg || idx < 0) return;
+        const r = canvas.getBoundingClientRect();
+        openInspector('main', null, { x: (e.clientX - r.left) * currentImg.naturalWidth / r.width, y: (e.clientY - r.top) * currentImg.naturalHeight / r.height, scale: 4 });
+    });
+    zoomCanvas.addEventListener('dblclick', () => { if (cropCanvas) openInspector('zoom'); });
+
     function updateButtons() {
         prevBtns.forEach(b => { b.disabled = idx <= 0; });
         nextBtns.forEach(b => { b.disabled = idx < 0 || idx >= files.length - 1; });
         redoBtn.disabled = idx < 0 || busy;
         cropBtn.disabled = !currentImg || idx < 0;
+        if (inspectBtn) inspectBtn.disabled = !currentImg || idx < 0;
         autoBtn.disabled = idx < 0;
         const trainOff = idx < 0 || !currentImg || addingToTrain;
         for (const k of TRAIN_KINDS) {

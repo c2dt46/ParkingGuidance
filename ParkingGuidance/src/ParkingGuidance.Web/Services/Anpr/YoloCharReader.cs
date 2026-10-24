@@ -101,14 +101,14 @@ public sealed class YoloCharReader : IDisposable
 
         string raw = string.Concat(texts);
         var lineLengths = texts.Count == 2 ? new[] { texts[0].Length, texts[1].Length } : null;
-        var (pretty, valid) = VietnamPlateFormatter.Normalize(raw, lineLengths);
-        if (!valid) return edgeCut;
+        var pretty = PlateNormalizer.Apply(raw, lineLengths);      // ham cua nguoi dung: null / "" = khong nhan dien duoc
+        if (pretty is null) return edgeCut;
 
-        var key = Regex.Replace(pretty, "[^A-Z0-9]", "");
+        var key = Regex.Replace(pretty.ToUpperInvariant(), "[^A-Z0-9]", "");
         if (!votes.TryGetValue(key, out var vote))
             votes[key] = vote = new PlateVote { Pretty = pretty };
 
-        double weight = (1.0 + conf) * (VietnamPlateFormatter.IsKnownProvinceCode(pretty) ? 1.0 : 0.4);
+        double weight = (1.0 + conf) * PlateNormalizer.Weight(pretty);
         if (key.Length >= 8 && Regex.IsMatch(key, @"\d{5}$")) weight += 0.2;
         weight *= TrustFactor * weightScale;
         if (edgeCut) weight *= 0.3;

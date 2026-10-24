@@ -350,7 +350,7 @@
                 <span class="sim-train-label">🧠 Thêm vào Train</span>
                 <button id="simTrainVehBtn" class="btn secondary btn-sm" disabled title="Gửi ảnh gốc này sang tab Train › Train xe (tự gợi ý khung xe, bạn kiểm tra lại ở tab Train)">➕ Train xe</button>
                 <button id="simTrainPlateBtn" class="btn secondary btn-sm" disabled title="Gửi ảnh gốc này sang tab Train › Train biển số (tự gợi ý khung biển, bạn kiểm tra lại ở tab Train)">➕ Train biển</button>
-                <button id="simTrainCharBtn" class="btn secondary btn-sm" disabled title="Gửi ảnh gốc này sang hàng chờ Train › Train ký tự (dùng khi không nhận diện được hoặc đọc sai biển) — phím tắt T">➕ Train ký tự</button>
+                <button id="simTrainCharBtn" class="btn secondary btn-sm" disabled title="Gửi ảnh gốc này sang hàng chờ Train › Train ký tự / OCR: sau đó bạn cắt vùng biển và nhập biển đúng (dùng khi không nhận diện được hoặc đọc sai biển) — phím tắt T">➕ Train ký tự (OCR)</button>
                 <button id="simTrainAllBtn" class="btn primary btn-sm" disabled title="Gửi ảnh gốc này vào cả 3 nơi: Train xe, Train biển và Train ký tự">➕ Train tất cả</button>
             </div>
             <span class="toolbar-sep"></span>
@@ -365,6 +365,7 @@
             <button id="simNextBtn" class="btn primary btn-sm sim-next" disabled>Tiếp theo ▶</button>
             <button id="simRedoBtn" class="btn secondary btn-sm" disabled>🔁 Nhận diện lại</button>
             <button id="simCropBtn" class="btn secondary btn-sm" disabled title="Bật rồi quét chuột trên ảnh để cắt một vùng và phóng to">✂️ Cắt/Zoom vùng</button>
+            <button id="simInspectBtn" class="btn secondary btn-sm" disabled title="Mở trình soi ảnh: phóng to bằng con lăn, kéo, chọn vùng để zoom, chỉnh sáng/tương phản, đối chiếu từng biển với chuỗi đọc được. Mẹo: nhấp đúp vào ảnh.">🔎 Soi ảnh</button>
             <button id="simClearBtn" class="btn secondary btn-sm" title="Quên thư mục + kết quả, giải phóng bộ nhớ">🗑 Xoá danh sách</button>
             <button id="simImportBtn" class="btn secondary btn-sm" title="Nhập dữ liệu train (ký tự / biển số / xe) từ một thư mục đã Export">Import...</button>
             <span class="toolbar-sep"></span>
@@ -564,15 +565,52 @@
 </section>
 </div>
 
-<div id="trainTab" class="train-sub-panel">
+<div id="trainTab" class="train-sub-panel old-train-off">
+    <section class="panel" id="otPanel">
+        <h2>🆕 Train đọc cả chuỗi biển (OCR) <span class="hint small" style="margin:0;">— khuyến nghị: không cần tách ký tự</span></h2>
+        <details class="hint-fold" open><summary>ℹ️ Hướng dẫn</summary><p class="hint">
+            Model học từ cặp <strong>ảnh biển đã cắt + chuỗi biển đúng</strong>: nhìn cả dòng chữ rồi trả về chuỗi, nên <strong>không cần khoanh từng ký tự</strong> và không còn lỗi “tách ký tự”.<br />
+            <strong>1.</strong> Thêm ảnh vào hàng chờ: ở tab <strong>🧪 Mô phỏng</strong> dùng nhóm nút <strong>🧠 Thêm vào Train</strong> cho ảnh đọc sai / không đọc được, hoặc bấm <strong>📂 Thêm ảnh từ máy</strong> ở phần ✂️ bên dưới.<br />
+            <strong>2.</strong> Chọn ảnh trong <strong>hàng chờ</strong>, kéo chuột để <strong>cắt vùng biển số vừa khít</strong> (bỏ viền, ốc vít, khung xe; biển 2 dòng cắt đủ cả hai dòng). Nút <strong>🤖 Tự dò biển</strong> gợi ý sẵn khung.<br />
+            <strong>3.</strong> Gõ <strong>biển đúng</strong> như trên biển (từ 3 ký tự chữ/số trở lên, <strong>nhập tự do</strong>: biển ô tô, xe máy, quân đội, công an, ngoại giao… đều được; biển 2 dòng gõ liền dòng trên rồi dòng dưới) rồi <kbd>Enter</kbd> để lưu mẫu.<br />
+            <strong>4.</strong> Đủ mẫu thì bấm <strong>🧠 Train OCR</strong>. Mẫu càng nhiều biển <strong>KHÁC NHAU</strong> (nhiều tỉnh, ngày/đêm, nghiêng, mờ…) thì kết quả càng sát thực tế; một biển chụp nhiều lần không thay được nhiều biển khác nhau. Máy tự sinh thêm biển giả lập để bù khi mẫu thật còn ít.<br />
+            Train chạy nền, ưu tiên thấp, mất khoảng vài chục phút đến vài giờ tuỳ máy (có GPU thì nhanh hơn nhiều). Xong mà đọc đúng ≥ 80% trên ≥ 5 biển thật chưa từng học thì <strong>tự cài</strong> và dùng ngay (bản cũ được sao lưu); chưa đủ tin cậy thì bạn quyết định bằng nút <strong>Vẫn cài bản mới</strong>.<br />
+            Cần Python có sẵn <code>torch</code>, <code>opencv-python</code>, <code>numpy</code>, <code>onnxruntime</code>, <code>pillow</code> (hoặc chỉ định Python riêng ở <code>Trainer:OcrPython</code> trong appsettings.json).
+            Phần <strong>train ký tự (cũ)</strong> vẫn còn, đang ẩn — bấm <strong>🔧 Hiện train ký tự (cũ)</strong> khi cần.
+        </p></details>
+
+        <div id="otWarn" class="sim-warn" style="display:none;"></div>
+        <div class="camera-toolbar">
+            <button id="otTrainBtn" class="btn primary btn-sm" disabled>🧠 Train OCR</button>
+            <label class="prop-inline" title="Số vòng học (3–200). Nhiều hơn = kỹ hơn nhưng lâu hơn.">
+                <span class="hint small" style="margin:0;">Số epoch</span>
+                <input id="otEpochs" type="number" min="3" max="200" step="1" value="20" style="width:70px;" />
+            </label>
+            <label class="prop-inline" title="Số biển giả lập sinh thêm mỗi lần train (0–30000). Nhiều hơn = học kỹ hơn nhưng lâu hơn.">
+                <span class="hint small" style="margin:0;">Biển giả lập</span>
+                <input id="otSynth" type="number" min="0" max="30000" step="500" value="4000" style="width:80px;" />
+            </label>
+            <button id="otCancelBtn" class="btn secondary btn-sm" style="display:none;">⏹ Huỷ train</button>
+            <button id="otInstallBtn" class="btn secondary btn-sm" style="display:none;">✔ Vẫn cài bản mới</button>
+            <button id="otClearBtn" class="btn secondary btn-sm" style="display:none;" title="Xoá kết quả lần train gần nhất (không ảnh hưởng model đang dùng và các mẫu đã lưu)">🗑 Xoá kết quả train</button>
+            <span class="toolbar-sep"></span>
+            <button id="otOldToggle" class="btn secondary btn-sm" type="button" title="Phần train ký tự (cũ) đang ẩn. Bấm để hiện/ẩn khi cần dùng.">🔧 Hiện train ký tự (cũ)</button>
+        </div>
+        <div class="sim-bar" id="otBarWrap" style="display:none;"><i id="otBar"></i></div>
+        <div id="otMsg" class="hint" style="margin:6px 0;"></div>
+        <div id="otResult"></div>
+        <div id="otModel" class="hint small"></div>
+    </section>
+
+    <div id="oldTrainWrap" style="display:none;">
     <section class="panel">
-        <h2>🧠 Train — dạy lại nhận diện biển số <span id="trCounts" class="hint small" style="margin:0;"></span></h2>
+        <h2>🧠 Train ký tự (cũ) — dạy bộ phân loại ký tự <span id="trCounts" class="hint small" style="margin:0;"></span></h2>
         <details class="hint-fold"><summary>ℹ️ Hướng dẫn</summary><p class="hint">
             <strong>1.</strong> Ở tab <strong>🧪 Mô phỏng</strong>, ảnh nào không nhận diện được / đọc sai biển thì dùng nhóm nút <strong>🧠 Thêm vào Train</strong> (Train ký tự hoặc Train tất cả), hoặc <strong>📂 Thêm ảnh từ máy</strong> ngay ở đây.<br />
             <strong>2.</strong> Chọn ảnh trong <strong>hàng chờ</strong>. Kéo chuột trên ảnh để <strong>cắt vùng biển số</strong> (kéo khung đã vẽ để dời, kéo góc/cạnh để chỉnh; lăn chuột để zoom, giữ chuột giữa/phải hoặc phím <kbd>Space</kbd> + kéo để dịch ảnh).
             Nếu hệ thống đã dò được biển thì khung và biển đọc được đã được <strong>điền sẵn</strong> — chỉ cần sửa. Nút <strong>🤖 Tự dò biển</strong> chạy lại AI để gợi ý khung.<br />
             <strong>3.</strong> Gõ <strong>ký tự đúng</strong> của biển rồi <kbd>Enter</kbd> để lưu mẫu; lưu xong tất cả khung của ảnh thì tự sang ảnh kế.
-            Biển Việt Nam 7–9 ký tự chữ/số, không dùng I, J, O, Q, W. Biển 2 dòng: gõ liền dòng trên rồi dòng dưới.<br />
+            Từ 3 ký tự chữ/số trở lên, nhập tự do (mọi loại biển). Biển 2 dòng: gõ liền dòng trên rồi dòng dưới.<br />
             <strong>4.</strong> Đủ mẫu thì bấm <strong>🧠 Train</strong>: học nền, ưu tiên thấp, không làm chậm camera thật; model mới tốt hơn thì tự cài (bản cũ được sao lưu).
             Mẫu càng đa dạng (ngày/đêm, nghiêng, mờ, 2 dòng…) càng tốt — nên có ít nhất ~10 mẫu mỗi lần train.
         </p></details>
@@ -592,9 +630,10 @@
         <div id="trTrainMsg" class="hint" style="margin:6px 0;"></div>
         <div id="trTrainResult"></div>
     </section>
+    </div>
 
     <section class="panel" id="trWorkbench">
-        <h2>✂️ Cắt biển &amp; gán ký tự <span id="trImgInfo" class="hint small" style="margin:0;"></span></h2>
+        <h2>✂️ Cắt biển &amp; nhập biển đúng <span id="trImgInfo" class="hint small" style="margin:0;"></span></h2>
         <div class="camera-toolbar">
             <label class="btn secondary btn-sm file-btn">📂 Thêm ảnh từ máy
                 <input type="file" id="trUploadInput" accept="image/*" multiple hidden />
@@ -629,7 +668,7 @@
                     <canvas id="trCanvas"></canvas>
                     <div id="trEmpty" class="tr-empty no-result">Chưa có ảnh. Thêm ảnh từ tab 🧪 Mô phỏng (➕ Train ký tự) hoặc bấm 📂 Thêm ảnh từ máy.</div>
                 </div>
-                <div class="hint small" style="margin:4px 0;">Kéo chuột để vẽ khung biển · kéo khung để dời · kéo mép/góc để chỉnh · <kbd>Del</kbd> xoá khung đang chọn · lăn chuột = zoom · <kbd>Space</kbd>/chuột giữa + kéo = dịch ảnh.</div>
+                <div class="hint small" style="margin:4px 0;"><strong>Chuột phải</strong> kéo một khung = phóng to vùng đó (bấm chuột phải = về toàn ảnh) · <strong>chuột trái</strong> bấm 4 GÓC của biển để tạo vùng cắt ôm sát (nút “📍 Chọn 4 điểm” đổi sang kéo khung) · kéo khung để dời · kéo mép/góc để chỉnh · <kbd>Backspace</kbd> bỏ điểm vừa chọn · <kbd>Esc</kbd> bỏ hết điểm · <kbd>Del</kbd> xoá khung đang chọn · lăn chuột = zoom · <kbd>Space</kbd>/chuột giữa + kéo = dịch ảnh.</div>
             </div>
             <aside class="tr-side">
                 <div class="tr-side-head">Biển trong ảnh này <span id="trRegionCount" class="hint small" style="margin:0;"></span></div>
@@ -701,10 +740,13 @@
     <script src="~/js/cameraData.js"></script>
     <script src="~/js/cameraHistory.js"></script>
     <script src="~/js/cameraSimulation.js"></script>
+    <script src="~/js/simInspector.js" asp-append-version="true"></script>
     <script src="~/js/trainHub.js" asp-append-version="true"></script>
+    <script src="~/js/trainZoom.js" asp-append-version="true"></script>
     <script src="~/js/cameraTrain.js" asp-append-version="true"></script>
     <script src="~/js/vehicleTrain.js" asp-append-version="true"></script>
     <script src="~/js/plateTrain.js" asp-append-version="true"></script>
+    <script src="~/js/ocrTrain.js" asp-append-version="true"></script>
     <script src="~/js/trainTransfer.js" asp-append-version="true"></script>
     <script src="~/js/panelCollapse.js"></script>
 }

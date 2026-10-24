@@ -10,14 +10,14 @@
     const $ = id => document.getElementById(id);
     const API = '/api/system/simulation';
     const ALPHABET = 'ABCDEFGHKLMNPRSTUVXYZ0123456789';
-    const BAD_CHARS = /[IJOQW]/;
+    const BAD_CHARS = /(?!)/;   // khong con ky tu nao bi coi la 'cam': nhan nhap tu do (moi loai bien)
     const MIN_CROP_W = 20, MIN_CROP_H = 10;             // khung nho hon coi nhu bam nham
     const SUGGEST_MARGIN_X = 0.10, SUGGEST_MARGIN_Y = 0.15;   // giong cach he thong cat bien khi doc
 
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const pct = x => (x == null ? '—' : (x * 100).toFixed(x >= 0.995 || x === 0 ? 0 : 1) + '%');
     const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-    const norm = s => String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const norm = s => String(s ?? '').toUpperCase().replace(/Đ/g, 'D').replace(/[^A-Z0-9]/g, '');
     const tabActive = () => !!window.pgTrainNav && window.pgTrainNav.isActive('char');   // tab lon Train dang mo VA tab con "Train ky tu" dang hien (xem trainHub.js)
 
     const canvas = $('trCanvas'), ctx = canvas.getContext('2d');
@@ -36,6 +36,9 @@
     let dragState = null;      // keo chuot dang dien ra
     let spaceDown = false;
     let cutMode = false;       // che do "✂️ Cat vung bien": moi lan keo chuot = ve khung moi (tu tat sau khi ve xong)
+    // Chon vung bien bang 4 DIEM: chuot trai bam vao 4 GOC cua bien -> vung cat = hinh chu nhat nho nhat bao tron 4 diem (om sat dung bien, ke ca bien nghieng).
+    let quadMode = true;
+    try { quadMode = localStorage.getItem('pg.char.quadMode') !== '0'; } catch { /* che do rieng tu */ }
     let redrawQueued = false;
     let msgTimer = null;
 
@@ -59,15 +62,14 @@
         if ((m = /^(\d{2}[A-Z])(\d{4})$/.exec(n))) return `${m[1]}-${m[2]}`;
         return n;
     }
-    // { ok, msg }: 7-9 ky tu chu/so, khong dung I J O Q W
+    // { ok, msg }: nhap tu do, tu 3 den 12 ky tu chu/so (moi loai bien: o to, xe may, quan doi, cong an, ngoai giao...)
     function validate(text) {
         const n = norm(text);
         if (!n) return { ok: false, msg: 'Chưa nhập ký tự.' };
-        const bad = [...new Set(n.split('').filter(c => BAD_CHARS.test(c)))];
-        if (bad.length) return { ok: false, msg: `Biển VN không dùng ${bad.join(', ')} (hay nhầm O→0, I→1, Q→0, W→V).` };
-        if (n.length < 7) return { ok: false, msg: `Mới ${n.length} ký tự — cần 7–9.` };
-        if (n.length > 9) return { ok: false, msg: `${n.length} ký tự — tối đa 9.` };
-        return { ok: true, msg: `${n.length} ký tự ✓` };
+        if (n.length < 3) return { ok: false, msg: `Mới ${n.length} ký tự — cần từ 3.` };
+        if (n.length > 12) return { ok: false, msg: `${n.length} ký tự — tối đa 12.` };
+        const rare = /[IJOQW]/.test(n);
+        return { ok: true, msg: `${n.length} ký tự ✓` + (rare ? ' (có I/J/O/Q/W: chỉ model OCR học được các chữ này)' : '') };
     }
     const quickFix = t => norm(t).replace(/[OQ]/g, '0').replace(/[IJ]/g, '1').replace(/W/g, 'V');
 
@@ -261,7 +263,8 @@
                 no, key: s.key, id: s.id, saved: true, dirty: false, suggested: false,
                 x: hasRect ? rect.x : 0, y: hasRect ? rect.y : 0, w: hasRect ? rect.w : img.naturalWidth, h: hasRect ? rect.h : img.naturalHeight,
                 noRect: !hasRect, text: fmtPlate(s.correct), recognized: s.recognized || '',
-                chars: (rect && Array.isArray(rect.chars) && rect.chars.length) ? rect.chars : null
+                chars: (rect && Array.isArray(rect.chars) && rect.chars.length) ? rect.chars : null,
+                quad: (rect && Array.isArray(rect.quad) && rect.quad.length === 4) ? rect.quad : null
             });
         });
         // 2) chua co mau: goi y tu Mo phong (khung + bien da doc)
@@ -507,7 +510,10 @@
         fd.append('kind', 'manual');
         fd.append('correct', n);
         fd.append('recognized', r.recognized || '');
-        fd.append('meta', JSON.stringify(r.chars ? { ...rect, chars: r.chars } : rect));
+        const meta = { ...rect };
+        if (r.chars) meta.chars = r.chars;
+        if (r.quad) meta.quad = r.quad;                       // 4 goc da chon (de doi chieu / dung sau nay); anh luu van la vung cat chu nhat
+        fd.append('meta', JSON.stringify(meta));
         fd.append('image', blob, 'plate.png');
         if (card()) card().innerHTML = '⏳ Đang lưu…';
         saving++;
@@ -612,7 +618,7 @@
     function zoomAt(px, py, factor) {
         if (!cur) return;
         const v = cur.view, fit = v.fit || 0.05;
-        const ns = clamp(v.s * factor, fit * 0.5, 24);
+        const ns = clamp(v.s * factor, fit * 0.5, 60);
         const ix = (px - v.ox) / v.s, iy = (py - v.oy) / v.s;
         v.s = ns; v.ox = px - ix * ns; v.oy = py - iy * ns;
         schedulePaint();
@@ -626,7 +632,51 @@
         cur.view.oy = h / 2 - (r.y + r.h / 2) * s;
         paint();
     }
+    // phong vao hinh chu nhat (toa do px anh): dung cho chuot phai keo khung
+    function zoomToRect(x, y, w, h) {
+        if (!cur) return;
+        const sz = stageSize();
+        const s = clamp(Math.min(sz.w / Math.max(1, w), sz.h / Math.max(1, h)) * 0.97, (cur.view.fit || 0.05) * 0.5, 60);
+        cur.view.s = s;
+        cur.view.ox = sz.w / 2 - (x + w / 2) * s;
+        cur.view.oy = sz.h / 2 - (y + h / 2) * s;
+        paint();
+    }
     const toImg = (px, py) => ({ x: (px - cur.view.ox) / cur.view.s, y: (py - cur.view.oy) / cur.view.s });
+    const quadOrder = pts => (window.PgZoom ? PgZoom.orderQuad(pts) : pts.slice());
+
+    // tao khung bien moi (cung cach voi keo khung) — quad: 4 goc neu chon bang 4 diem
+    function newRegion(a, quad) {
+        const r = { no: cur.nextNo++, key: '', saved: false, dirty: true, suggested: false, text: '', recognized: '', x: Math.round(a.x), y: Math.round(a.y), w: Math.round(a.w), h: Math.round(a.h), quad: quad || null };
+        r.key = `${cur.item.id}|r${r.no}`;
+        cur.regions.push(r);
+        cur.sel = r.no;
+        renderRegions();
+        const inp = $('trRegions').querySelector(`.tr-region[data-no="${r.no}"] .tr-input`);
+        if (inp) { inp.focus(); inp.scrollIntoView({ block: 'nearest' }); }
+        say('✎ Gõ ký tự đúng của biển rồi nhấn Enter để lưu mẫu.', 6000);
+        return r;
+    }
+    // Che do 4 diem: moi lan bam trai them 1 goc; du 4 goc -> tao khung om sat (hinh chu nhat bao tron 4 diem)
+    function addQuadPoint(im) {
+        const W = cur.img.naturalWidth, H = cur.img.naturalHeight;
+        const pts = (cur.pts = cur.pts || []);
+        if (!pts.length) {
+            cur.sel = null; $('trRegions').querySelectorAll('.tr-region.sel').forEach(c => c.classList.remove('sel'));
+            const ae = document.activeElement;                   // dang go chu o o nhap cua khung truoc: roi o do de Backspace/Esc tac dong vao cac diem
+            if (ae && ae.tagName === 'INPUT') ae.blur();
+        }
+        pts.push({ x: clamp(im.x, 0, W), y: clamp(im.y, 0, H) });
+        if (pts.length < 4) { say(`📍 Đã chọn ${pts.length}/4 điểm — bấm tiếp các góc còn lại của biển số (<kbd>Backspace</kbd>: bỏ điểm cuối · <kbd>Esc</kbd>: bỏ hết).`, 0); paint(); return; }
+        const xs = pts.map(q => q.x), ys = pts.map(q => q.y);
+        const a = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+        const quad = quadOrder(pts).map(q => ({ x: Math.round(q.x), y: Math.round(q.y) }));
+        cur.pts = [];
+        if (a.w < MIN_CROP_W || a.h < MIN_CROP_H) { say('Bốn điểm quá gần nhau — khung biển quá nhỏ, hãy chọn lại 4 góc (có thể phóng to bằng chuột phải kéo khung).', 5000); paint(); return; }
+        if (cutMode) setCutMode(false);
+        newRegion(a, quad);
+        paint();
+    }
     // Vi tri chuot theo pixel CSS cua canvas (he toa do ma paint() dung). KHONG duoc dung thang clientX - rect.left: getBoundingClientRect/clientX tinh theo pixel
     // MAN HINH, con canvas ve theo pixel CSS (canvas.style.width). Khi trang bi phong/thu — "Kich thuoc giao dien" (root.style.zoom trong prefs.js) khac 100%,
     // zoom trinh duyet... — hai he nay lech nhau dung bang ty le do: khung ve sai cho, khong keo/chinh duoc khung cu (tay cam lech khoi vi tri that).
@@ -690,6 +740,10 @@
             if (!ok) ctx.setLineDash([8, 5]);
             ctx.strokeRect(x, y, w, h);
             ctx.restore();
+            if (r.quad && r.quad.length === 4) {            // da giac 4 goc da chon (chi de doi chieu bang mat)
+                ctx.save(); ctx.setLineDash([3, 3]); ctx.lineWidth = 1.5; ctx.strokeStyle = '#fff';
+                ctx.beginPath(); r.quad.forEach((q, k) => (k ? ctx.lineTo(v.ox + q.x * v.s, v.oy + q.y * v.s) : ctx.moveTo(v.ox + q.x * v.s, v.oy + q.y * v.s))); ctx.closePath(); ctx.stroke(); ctx.restore();
+            }
             const label = `#${r.no}${r.text ? ' ' + norm(r.text) : ''}`;
             ctx.font = 'bold 12px sans-serif';
             const tw = ctx.measureText(label).width + 10;
@@ -714,6 +768,23 @@
             ctx.strokeRect(v.ox + a.x * v.s, v.oy + a.y * v.s, a.w * v.s, a.h * v.s);
             ctx.restore();
         }
+        if (dragState && dragState.type === 'zoomsel') {   // chuot phai dang keo khung de phong to
+            const z = dragState, zx = Math.min(z.x0, z.x1), zy = Math.min(z.y0, z.y1), zw = Math.abs(z.x1 - z.x0), zh = Math.abs(z.y1 - z.y0);
+            ctx.save();
+            ctx.setLineDash([6, 4]); ctx.lineWidth = 2; ctx.strokeStyle = '#38bdf8'; ctx.fillStyle = 'rgba(56,189,248,.16)';
+            ctx.fillRect(zx, zy, zw, zh); ctx.strokeRect(zx, zy, zw, zh);
+            ctx.restore();
+        }
+        if (cur.pts && cur.pts.length) {                   // cac diem 4 goc dang chon
+            ctx.save(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#facc15';
+            ctx.beginPath(); cur.pts.forEach((q, k) => (k ? ctx.lineTo(v.ox + q.x * v.s, v.oy + q.y * v.s) : ctx.moveTo(v.ox + q.x * v.s, v.oy + q.y * v.s))); ctx.stroke();
+            cur.pts.forEach((q, k) => {
+                const X = v.ox + q.x * v.s, Y = v.oy + q.y * v.s;
+                ctx.beginPath(); ctx.arc(X, Y, 6, 0, 7); ctx.fillStyle = '#facc15'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.stroke();
+                ctx.fillStyle = '#000'; ctx.font = 'bold 10px sans-serif'; ctx.fillText(String(k + 1), X - 3, Y + 3.5);
+            });
+            ctx.restore();
+        }
     }
 
     canvas.addEventListener('wheel', e => {
@@ -727,10 +798,14 @@
     canvas.addEventListener('mousedown', e => {
         if (!cur) return;
         const p = evPt(e), im = toImg(p.x, p.y);
-        // dich anh: chuot giua / phai / giu Space
-        if (e.button === 1 || e.button === 2 || (e.button === 0 && spaceDown)) {
+        // dich anh: chuot giua / giu Space. CHUOT PHAI keo mot khung = phong to vung do; bam chuot phai (khong keo) = ve toan anh
+        if (e.button === 1 || (e.button === 0 && spaceDown)) {
             dragState = { type: 'pan', sx: p.x, sy: p.y, ox: cur.view.ox, oy: cur.view.oy };
             canvas.style.cursor = 'grabbing';
+        } else if (e.button === 2) {
+            dragState = { type: 'zoomsel', x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+        } else if (e.button === 0 && cutMode && quadMode) {
+            dragState = { type: 'pt', sx: p.x, sy: p.y, im, moved: false };       // bam (khong keo) = them 1 goc cua bien
         } else if (e.button === 0 && cutMode) {
             dragState = { type: 'draw', x0: clamp(im.x, 0, cur.img.naturalWidth), y0: clamp(im.y, 0, cur.img.naturalHeight), rect: { x: im.x, y: im.y, w: 0, h: 0 } };
         } else if (e.button === 0) {
@@ -744,6 +819,8 @@
                 if (hit) {
                     setSelected(hit.no);
                     dragState = { type: 'move', r: hit, dx: im.x - hit.x, dy: im.y - hit.y, moved: false };
+                } else if (quadMode) {
+                    dragState = { type: 'pt', sx: p.x, sy: p.y, im, moved: false };   // che do 4 diem: bam vao cho trong = them 1 goc cua bien
                 } else {
                     dragState = { type: 'draw', x0: clamp(im.x, 0, cur.img.naturalWidth), y0: clamp(im.y, 0, cur.img.naturalHeight), rect: { x: im.x, y: im.y, w: 0, h: 0 } };
                 }
@@ -760,6 +837,10 @@
         const d = dragState;
         if (d.type === 'pan') {
             cur.view.ox = d.ox + (p.x - d.sx); cur.view.oy = d.oy + (p.y - d.sy);
+        } else if (d.type === 'zoomsel') {
+            d.x1 = p.x; d.y1 = p.y;
+        } else if (d.type === 'pt') {
+            if (Math.hypot(p.x - d.sx, p.y - d.sy) > 5) d.moved = true;
         } else if (d.type === 'draw') {
             const x1 = clamp(im.x, 0, W), y1 = clamp(im.y, 0, H);
             d.rect = { x: Math.min(d.x0, x1), y: Math.min(d.y0, y1), w: Math.abs(x1 - d.x0), h: Math.abs(y1 - d.y0) };
@@ -789,6 +870,15 @@
         const d = dragState; dragState = null;
         canvas.style.cursor = spaceDown ? 'grab' : (cutMode ? 'crosshair' : '');
         if (!d || !cur) return;
+        if (d.type === 'zoomsel') {                          // chuot phai: keo khung = phong to; bam khong keo = ve toan anh
+            if (Math.abs(d.x1 - d.x0) < 6 && Math.abs(d.y1 - d.y0) < 6) { fitView(); paint(); }
+            else {
+                const a = toImg(Math.min(d.x0, d.x1), Math.min(d.y0, d.y1)), b = toImg(Math.max(d.x0, d.x1), Math.max(d.y0, d.y1));
+                zoomToRect(a.x, a.y, b.x - a.x, b.y - a.y);
+            }
+            return;
+        }
+        if (d.type === 'pt') { if (!d.moved) addQuadPoint(d.im); return; }
         if (d.type === 'draw') {
             const a = d.rect;
             if (cutMode && a.w >= MIN_CROP_W && a.h >= MIN_CROP_H) setCutMode(false);      // ve duoc khung -> tu tat che do cat
@@ -816,6 +906,7 @@
     function regionChanged(r, live) {
         if (r.saved) r.dirty = true;
         r.suggested = false;
+        r.quad = null;                                       // khung doi vi tri/kich thuoc -> 4 goc cu khong con dung
         r.chars = null;                                      // khung doi -> cac o ky tu (toa do theo khung) khong con dung
         r.x = Math.round(r.x); r.y = Math.round(r.y); r.w = Math.round(r.w); r.h = Math.round(r.h);
         drawThumb(r);
@@ -843,11 +934,25 @@
         cutMode = !!on && !!cur;
         const b = $('trCutBtn');
         b.classList.toggle('primary', cutMode); b.classList.toggle('secondary', !cutMode);
-        b.textContent = cutMode ? '✂️ Đang cắt… (kéo chuột trên ảnh)' : '✂️ Cắt vùng biển';
+        b.textContent = cutMode ? (quadMode ? '✂️ Đang cắt… (bấm 4 góc biển)' : '✂️ Đang cắt… (kéo chuột trên ảnh)') : '✂️ Cắt vùng biển';
         canvas.style.cursor = cutMode ? 'crosshair' : '';
-        if (cutMode) say('✂️ Kéo chuột trên ảnh để cắt vùng biển số (lăn chuột để zoom vào biển nhỏ). <kbd>Esc</kbd> để thoát chế độ cắt.', 0);
+        if (cutMode) say(quadMode ? '✂️ Bấm chuột TRÁI vào 4 GÓC của biển số (chuột PHẢI kéo khung để phóng to trước cho chính xác). <kbd>Esc</kbd> để thoát.' : '✂️ Kéo chuột trên ảnh để cắt vùng biển số (chuột PHẢI kéo khung để phóng to). <kbd>Esc</kbd> để thoát chế độ cắt.', 0);
     }
     $('trCutBtn').addEventListener('click', () => { if (cur) setCutMode(!cutMode); });
+    // Nut doi cach chon vung bien: bam 4 goc (mac dinh) <-> keo khung chu nhat
+    const quadBtn = document.createElement('button');
+    quadBtn.type = 'button'; quadBtn.id = 'trQuadBtn'; quadBtn.className = 'btn secondary btn-sm';
+    const quadLabel = () => { quadBtn.textContent = quadMode ? '📍 Chọn 4 điểm: BẬT' : '▭ Kéo khung'; quadBtn.title = quadMode ? 'Bấm chuột trái vào 4 GÓC của biển số → vùng cắt ôm sát đúng biển. Bấm để đổi sang kéo khung chữ nhật.' : 'Kéo khung chữ nhật. Bấm để đổi sang chọn 4 góc của biển.'; };
+    quadLabel();
+    quadBtn.addEventListener('click', () => {
+        quadMode = !quadMode;
+        try { localStorage.setItem('pg.char.quadMode', quadMode ? '1' : '0'); } catch { /* bo qua */ }
+        if (cur) cur.pts = [];
+        quadLabel();
+        if (cutMode) setCutMode(true);
+        if (cur) paint();
+    });
+    $('trCutBtn').insertAdjacentElement('afterend', quadBtn);
     $('trFitBtn').addEventListener('click', () => { fitView(); paint(); });
     $('trZoomInBtn').addEventListener('click', () => { const { w, h } = stageSize(); zoomAt(w / 2, h / 2, 1.4); });
     $('trZoomOutBtn').addEventListener('click', () => { const { w, h } = stageSize(); zoomAt(w / 2, h / 2, 1 / 1.4); });
@@ -864,6 +969,8 @@
         if (e.key === ' ' && !typing) { spaceDown = true; if (!dragState) canvas.style.cursor = 'grab'; if (cur) e.preventDefault(); return; }
         if (typing) return;
         if ((e.key === 'c' || e.key === 'C') && cur && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); setCutMode(!cutMode); return; }
+        if (e.key === 'Escape' && cur && cur.pts && cur.pts.length) { cur.pts = []; say('', 0); paint(); return; }
+        if (e.key === 'Backspace' && cur && cur.pts && cur.pts.length) { e.preventDefault(); cur.pts.pop(); paint(); return; }
         if (e.key === 'Escape' && cutMode) { setCutMode(false); say('', 0); return; }
         if (e.key === 'ArrowRight') { const n = cur && neighbour(cur.item.id, +1); if (n) { e.preventDefault(); openItem(n.id); } }
         else if (e.key === 'ArrowLeft') { const n = cur && neighbour(cur.item.id, -1); if (n) { e.preventDefault(); openItem(n.id); } }
@@ -1446,13 +1553,33 @@
         say('');
     }
 
+    // Tab Mo phong bao: "mo anh nay trong hang cho" (nut ➡ Mo tab Train) / "vua them anh" -> nap lai hang cho, bo loc ve "Tat ca" neu anh dang bi an
+    let pendingFocus = null;
+    function applyFocus() {
+        if (!pendingFocus) return;
+        const id = pendingFocus;
+        pendingFocus = null;
+        const it = inbox.find(i => i.id === id);
+        if (!it) return;
+        const f = $('trFilter');
+        if (f && f.value !== 'all' && ((f.value === 'pending' && it.done) || (f.value === 'done' && !it.done))) f.value = 'all';
+        renderInbox();
+        openItem(id, true);
+    }
+    document.addEventListener('pg:train-focus', e => {
+        if (!e.detail || e.detail.kind !== 'char') return;
+        pendingFocus = e.detail.id || null;
+        if (entered) loadAll().then(applyFocus);          // tab dang mo san: nap lai roi mo anh; chua mo thi enter() lam viec do
+    });
+    document.addEventListener('pg:train-data-imported', () => { if (entered) loadAll(); });
+
     function enter() {
         if (entered || !tabActive()) return;
         entered = true;
         document.addEventListener('keydown', onKeyDown);
         document.addEventListener('keyup', onKeyUp);
         $('trInbox').innerHTML = '<div class="no-result">Đang tải…</div>';
-        loadAll();
+        loadAll().then(applyFocus);
         fetchTrainStatus();
     }
     function leave() {

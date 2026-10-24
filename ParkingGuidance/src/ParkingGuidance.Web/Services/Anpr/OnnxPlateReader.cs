@@ -10,7 +10,7 @@ namespace ParkingGuidance.Web.Services.Anpr;
 /// Chỉ bật khi có file model (Anpr:OcrModelPath); nếu không, hệ thống dùng Tesseract như trước.
 ///
 /// Cấu hình trong appsettings.json (mục "Anpr"):
-///   OcrCharset      chuỗi ký tự model nhận ra (mặc định "0123456789ABCDEFGHKLMNPRSTUVXYZ") hoặc OcrCharsetFile (mỗi dòng 1 ký tự)
+///   OcrCharset      chuỗi ký tự model nhận ra (mặc định 36 ký tự "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"; model cũ 31 ký tự vẫn tự nhận ra) hoặc OcrCharsetFile (mỗi dòng 1 ký tự)
 ///   OcrBlankLast    false (mặc định) = chỉ số 0 là "blank" CTC và ký tự thứ i ứng với chỉ số i+1; true = blank là chỉ số cuối
 ///   OcrNormalize    "signed" (mặc định, (x/255-0.5)/0.5) hoặc "unit" (x/255)
 /// Kích thước/số kênh ảnh vào đọc từ chính model ([1, 1|3, H, W]); chiều rộng động thì tự tính theo tỉ lệ ảnh.
@@ -42,7 +42,7 @@ public sealed class OnnxPlateReader : IDisposable
     {
         try
         {
-            var charset = config["Anpr:OcrCharset"] ?? "0123456789ABCDEFGHKLMNPRSTUVXYZ";
+            var charset = config["Anpr:OcrCharset"] ?? "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
             var charsetFile = config["Anpr:OcrCharsetFile"];
             if (!string.IsNullOrWhiteSpace(charsetFile) && File.Exists(charsetFile))
                 charset = string.Concat(File.ReadAllLines(charsetFile).Select(l => l.Trim()).Where(l => l.Length > 0).Select(l => l[0]));
@@ -50,7 +50,26 @@ public sealed class OnnxPlateReader : IDisposable
             bool blankLast = config.GetValue("Anpr:OcrBlankLast", false);
             bool signed = !string.Equals(config["Anpr:OcrNormalize"], "unit", StringComparison.OrdinalIgnoreCase);
 
-            var r = new OnnxPlateReader(new InferenceSession(path), charset.ToUpperInvariant(), blankLast, signed);
+            var session = new InferenceSession(path);
+            charset = charset.ToUpperInvariant();
+
+            // Tu nhan bang ky tu theo so lop dau ra cua model: 37 lop = 36 ky tu (A-Z, 0-9), 32 lop = 31 ky tu cu (khong co I J O Q W).
+            // Nho vay doi model (cu <-> moi) khong bat buoc phai sua OcrCharset trong appsettings.json.
+            const string full = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", legacy = "0123456789ABCDEFGHKLMNPRSTUVXYZ";
+            int classes = 0;
+            var outMeta = session.OutputMetadata.Values.FirstOrDefault();
+            if (outMeta is not null && outMeta.Dimensions.Length > 0) classes = outMeta.Dimensions[^1];
+            if (classes > 0 && classes != charset.Length + 1)
+            {
+                var alt = new[] { full, legacy }.FirstOrDefault(c => c.Length + 1 == classes);
+                if (alt is not null)
+                {
+                    logger.LogInformation("Model OCR co {C} lop: dung bang {N} ky tu thay cho OcrCharset ({M} ky tu).", classes, alt.Length, charset.Length);
+                    charset = alt;
+                }
+            }
+
+            var r = new OnnxPlateReader(session, charset, blankLast, signed);
             logger.LogInformation("Da tai model OCR bien so (ONNX): {Path} (anh vao {C}x{H}x{W}, {N} ky tu)", path, r._channels, r._inH, r._inW, charset.Length);
             return r;
         }

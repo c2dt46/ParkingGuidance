@@ -17,7 +17,7 @@ Du lieu:
     => Mau that cang nhieu va cang da dang (nhieu bien KHAC NHAU, nhieu dieu kien sang/toi) thi ket qua cang sat thuc te. Chi 1 bien chup 50 lan KHONG thay duoc 50 bien khac nhau.
 
 Quy uoc PHAI khop OnnxPlateReader.cs / appsettings.json (muc Anpr): anh vao [1,1,48,256] xam, chuan hoa (x/255-0.5)/0.5, dong ngan hon 256 thi chen 0 ben phai;
-dau ra [1,64,32] (blank = chi so 0, ky tu thu i = chi so i+1), OcrCharset = "0123456789ABCDEFGHKLMNPRSTUVXYZ", OcrBlankLast = false.
+dau ra [1,64,37] (blank = chi so 0, ky tu thu i = chi so i+1), OcrCharset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", OcrBlankLast = false.
 
 Yeu cau: pip install torch opencv-python numpy pillow onnxruntime   (torch da co san neu ban da cai ultralytics cho train_chars.py)
 """
@@ -39,7 +39,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from synth_plates import find_fonts, make_plate  # noqa: E402
 
-CHARSET = "0123456789ABCDEFGHKLMNPRSTUVXYZ"     # PHAI trung Anpr:OcrCharset
+CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"   # PHAI trung Anpr:OcrCharset (36 ky tu: moi chu A-Z va so 0-9 => hoc duoc ca bien quan doi, ngoai giao, dac biet)
 H, W = 48, 256                                  # anh vao model (chieu cao co dinh, rong co dinh, chen 0 ben phai)
 STRIDE = 4                                      # model giam chieu rong 4 lan -> T = W / 4 = 64 buoc
 
@@ -51,9 +51,9 @@ def split_lines(img, text):
     if h < 8 or w < 8:
         return []
     if w / float(h) < 2.4:
-        n2 = 5 if len(text) >= 8 else 4
+        n2 = 5 if len(text) >= 8 else (4 if len(text) >= 6 else max(1, len(text) // 2))
         n1 = len(text) - n2
-        if n1 < 2 or n1 > 4:
+        if n1 < 1 or n2 < 1:
             return []
         half, ov = h // 2, max(1, h // 20)
         top = img[0:min(h, half + ov), :]
@@ -141,9 +141,9 @@ def load_real(corr_dir):
     plates, skipped = [], 0
     for e in index:
         sid = e.get("id", "")
-        text = re.sub(r"[^A-Z0-9]", "", (e.get("correct") or "").upper())
+        text = re.sub(r"[^A-Z0-9]", "", (e.get("correct") or "").upper().replace("Đ", "D"))
         p = os.path.join(corr_dir, sid + ".png")
-        if not sid or not text or any(c not in CHARSET for c in text) or not os.path.exists(p):
+        if not sid or len(text) < 3 or any(c not in CHARSET for c in text) or not os.path.exists(p):
             skipped += 1
             continue
         img = cv2.imdecode(np.fromfile(p, dtype=np.uint8), cv2.IMREAD_COLOR)
@@ -230,6 +230,28 @@ if torch is not None:
         return xs, ys, lens
 
 
+# --------------------------------------------------------------------------- trang thai cho ung dung (--status)
+INFO = {}
+_STATUS = {"path": None, "data": {"stage": "prepare", "stageLabel": "Chuẩn bị", "progress": 0, "message": "", "finished": False,
+                                    "error": None, "result": None, "startedAt": time.strftime("%Y-%m-%d %H:%M:%S")}}
+
+
+def status(**kw):
+    """Ghi file JSON trang thai (nguyen tu: ghi file tam roi doi ten) de tab Train trong ung dung hien tien trinh. Khong co --status thi bo qua."""
+    _STATUS["data"].update(kw)
+    path = _STATUS["path"]
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(_STATUS["data"], f, ensure_ascii=False)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
 def ctc_decode(logits):
     """Giai ma tham lam y het OnnxPlateReader.cs: argmax moi buoc, gop lap, bo blank (chi so 0). logits: [T, C]."""
     out, prev = [], -1
@@ -271,6 +293,8 @@ def export_onnx(model, path):
 
 
 def train(args, real_train, real_val, synth_train, synth_val):
+    if args.threads > 0:
+        torch.set_num_threads(args.threads)
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     print(f"[train] thiet bi: {device}")
     real_lines, synth_lines = flat_lines(real_train), flat_lines(synth_train)
@@ -306,7 +330,7 @@ def train(args, real_train, real_val, synth_train, synth_val):
             nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             opt.step()
             sched.step()
-            tot += float(loss) * xs.size(0)
+            tot += loss.item() * xs.size(0)
             n += xs.size(0)
         sp, sl, sn = eval_plates(fwd_np, synth_val)
         rp, rl, rn = eval_plates(fwd_np, real_val)
@@ -315,16 +339,82 @@ def train(args, real_train, real_val, synth_train, synth_val):
         if score > best:
             best, mark = score, "  <- tot nhat"
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            torch.save(best_state, os.path.join(args.out, "best.pt"))          # co the xuat ONNX som bang --export-from best.pt
+        status(stage="train", stageLabel="Đang huấn luyện", progress=5 + int(90 * ep / args.epochs), epoch=ep, epochs=args.epochs,
+               loss=round(tot / max(1, n), 4), synthAcc=round(sp, 4), realAcc=round(rp, 4) if rn else None, realPlates=rn,
+               message=f"epoch {ep}/{args.epochs} — loss {tot / max(1, n):.2f}, giả lập {100 * sp:.0f}%" + (f", thật {100 * rp:.0f}% ({rn} biển)" if rn else ""))
         real_txt = f" | that {100 * rp:5.1f}% ({rn} bien)" if rn else " | that: chua co tap kiem tra"
         print(f"[epoch {ep:3d}/{args.epochs}] loss {tot / max(1, n):.3f} | gia lap {100 * sp:5.1f}%{real_txt} | {time.time() - t0:.0f}s{mark}", flush=True)
     model.load_state_dict(best_state)
     return model, fwd_np
 
 
-def main():
+def finish(args, model, fwd_np, synth_val, real_val):
+    status(stage="export", stageLabel="Xuất model", progress=96, message="Đang xuất plate_ocr.onnx và kiểm tra lại…")
+    onnx_path = os.path.join(args.out, "plate_ocr.onnx")
+    export_onnx(copy.deepcopy(model), onnx_path)      # ban sao: export_onnx dua model ve CPU, khong lam hong fwd_np khi train bang GPU
+    with open(os.path.join(args.out, "plate_ocr.charset.txt"), "w", encoding="utf-8") as f:
+        f.write("\n".join(CHARSET) + "\n")
+    print(f"[xuat] da tao: {os.path.abspath(onnx_path)}")
+
+    sp = rp = 0.0
+    sn = rn = 0
+    try:
+        import onnxruntime as ort
+        sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
+        meta = sess.get_inputs()[0]
+        print(f"[kiem tra ONNX] dau vao {meta.name} {meta.shape}, dau ra {sess.get_outputs()[0].shape}")
+        run = lambda x: sess.run(None, {meta.name: x.astype(np.float32)})[0]
+        sp, sl, sn = eval_plates(run, synth_val)
+        rp, rl, rn = eval_plates(run, real_val)
+        print(f"[kiem tra ONNX] doc DUNG TRON bien: gia lap {100 * sp:.1f}% ({sn} bien)" + (f", that {100 * rp:.1f}% ({rn} bien)" if rn else ""))
+        x = np.stack([line_to_array(g) for g, _ in flat_lines(synth_val)[:8]])[:, None]
+        diff = float(np.abs(run(x) - fwd_np(x)).max())
+        print(f"[kiem tra ONNX] chenh lech so voi PyTorch: {diff:.2e}" + ("  (OK)" if diff < 1e-3 else "  <-- LON BAT THUONG, khong nen deploy"))
+        if diff >= 1e-3:
+            raise RuntimeError("Model ONNX xuất ra khác PyTorch quá nhiều — không dùng.")
+    except ImportError:
+        print("[kiem tra ONNX] bo qua (chua cai onnxruntime). Cai: pip install onnxruntime")
+
+    # Khuyen nghi cai: chi khi doc DUNG TRON it nhat 80% tren it nhat 5 bien THAT (khac nhau) chua tung dung de train
+    if rn >= 5 and rp >= 0.8:
+        recommend, reason = True, f"Đọc đúng {100 * rp:.0f}% trên {rn} biển thật chưa từng học — đủ tin cậy."
+    elif rn >= 5:
+        recommend, reason = False, f"Chỉ đọc đúng {100 * rp:.0f}% trên {rn} biển thật chưa từng học (cần ≥ 80%). Hãy thêm nhiều biển KHÁC NHAU rồi train lại."
+    else:
+        recommend, reason = False, "Chưa có đủ biển thật để kiểm tra (cần ≥ 5 biển khác nhau ngoài tập học). Có thể cài thử rồi kiểm tra ở tab Mô phỏng."
+    status(stage="done", stageLabel="Hoàn tất", progress=100, finished=True, error=None, message=reason,
+           result={"candidate": os.path.abspath(onnx_path), "recommendInstall": recommend, "reason": reason,
+                   "synthAcc": round(sp, 4), "realAcc": round(rp, 4) if rn else None, "realPlates": rn, "synthPlates": sn,
+                   "uniquePlates": INFO.get("uniquePlates"), "samples": INFO.get("samples")})
+
+    if args.deploy and not args.smoke:
+        os.makedirs(os.path.dirname(os.path.abspath(args.deploy)), exist_ok=True)
+        if os.path.exists(args.deploy):
+            shutil.copy2(args.deploy, args.deploy + time.strftime(".bak-%Y%m%d-%H%M%S"))
+        shutil.copy2(onnx_path, args.deploy)
+        print(f"[deploy] da chep vao {args.deploy}. KHOI DONG LAI ung dung de nap model (bo doc OCR chi nap luc khoi dong).")
+    elif not args.smoke:
+        print("[deploy] CHUA chep vao ung dung. Chep file tren vao Models\\plate_ocr.onnx cua ung dung (hoac chay lai voi --deploy), roi khoi dong lai ung dung.")
+    elif args.smoke:
+        print("[smoke] Moi truong OK (xuat + chay duoc ONNX). Model nay moi train 2 epoch nen CHUA dung duoc — chay lai khong co --smoke.")
+
+
+def default_corrections():
+    base = os.environ.get("LOCALAPPDATA")
+    if base:
+        p = os.path.join(base, "ParkingGuidance", "data", "simulation", "corrections")
+        if os.path.exists(os.path.join(p, "index.json")):
+            return p
+    return None
+
+
+def _main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--corrections", default=None, help="thu muc <DataDirectory>/simulation/corrections (index.json + <id>.png). Bo trong = chi dung du lieu gia lap")
-    ap.add_argument("--out", default="plate_ocr_run", help="thu muc lam viec/ket qua")
+    ap.add_argument("--corrections", default=None, help="thu muc <DataDirectory>/simulation/corrections (index.json + <id>.png). Bo trong = tu tim %%LOCALAPPDATA%%/ParkingGuidance/data/simulation/corrections")
+    ap.add_argument("--synth-only", action="store_true", help="chi dung du lieu gia lap (bo qua mau that)")
+    ap.add_argument("--export-from", default=None, help="xuat ONNX tu checkpoint best.pt (khi muon dung train som, khong cho het cac epoch)")
+    ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "plate_ocr_run"), help="thu muc lam viec/ket qua (mac dinh: tools/plate_ocr_run, du chay tu dau)")
     ap.add_argument("--deploy", default="", help="neu co: chep plate_ocr.onnx vao day (vd src/ParkingGuidance.Web/Models/plate_ocr.onnx)")
     ap.add_argument("--fonts", default=None, help="thu muc chua them font .ttf cho du lieu gia lap")
     ap.add_argument("--epochs", type=int, default=25)
@@ -333,12 +423,16 @@ def main():
     ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--workers", type=int, default=0)
+    ap.add_argument("--threads", type=int, default=0, help="so luong CPU toi da cho PyTorch (0 = mac dinh)")
+    ap.add_argument("--status", default=None, help="file JSON ghi tien trinh (ung dung dung de hien thi tab Train)")
     ap.add_argument("--device", default=None)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--smoke", action="store_true", help="chay nhanh 2 epoch voi du lieu gia lap nho de kiem tra moi truong + xuat ONNX")
     ap.add_argument("--dry-run", action="store_true", help="chi dung du lieu, in thong ke, luu anh xem thu (khong can PyTorch)")
     args = ap.parse_args()
 
+    _STATUS["path"] = args.status
+    status(stage="prepare", stageLabel="Chuẩn bị dữ liệu", progress=1, message="Đang đọc mẫu thật và sinh dữ liệu giả lập…")
     if args.smoke:
         args.synth, args.epochs, args.batch = 300, 2, 32
     random.seed(args.seed); np.random.seed(args.seed)
@@ -347,11 +441,25 @@ def main():
     fonts = find_fonts(args.fonts)
     print(f"[du lieu] font cho du lieu gia lap: {len(fonts)} ({', '.join(os.path.basename(f) for f in fonts[:4])}...)" if fonts else
           "[du lieu] CANH BAO: khong tim thay font .ttf nao, dung font mac dinh cua Pillow -> kem giong bien that. Dung --fonts <thu muc font>")
+    if args.export_from:
+        model = CRNN(len(CHARSET) + 1)
+        model.load_state_dict(torch.load(args.export_from, map_location="cpu"))
+        model.eval()
+        def fwd_np(x):
+            with torch.no_grad():
+                return model(torch.from_numpy(x)).numpy()
+        finish(args, model, fwd_np, synth_plates(300, fonts, seed0=9000000), [])
+        return
     real_train, real_val = [], []
-    if args.corrections and not args.smoke:
-        plates, skipped = load_real(args.corrections)
+    corr = None if (args.smoke or args.synth_only) else (args.corrections or default_corrections())
+    if corr is None and not args.smoke:
+        print("[du lieu] KHONG co du lieu that (khong tim thay corrections) -> chi train bang du lieu gia lap. Truyen --corrections <thu muc> de dung mau that.")
+    if corr:
+        print(f"[du lieu] doc mau that tu: {corr}")
+        plates, skipped = load_real(corr)
         real_train, real_val = split_real(plates)
         uniq = len({p["text"] for p in plates})
+        INFO.update(uniquePlates=uniq, samples=len(plates))
         print(f"[du lieu] mau that: {len(plates)} bien ({uniq} chuoi KHAC NHAU), bo qua {skipped}; train {len(real_train)}, kiem tra {len(real_val)}")
         if uniq < 30:
             print(f"[du lieu] LUU Y: chi {uniq} bien khac nhau — model se phu thuoc nhieu vao du lieu gia lap; hay thu them nhieu bien KHAC NHAU de on dinh hon.")
@@ -359,6 +467,7 @@ def main():
     synth_train = synth_plates(args.synth, fonts, seed0=100000)
     synth_val = synth_plates(60 if args.smoke else 300, fonts, seed0=9000000)
     print(f"[du lieu] gia lap: {len(synth_train)} bien train + {len(synth_val)} bien kiem tra ({time.time() - t0:.0f}s)")
+    status(stage="prepare", progress=5, message="Đã chuẩn bị xong dữ liệu, bắt đầu huấn luyện…")
 
     if args.dry_run or torch is None:
         if torch is None and not args.dry_run:
@@ -382,35 +491,19 @@ def main():
 
     model, fwd_np = train(args, real_train, real_val, synth_train, synth_val)
 
-    onnx_path = os.path.join(args.out, "plate_ocr.onnx")
-    export_onnx(copy.deepcopy(model), onnx_path)      # ban sao: export_onnx dua model ve CPU, khong lam hong fwd_np khi train bang GPU
-    with open(os.path.join(args.out, "plate_ocr.charset.txt"), "w", encoding="utf-8") as f:
-        f.write("\n".join(CHARSET) + "\n")
-    print(f"[xuat] {onnx_path}")
+    finish(args, model, fwd_np, synth_val, real_val)
 
+
+def main():
     try:
-        import onnxruntime as ort
-        sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
-        meta = sess.get_inputs()[0]
-        print(f"[kiem tra ONNX] dau vao {meta.name} {meta.shape}, dau ra {sess.get_outputs()[0].shape}")
-        run = lambda x: sess.run(None, {meta.name: x.astype(np.float32)})[0]
-        sp, sl, sn = eval_plates(run, synth_val)
-        rp, rl, rn = eval_plates(run, real_val)
-        print(f"[kiem tra ONNX] doc DUNG TRON bien: gia lap {100 * sp:.1f}% ({sn} bien)" + (f", that {100 * rp:.1f}% ({rn} bien)" if rn else ""))
-        x = np.stack([line_to_array(g) for g, _ in flat_lines(synth_val)[:8]])[:, None]
-        diff = float(np.abs(run(x) - fwd_np(x)).max())
-        print(f"[kiem tra ONNX] chenh lech so voi PyTorch: {diff:.2e}" + ("  (OK)" if diff < 1e-3 else "  <-- LON BAT THUONG, khong nen deploy"))
-    except ImportError:
-        print("[kiem tra ONNX] bo qua (chua cai onnxruntime). Cai: pip install onnxruntime")
-
-    if args.deploy and not args.smoke:
-        os.makedirs(os.path.dirname(os.path.abspath(args.deploy)), exist_ok=True)
-        if os.path.exists(args.deploy):
-            shutil.copy2(args.deploy, args.deploy + time.strftime(".bak-%Y%m%d-%H%M%S"))
-        shutil.copy2(onnx_path, args.deploy)
-        print(f"[deploy] da chep vao {args.deploy}. KHOI DONG LAI ung dung de nap model (bo doc OCR chi nap luc khoi dong).")
-    elif args.smoke:
-        print("[smoke] Moi truong OK (xuat + chay duoc ONNX). Model nay moi train 2 epoch nen CHUA dung duoc — chay lai khong co --smoke.")
+        _main()
+    except SystemExit as e:
+        if e.code not in (None, 0):          # thoat co thong bao loi (vd: thieu PyTorch, khong thay thu muc corrections)
+            status(stage="error", stageLabel="Lỗi", finished=True, error=str(e.code))
+        raise
+    except BaseException as e:              # ghi loi vao file trang thai de ung dung hien thi, roi thoat voi ma loi
+        status(stage="error", stageLabel="Lỗi", finished=True, error=f"{type(e).__name__}: {e}")
+        raise
 
 
 if __name__ == "__main__":

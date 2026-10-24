@@ -1,4 +1,5 @@
 using System.Text;
+using ParkingGuidance.Web.Services.Anpr;
 
 namespace ParkingGuidance.Web.Services.Parking;
 
@@ -82,8 +83,14 @@ public static class PlateConsensus
             }
 
             var key = new string(chars);
-            if (key != leader.Key && StructureOk(leader.Pretty, key))
-                return new PlateConsensusResult(ApplyToPretty(leader.Pretty, key), key, cluster.Sum(r => r.Weight), cluster.Count);
+            if (key != leader.Key)
+            {
+                // Chuoi moi tao ra tu viec bo phieu tung vi tri: cho di qua ham kiem tra/chuan hoa cua nguoi dung nhu moi ket qua doc khac;
+                // bi tu choi (null / "") thi giu nguyen ket qua dan dau.
+                var merged = PlateNormalizer.Apply(ApplyToPretty(leader.Pretty, key));
+                if (merged is not null)
+                    return new PlateConsensusResult(merged, KeyOf(merged), cluster.Sum(r => r.Weight), cluster.Count);
+            }
         }
 
         return new PlateConsensusResult(leader.Pretty, leader.Key, leader.Score, leader.Count);

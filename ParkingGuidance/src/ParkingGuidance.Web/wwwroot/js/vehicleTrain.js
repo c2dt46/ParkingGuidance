@@ -25,6 +25,13 @@
     let lastRunning = false;
 
     const canvas = $('vtCanvas'), ctx = canvas.getContext('2d');
+
+    // ---- zoom bang chuot PHAI (xem trainZoom.js): chuot phai keo khung = phong to; chuot trai khoanh khung nhu binh thuong ----
+    const view = PgZoom.attach(canvas, {
+        size: () => (img && cur ? { w: cur.width, h: cur.height } : null),
+        onChange: v => { scale = v.scale(); redraw(); },
+        bar: {},
+    });
     const tabActive = () => !!window.pgTrainNav && window.pgTrainNav.isActive('vehicle');   // tab lon Train dang mo VA tab con "Train xe" dang hien (xem trainHub.js)
 
     async function jfetch(url, opts) {
@@ -140,24 +147,24 @@
         scale = Math.min(maxW / cur.width, maxH / cur.height);
         canvas.width = Math.round(cur.width * scale);
         canvas.height = Math.round(cur.height * scale);
+        view.setBase(scale);
     }
     window.addEventListener('resize', () => { if (img && tabActive()) { layout(); redraw(); } });
 
-    const toImg = e => {
-        const r = canvas.getBoundingClientRect();
-        return { x: (e.clientX - r.left) * (cur.width / r.width), y: (e.clientY - r.top) * (cur.height / r.height) };
-    };
+    const toImg = e => view.toImg(e);                       // da tinh ca vung dang phong to
     const clampX = x => Math.max(0, Math.min(cur.width, x));
     const clampY = y => Math.max(0, Math.min(cur.height, y));
 
     function redraw() {
         if (!img) return;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const zoomed = view.z > 1.001, ox = zoomed ? view.vx : 0, oy = zoomed ? view.vy : 0;   // goc tren-trai vung dang xem (px anh)
+        if (zoomed) ctx.drawImage(img, ox, oy, canvas.width / scale, canvas.height / scale, 0, 0, canvas.width, canvas.height);
+        else ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         const all = drag && drag.mode === 'draw' && drag.box ? [...boxes, drag.box] : boxes;
         all.forEach((b, i) => {
             const c = COLORS[b.cls] || '#fff';
-            const x = Math.min(b.x1, b.x2) * scale, y = Math.min(b.y1, b.y2) * scale;
+            const x = (Math.min(b.x1, b.x2) - ox) * scale, y = (Math.min(b.y1, b.y2) - oy) * scale;
             const w = Math.abs(b.x2 - b.x1) * scale, h = Math.abs(b.y2 - b.y1) * scale;
             const sel = i === selected;
             ctx.lineWidth = sel ? 3 : 2; ctx.strokeStyle = c; ctx.strokeRect(x, y, w, h);
@@ -168,6 +175,7 @@
             ctx.fillStyle = '#000'; ctx.fillText(label, x + 4, Math.max(12, y - 4));
             if (sel) [[x, y], [x + w, y], [x, y + h], [x + w, y + h]].forEach(([hx, hy]) => { ctx.fillStyle = '#fff'; ctx.fillRect(hx - 4, hy - 4, 8, 8); ctx.strokeRect(hx - 4, hy - 4, 8, 8); });
         });
+        view.drawOverlay(ctx);
         $('vtBoxInfo').textContent = boxes.length
             ? `${boxes.length} khung: ` + ['car', 'motorcycle', 'bus', 'truck'].map(k => [k, boxes.filter(b => b.cls === k).length]).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(' · ')
             : 'Chưa có khung nào. Nếu ảnh thật sự không có xe, bấm “✓ Lưu & duyệt” để dạy model đây là ảnh không có xe.';

@@ -82,15 +82,15 @@ public sealed class PlateTextReader
                     var (raw, conf, lineLengths) = OcrText(img, twoLines);
                     if (raw is null) continue;
 
-                    var (pretty, isValid) = VietnamPlateFormatter.Normalize(raw, twoLines ? lineLengths : null);
-                    if (!isValid) continue;
+                    var pretty = PlateNormalizer.Apply(raw, twoLines ? lineLengths : null);   // ham cua nguoi dung: null / "" = khong nhan dien duoc
+                    if (pretty is null) continue;
 
-                    var key = Regex.Replace(pretty, "[^A-Z0-9]", "");
+                    var key = Regex.Replace(pretty.ToUpperInvariant(), "[^A-Z0-9]", "");
                     if (!votes.TryGetValue(key, out var vote))
                         votes[key] = vote = new PlateVote { Pretty = pretty };
 
                     // Ma tinh la (khong nam trong danh sach thuong gap) thuong la doc sai 1-2 ky tu dau: giam trong so, khong loai han
-                    double weight = (1.0 + conf) * (VietnamPlateFormatter.IsKnownProvinceCode(pretty) ? 1.0 : 0.4);
+                    double weight = (1.0 + conf) * PlateNormalizer.Weight(pretty);
                     vote.Score += weight;
                     vote.BestConfidence = Math.Max(vote.BestConfidence, conf);
                 }

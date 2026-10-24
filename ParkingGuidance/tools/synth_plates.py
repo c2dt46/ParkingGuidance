@@ -9,6 +9,8 @@ import argparse
 import glob
 import os
 import random
+import re
+import string
 
 import cv2
 import numpy as np
@@ -17,7 +19,8 @@ from PIL import Image, ImageDraw, ImageFont
 # Ma tinh/thanh pho dang su dung tren bien so Viet Nam (dung de sinh bien hop le, khong sinh ma khong ton tai)
 PROVINCES = ([11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 43, 47, 48, 49]
              + list(range(50, 91)) + [92, 93, 94, 95, 97, 98, 99])
-LETTERS = "ABCDEFGHKLMNPRSTUVXYZ"      # 21 chu cai bien Viet Nam dung (khong co I, J, O, Q, W)
+LETTERS = "ABCDEFGHKLMNPRSTUVXYZ"      # 21 chu cai seri bien o to / xe may thuong gap
+ALL_LETTERS = string.ascii_uppercase  # bien quan doi, cong an, ngoai giao... co the dung ca I, J, O, Q, W
 
 _WIN_FONTS = ["ARIALNB.TTF", "arialbd.ttf", "calibrib.ttf", "segoeuib.ttf", "tahomabd.ttf", "verdanab.ttf", "trebucbd.ttf", "ARLRDBD.TTF"]
 _LINUX_FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf", "/usr/share/fonts/truetype/liberation/LiberationSansNarrow-Bold.ttf",
@@ -43,8 +46,24 @@ def find_fonts(extra_dir=None):
     return found
 
 
+def rand_special(rng):
+    """Bien KHONG theo dang thuong (quan doi, cong an, ngoai giao, xe dac biet...). Chua co quy cach chinh xac nen sinh nhieu kieu ngau nhien."""
+    L = lambda n: "".join(rng.choice(ALL_LETTERS) for _ in range(n))
+    D = lambda n: "".join(rng.choice("0123456789") for _ in range(n))
+    kind = rng.randrange(7)
+    if kind == 0: return L(2) + D(4)                       # kieu AA1234
+    if kind == 1: return L(2) + D(5)
+    if kind == 2: return D(2) + L(2) + D(3)                # kieu 80NG123
+    if kind == 3: return D(2) + L(2) + D(4)
+    if kind == 4: return L(1) + D(rng.randint(4, 5))
+    if kind == 5: return D(2) + L(1) + D(rng.randint(4, 5))
+    return "".join(rng.choice(ALL_LETTERS + "0123456789") for _ in range(rng.randint(3, 9)))
+
+
 def rand_text(rng):
-    """Chuoi bien (khong dau - cham): 8 ky tu (NNLddddd) la chinh; co them 9 ky tu (series chu+so / 2 chu) va bien cu 7 ky tu."""
+    """Chuoi bien (khong dau - cham): 8 ky tu (NNLddddd) la chinh; co them 9 ky tu (series chu+so / 2 chu), bien cu 7 ky tu, va ~15% bien khong theo dang thuong."""
+    if rng.random() < 0.15:
+        return rand_special(rng)
     pv = "%02d" % rng.choice(PROVINCES)
     r = rng.random()
     if r < 0.66:   series = rng.choice(LETTERS)
@@ -57,8 +76,12 @@ def rand_text(rng):
 
 def _lines(text, two, rng):
     """Chia thanh cac dong hien thi, them dau '-' va '.' nhu bien that (chi de VE; nhan chi gom chu va so)."""
+    if len(text) < 6:
+        return [text]
     n = 5 if len(text) >= 8 else 4
     head, serial = text[:-n], text[-n:]
+    if not re.match(r"^\d{2}[A-Z][A-Z0-9]?\d{4,5}$", text):      # khong phai dang o to / xe may thuong: khong them dau - va cham
+        return [head, serial] if two else [text]
     dot = (serial[:3] + "." + serial[3:]) if n == 5 else serial
     if two:
         return [(head[:2] + "-" + head[2:]) if rng.random() < 0.7 else head, dot]
@@ -70,7 +93,7 @@ def make_plate(seed, fonts, text=None):
     rng = random.Random(seed)
     rs = np.random.RandomState(seed % (2 ** 31))
     text = text or rand_text(rng)
-    two = rng.random() < 0.45
+    two = rng.random() < 0.45 and len(text) >= 6
     bg, fg = STYLES[rng.choices(list(STYLES), STYLE_WEIGHTS)[0]]
     W, H = (rng.randint(200, 240), rng.randint(165, 200)) if two else (rng.randint(380, 520), rng.randint(95, 125))
     S = 3
