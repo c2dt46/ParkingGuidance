@@ -36,6 +36,23 @@
         onChange: v => { scale = v.scale(); redraw(); },
         bar: { quad: { get: () => quadMode, set: on => { quadMode = on; pts = []; try { localStorage.setItem(QUAD_KEY, on ? '1' : '0'); } catch { /* bo qua */ } } } },
     });
+
+    // ---- 2 nut Anh truoc / Anh sau o hai ben anh (phim ← → hoac PageUp / PageDown) ----
+    const nav = PgZoom.navButtons($('ptStage'), { onPrev: () => stepSample(-1), onNext: () => stepSample(1), prevTitle: 'Ảnh trước (← hoặc PageUp)', nextTitle: 'Ảnh sau (→ hoặc PageDown)' });
+    function navPos() {
+        let list = visible(), i = cur ? list.findIndex(s => s.id === cur.id) : -1;
+        if (i < 0 && cur) { list = samples; i = list.findIndex(s => s.id === cur.id); }      // anh vua duyet xong roi khoi bo loc "chua duyet": van di chuyen theo toan bo danh sach
+        return { list, i };
+    }
+    function stepSample(d) {
+        const { list, i } = navPos();
+        const t = i >= 0 ? list[i + d] : null;
+        if (t) openSample(t.id);                              // openSample da hoi truoc khi bo thay doi chua luu
+    }
+    function updateNav() {
+        const { list, i } = navPos();
+        nav.update(i > 0, i >= 0 && i < list.length - 1, i >= 0 ? `${i + 1} / ${list.length}` : '');
+    }
     const tabActive = () => !!window.pgTrainNav && window.pgTrainNav.isActive('plate');   // tab lon Train dang mo VA tab con "Train bien so" dang hien (xem trainHub.js)
 
     async function jfetch(url, opts) {
@@ -71,6 +88,7 @@
     };
 
     function renderGrid() {
+        updateNav();
         const list = visible();
         const box = $('ptGrid');
         if (!samples.length) { box.innerHTML = '<div class="hint small" style="grid-column:1/-1">Chưa có ảnh nào — bấm “Thêm ảnh”.</div>'; return; }
@@ -298,7 +316,9 @@
         if (!tabActive() || !cur) return;
         const tag = (e.target.tagName || '').toLowerCase();
         if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
-        if (e.key === 'Escape' && pts.length) { pts = []; say('ptEditMsg', ''); redraw(); }
+        if (e.key === 'ArrowLeft' || e.key === 'PageUp') { stepSample(-1); e.preventDefault(); }
+        else if (e.key === 'ArrowRight' || e.key === 'PageDown') { stepSample(1); e.preventDefault(); }
+        else if (e.key === 'Escape' && pts.length) { pts = []; say('ptEditMsg', ''); redraw(); }
         else if (e.key === 'Backspace' && pts.length) { pts.pop(); redraw(); e.preventDefault(); }
         else if (e.key === 'Delete' || e.key === 'Backspace') { delSelected(); e.preventDefault(); }
         else if (e.key === 'Enter') { saveCurrent(true); e.preventDefault(); }

@@ -172,12 +172,15 @@
         }
         return pending[0];
     }
+    // 2 nut lon o HAI BEN anh (cung chuc nang voi nut "Truoc / Sau" tren thanh cong cu)
+    const sideNav = PgZoom.navButtons($('trStage'), { onPrev: () => $('trPrevBtn').click(), onNext: () => $('trNextBtn').click(), prevTitle: 'Ảnh trước (←)', nextTitle: 'Ảnh sau (→)' });
     function updateNav() {
         const has = !!cur;
         const list = filteredInbox();
         const i = has ? list.findIndex(x => x.id === cur.item.id) : -1;
         $('trPrevBtn').disabled = !has || i <= 0;
         $('trNextBtn').disabled = !has || i < 0 || i >= list.length - 1;
+        sideNav.update(!$('trPrevBtn').disabled, !$('trNextBtn').disabled, has && i >= 0 ? `${i + 1} / ${list.length}` : '');
         ['trDetectBtn', 'trCutBtn', 'trFitBtn', 'trZoomOutBtn', 'trZoomInBtn', 'trDoneBtn', 'trDropBtn'].forEach(id => { $(id).disabled = !has; });
         $('trImgInfo').textContent = has ? `— ${cur.item.imageName}${i >= 0 ? ` (${i + 1}/${list.length})` : ''}` : '';
     }

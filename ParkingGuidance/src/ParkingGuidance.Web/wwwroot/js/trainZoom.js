@@ -1,6 +1,7 @@
 /* trainZoom.js — phóng to bằng CHUỘT PHẢI cho các canvas khoanh vùng ở tab Train (Train biển, Train xe).
-   • Giữ chuột PHẢI, kéo một khung → phóng to đúng vùng đó (làm lại nhiều lần để phóng sâu hơn).
-   • Bấm chuột phải (không kéo) → về toàn ảnh. Giữ chuột GIỮA kéo → di chuyển ảnh khi đang phóng.
+   • LĂN CHUỘT → phóng to / thu nhỏ quanh vị trí con trỏ (giống tab Train ký tự).
+   • Giữ chuột PHẢI, kéo một khung → phóng to đúng vùng đó. Bấm chuột phải (không kéo) → về toàn ảnh.
+   • Giữ phím SPACE rồi kéo chuột trái, hoặc giữ chuột GIỮA kéo → di chuyển ảnh khi đang phóng.
    • Chuột TRÁI vẫn khoanh vùng như bình thường (trên ảnh đã phóng).
    Cách dùng (xem plateTrain.js):
      const view = PgZoom.attach(canvas, { size: () => ({ w, h }) | null, onChange: v => {...vẽ lại...}, bar: { quad: { get, set } } });
@@ -46,6 +47,15 @@
             v.vy = (y0 + y1) / 2 - canvas.height / s / 2;
             sync();
         };
+        // Phong/thu quanh diem (cx, cy) tinh theo pixel canvas: diem anh duoi con tro giu nguyen vi tri tren man hinh
+        v.zoomAt = (cx, cy, f) => {
+            if (!size()) return;
+            const s0 = v.scale(), ix = v.vx + cx / s0, iy = v.vy + cy / s0;
+            const s1 = clamp(s0 * f, v.base, v.base * MAX_Z);
+            v.z = s1 / v.base;
+            v.vx = ix - cx / s1; v.vy = iy - cy / s1;
+            sync();
+        };
         v.drawOverlay = ctx => {
             if (!v.sel) return;
             const a = v.sel, x = Math.min(a.x0, a.x1), y = Math.min(a.y0, a.y1), w = Math.abs(a.x1 - a.x0), h = Math.abs(a.y1 - a.y0);
@@ -55,12 +65,35 @@
             ctx.restore();
         };
 
+        // ------------------------------------------------------------------ con lan: zoom quanh con tro
+        canvas.addEventListener('wheel', e => {
+            if (!size() || e.ctrlKey) return;                // Ctrl + lan: de trinh duyet tu phong/thu trang
+            e.preventDefault();
+            const p = v.pt(e);
+            v.zoomAt(p.x, p.y, clamp(Math.pow(1.0015, -e.deltaY * (e.deltaMode === 1 ? 33 : 1)), 0.8, 1.25));   // ~1.16 moi nac cua chuot thuong; muot voi touchpad
+        }, { passive: false });
+
+        // ------------------------------------------------------------------ phim Space + keo chuot trai = di chuyen anh
+        let spaceDown = false, hover = false;
+        const typing = t => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+        canvas.addEventListener('mouseenter', () => { hover = true; });
+        canvas.addEventListener('mouseleave', () => { hover = false; });
+        window.addEventListener('keydown', e => {
+            if (e.code !== 'Space' || typing(e.target) || !size()) return;
+            spaceDown = true;
+            if (hover) { e.preventDefault(); canvas.style.cursor = 'grab'; }     // khong de Space cuon trang khi dang tro vao anh
+        });
+        window.addEventListener('keyup', e => { if (e.code === 'Space') { spaceDown = false; if (!v.pan) canvas.style.cursor = ''; } });
+        window.addEventListener('blur', () => { spaceDown = false; });
+
         // ------------------------------------------------------------------ chuot phai / giua
         const block = e => e.preventDefault();               // chan menu chuot phai ke ca khi tha chuot ngoai canvas
         canvas.addEventListener('contextmenu', e => e.preventDefault());
         canvas.addEventListener('mousedown', e => {
-            if (!size() || (e.button !== 2 && e.button !== 1)) return;
+            const spacePan = e.button === 0 && spaceDown;
+            if (!size() || (e.button !== 2 && e.button !== 1 && !spacePan)) return;
             e.preventDefault();
+            if (spacePan) e.stopImmediatePropagation();      // Space + chuot trai la di chuyen anh, khong phai ve khung
             const p = v.pt(e);
             if (e.button === 2) v.sel = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
             else { v.pan = { x: p.x, y: p.y, vx: v.vx, vy: v.vy }; canvas.style.cursor = 'grabbing'; }
@@ -85,7 +118,7 @@
             window.removeEventListener('mouseup', onUp);
             setTimeout(() => window.removeEventListener('contextmenu', block, true), 500);
             const a = v.sel;
-            v.sel = null; v.pan = null; canvas.style.cursor = '';
+            v.sel = null; v.pan = null; canvas.style.cursor = spaceDown && hover ? 'grab' : '';
             if (!a || !size()) { redraw(); return; }
             if (Math.abs(a.x1 - a.x0) < MIN_DRAG && Math.abs(a.y1 - a.y0) < MIN_DRAG) { v.reset(); return; }   // bam chuot phai (khong keo) = ve toan anh
             const s = v.scale();
@@ -97,7 +130,7 @@
             if (!v.barEl) return;
             const lbl = v.barEl.querySelector('.pg-zoom-lbl');
             lbl.textContent = v.z > 1.01 ? `🔍 đang phóng ×${v.z.toFixed(1)}` : '';
-            v.barEl.querySelector('.pg-zoom-fit').style.display = v.z > 1.01 ? '' : 'none';
+            v.barEl.querySelector('.pg-zoom-fit').style.visibility = v.z > 1.01 ? 'visible' : 'hidden';   // giu cho: thanh khong doi chieu cao -> anh khong bi day xuong khi bat dau phong
             const q = o.bar && o.bar.quad;
             if (q) v.barEl.querySelectorAll('[data-q]').forEach(b => {
                 const on = (b.dataset.q === '1') === !!q.get();
@@ -112,10 +145,10 @@
             el.innerHTML =
                 (q ? '<span><button type="button" class="btn secondary btn-sm" data-q="1" title="Bấm chuột trái vào 4 GÓC của biển số → khung ôm sát đúng biển">📍 Chọn 4 điểm</button> ' +
                      '<button type="button" class="btn secondary btn-sm" data-q="0" title="Kéo một khung chữ nhật như trước">▭ Kéo khung</button></span>' : '') +
-                '<span style="opacity:.85;">🔍 <b>Chuột phải</b> kéo một khung = phóng to vùng đó · bấm chuột phải = về toàn ảnh · giữ chuột giữa kéo = di chuyển' +
+                '<span style="opacity:.85;">🔍 <b>Lăn chuột</b> = zoom tại con trỏ · <b>chuột phải</b> kéo khung = phóng vùng đó, bấm chuột phải = về toàn ảnh · <b>Space</b> + kéo (hoặc chuột giữa) = di chuyển ảnh' +
                 (q ? ' · <span class="pg-q-hint"></span>' : '') + '</span>' +
-                '<span class="pg-zoom-lbl" style="font-weight:600;"></span>' +
-                '<button type="button" class="btn secondary btn-sm pg-zoom-fit" style="display:none;">⛶ Vừa khung</button>';
+                '<span class="pg-zoom-lbl" style="font-weight:600;display:inline-block;min-width:150px;"></span>' +
+                '<button type="button" class="btn secondary btn-sm pg-zoom-fit" style="visibility:hidden;">⛶ Vừa khung</button>';
             canvas.parentElement.insertAdjacentElement('beforebegin', el);
             el.querySelector('.pg-zoom-fit').addEventListener('click', () => v.reset());
             if (q) el.querySelectorAll('[data-q]').forEach(b => b.addEventListener('click', () => { q.set(b.dataset.q === '1'); updateBar(); redraw(); }));
@@ -137,5 +170,37 @@
         return new Set(out).size === 4 ? out : pts.slice();   // diem trung / thang hang: giu thu tu bam
     }
 
-    window.PgZoom = { attach, orderQuad };
+    // Hai nut lon "Anh truoc" / "Anh sau" nam o HAI BEN anh (giua chieu cao) + nhan "3 / 15" o day anh.
+    // stage: phan tu chua canvas. o = { onPrev, onNext, prevTitle, nextTitle }. Tra ve { update(coAnhTruoc, coAnhSau, nhan) }.
+    function navButtons(stage, o) {
+        if (getComputedStyle(stage).position === 'static') stage.style.position = 'relative';
+        const base = 'position:absolute;top:50%;transform:translateY(-50%);z-index:6;width:40px;height:84px;border:0;border-radius:10px;' +
+            'background:rgba(15,23,42,.55);color:#fff;font-size:34px;line-height:1;cursor:pointer;padding:0;transition:opacity .15s,background .15s;';
+        const mk = (side, text, title, fn) => {
+            const b = document.createElement('button');
+            b.type = 'button'; b.className = 'pg-nav pg-nav-' + side; b.textContent = text; b.title = title;
+            b.style.cssText = base + side + ':6px;opacity:.7;';
+            b.addEventListener('mouseenter', () => { if (!b.disabled) { b.style.opacity = '1'; b.style.background = 'rgba(37,99,235,.85)'; } });
+            b.addEventListener('mouseleave', () => { b.style.opacity = b.disabled ? '.2' : '.7'; b.style.background = 'rgba(15,23,42,.55)'; });
+            b.addEventListener('mousedown', e => e.stopPropagation());     // bam nut khong tac dong len anh
+            b.addEventListener('click', e => { e.stopPropagation(); if (fn) fn(); });
+            return b;
+        };
+        const prev = mk('left', '‹', o.prevTitle || 'Ảnh trước (←)', o.onPrev), next = mk('right', '›', o.nextTitle || 'Ảnh sau (→)', o.onNext);
+        const pill = document.createElement('div');
+        pill.style.cssText = 'position:absolute;left:50%;bottom:8px;transform:translateX(-50%);z-index:6;padding:2px 12px;border-radius:12px;' +
+            'background:rgba(15,23,42,.6);color:#fff;font-size:12px;pointer-events:none;display:none;';
+        stage.append(prev, next, pill);
+        prev.disabled = next.disabled = true; prev.style.opacity = next.style.opacity = '.2';
+        return {
+            update(canPrev, canNext, label) {
+                prev.disabled = !canPrev; next.disabled = !canNext;
+                prev.style.opacity = canPrev ? '.7' : '.2'; next.style.opacity = canNext ? '.7' : '.2';
+                prev.style.cursor = canPrev ? 'pointer' : 'default'; next.style.cursor = canNext ? 'pointer' : 'default';
+                pill.textContent = label || ''; pill.style.display = label ? '' : 'none';
+            },
+        };
+    }
+
+    window.PgZoom = { attach, orderQuad, navButtons };
 })();
