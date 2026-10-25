@@ -1,0 +1,12 @@
+# Thu vien cho cong cu Train (Python 3.11, Windows x64, chay CPU).
+# Gom du thu vien ma 3 bo train can: ultralytics (xe, bien so) va torch/cv2/numpy/onnxruntime/PIL (OCR bien so).
+# Nen ghim phien ban (ultralytics==x.y.z ...) bang `pip freeze` tren may dev de moi lan dong goi cho ket qua giong nhau.
+ultralytics
+torch
+torchvision
+opencv-python
+numpy
+pillow
+onnx
+onnxslim
+onnxruntime
