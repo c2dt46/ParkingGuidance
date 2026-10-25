@@ -15,6 +15,14 @@ using ParkingGuidance.Web.Services.Sensor;
 using ParkingGuidance.Web.Services.Simulation;
 using ParkingGuidance.Web.Services.Tags;
 
+
+
+//
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
+//
+
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Du phong: ThreadPool khoi dau chi co so luong luong bang so nhan CPU va chi them ~1 luong/giay khi bi nghen.
@@ -24,6 +32,57 @@ ThreadPool.SetMinThreads(Math.Max(minWorker, 64), Math.Max(minIo, 64));
 
 
 builder.Services.AddRazorPages();
+
+
+
+
+
+
+
+
+
+
+
+builder.Services
+    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(o =>
+    {
+        o.Cookie.Name = "pgs_auth";
+        o.LoginPath = "/Login";
+        o.ExpireTimeSpan = TimeSpan.FromHours(8);
+        // API và SignalR trả 401 thay vì chuyển hướng sang trang đăng nhập
+        o.Events.OnRedirectToLogin = ctx =>
+        {
+            var p = ctx.Request.Path;
+            if (p.StartsWithSegments("/api") || p.StartsWithSegments("/hubs"))
+                ctx.Response.StatusCode = 401;
+            else
+                ctx.Response.Redirect(ctx.RedirectUri);
+            return Task.CompletedTask;
+        };
+    });
+
+// Mọi trang, controller và hub đều bắt buộc đăng nhập (trừ trang Login đã có [AllowAnonymous])
+builder.Services.AddAuthorization(o =>
+    o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Serialize enum (VehicleType, SlotStatus, LayoutElementType...) thanh chuoi ten
 // (vi du "Occupied" thay vi 2) de JavaScript phia client de doc va so sanh hon.
@@ -159,8 +218,8 @@ var app = builder.Build();
 app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
+app.UseAuthentication();
 app.UseAuthorization();
-
 app.MapRazorPages();
 app.MapControllers();
 app.MapHub<MonitoringHub>("/hubs/monitoring");
