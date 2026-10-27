@@ -60,6 +60,10 @@ public static class FrameAnalysis
             p.X1 += rect.X; p.X2 += rect.X;
             p.Y1 += rect.Y; p.Y2 += rect.Y;
         }
+        // Loc hinh hoc co biet XE: bo khung qua nho/qua to so voi xe va ti le vo ly (xem PlateBoxFilter); khung nghi cut van giu de thu doc
+        var veh = vehicles[index];
+        found = PlateBoxFilter.Filter(found, p => (p.Width, p.Height), veh.Width, veh.Height, refIsVehicle: true);
+        if (found.Count == 0) return null;
         var owned = AssignPlates(vehicles, found, minOverlap);
         return owned.TryGetValue(index, out var plate) ? plate : null;
     }
@@ -133,7 +137,14 @@ public static class FrameAnalysis
         }
 
         foreach (var (idx, list) in perVehicle)
-            result[idx] = list.OrderByDescending(x => x.Ratio).ThenByDescending(x => (double)x.Plate.Width * x.Plate.Height).First().Plate;
+            // Khung nam gon (>= 85%) trong xe coi nhu ngang nhau: khung DAY DU hoi nho ra mep xe khong con thua khung CUT nam tron ben trong.
+            // Roi uu tien khung dung dang biển (Valid) truoc khung nghi cut (Suspect), sau do moi den ti le nam trong xe va dien tich.
+            result[idx] = list
+                .OrderByDescending(x => x.Ratio >= 0.85 ? 1 : 0)
+                .ThenByDescending(x => (int)PlateBoxFilter.Classify(x.Plate.Width, x.Plate.Height))
+                .ThenByDescending(x => x.Ratio)
+                .ThenByDescending(x => (double)x.Plate.Width * x.Plate.Height)
+                .First().Plate;
         return result;
     }
 }

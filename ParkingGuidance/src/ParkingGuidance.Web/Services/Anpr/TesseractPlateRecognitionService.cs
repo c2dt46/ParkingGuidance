@@ -39,6 +39,9 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
     private bool _warnedOnnx;
     private readonly int _maxRecognizeMs;                      // tran thoi gian cho 1 lan doc binh thuong (Anpr:MaxRecognizeMs, 0 = khong gioi han)
     private readonly int _quickMaxMs;                          // tran thoi gian cho lan do nhanh tren ca khung hinh (Anpr:QuickMaxMs)
+    private readonly string _refineMode;                        // cach tinh lai khung bien sau khi doc: off | expand (mac dinh) | chars (kieu cu) — xem RefineRectFromChars
+    private readonly bool _shapeFilter;                         // loc khung bien theo hinh hoc (Anpr:PlateShapeFilter, mac dinh bat): xem PlateBoxFilter
+    private readonly bool _classicalFallback;                   // cho phep PlateLocator (xu ly anh) chay du phong KHI DA CO bo do neural (Anpr:ClassicalPlateFallback, mac dinh tat)
     private readonly bool _relaxedSearch;                       // lan do noi long khi lan thuong khong ra bien doc duoc (Anpr:RelaxedSearch, mac dinh bat)
     // TesseractEngine KHONG an toan da luong: API demo va dich vu camera nen co the goi dong thoi
     private readonly object _ocrLock = new();
@@ -71,6 +74,10 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
         VietnamPlateFormatter.AllowLegacyFourDigit = config.GetValue("Anpr:AllowLegacy4DigitPlates", false);
 
         _relaxedSearch = config.GetValue("Anpr:RelaxedSearch", true);
+        _shapeFilter = config.GetValue("Anpr:PlateShapeFilter", true);
+        var rm = (config["Anpr:BoxRefine"] ?? "expand").Trim().ToLowerInvariant();
+        _refineMode = rm is "off" or "chars" ? rm : "expand";
+        _classicalFallback = config.GetValue("Anpr:ClassicalPlateFallback", false);
         _maxRecognizeMs = Math.Max(0, config.GetValue("Anpr:MaxRecognizeMs", 8000));
         _quickMaxMs = Math.Max(0, config.GetValue("Anpr:QuickMaxMs", 2500));
 
@@ -284,6 +291,15 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
         var result = new List<(double X1, double Y1, double X2, double Y2, float Score)>();
         if (image.Empty()) return result;
 
+        // Lay khung cua tung bo do theo thu tu uu tien (model da train → Darknet → ONNX goc); bo do nao cho khung hop le (sau loc hinh hoc) thi dung luon.
+        List<(double X1, double Y1, double X2, double Y2, float Score)> Keep(IEnumerable<(OpenCvSharp.Rect R, float Score)> found)
+        {
+            var all = found.Select(f => (X1: (double)f.R.X, Y1: (double)f.R.Y, X2: (double)f.R.Right, Y2: (double)f.R.Bottom, f.Score)).ToList();
+            return _shapeFilter
+                ? PlateBoxFilter.Filter(all, b => (b.X2 - b.X1, b.Y2 - b.Y1), image.Width, image.Height)
+                : all;
+        }
+
         lock (_ocrLock)
         {
             try
@@ -291,16 +307,16 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
                 var custom = _customPlateDetector;
                 if (custom is not null)
                 {
-                    foreach (var (r, sc) in custom.Detect(image, confThreshold, 6, expand: 0f)) result.Add((r.X, r.Y, r.Right, r.Bottom, sc));
+                    result = Keep(custom.Detect(image, confThreshold, 6, expand: 0f));
                     if (result.Count > 0) return result;
                 }
                 if (_darknetDetector is not null)
                 {
-                    foreach (var (r, sc) in _darknetDetector.Detect(image, confThreshold, 6)) result.Add((r.X, r.Y, r.Right, r.Bottom, sc));
+                    result = Keep(_darknetDetector.Detect(image, confThreshold, 6));
                     if (result.Count > 0) return result;
                 }
                 if (_plateDetector is not null)
-                    foreach (var (r, sc) in _plateDetector.Detect(image, confThreshold, 6, expand: 0f)) result.Add((r.X, r.Y, r.Right, r.Bottom, sc));
+                    result = Keep(_plateDetector.Detect(image, confThreshold, 6, expand: 0f));
             }
             catch (Exception ex)
             {
@@ -438,7 +454,7 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
                 return (null, 0f, plateBox);
             }
 
-            var refined = RefineRectFromChars(best, rect, frame.Width, frame.Height);
+            var refined = RefineRectFromChars(best, rect, frame.Width, frame.Height, _refineMode);
             var box = new BoundingBox { X1 = refined.X, Y1 = refined.Y, X2 = refined.X + refined.Width, Y2 = refined.Y + refined.Height };
             SaveDebug(frame, refined, best.Pretty, best.BestConfidence);
             return (best.Pretty, best.BestConfidence, box);
@@ -529,7 +545,9 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
         }
 
         // Du phong bang xu ly anh. O che do nhanh chi dung khi KHONG co bo do bien da huan luyen (khi do day la cach duy nhat), va chi vai ung vien.
-        if (best is null && (!quick || !hasLearnedDetector) && !OutOfTime())
+        // (Theo khuyen nghi: khong chay phuong phap co dien song song voi YOLO — yeu hon ro khi anh sang kem/bien ban/nghieng va chi them khung gia.)
+        // Chi dung khi KHONG co bo do neural nao (khi do day la cach duy nhat), hoac khi bat Anpr:ClassicalPlateFallback.
+        if (best is null && (!hasLearnedDetector || _classicalFallback) && !OutOfTime())
             TryRects(PlateLocator.FindPlateCandidates(vehicleCrop, quick ? 2 : MaxCandidates));
 
         if (best is null)
@@ -542,7 +560,7 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
 
         // Khung bao biển tính lại từ DẢI KÝ TỰ đã đọc được (khung cua bo do, nhat la model train it anh, hay bi cut/lech).
         // Khung nay cung la khung goi y cho tab Train nen khung dung se khong "day" nhan sai vao du lieu train.
-        bestRect = RefineRectFromChars(best, bestRect, vehicleCrop.Width, vehicleCrop.Height);
+        bestRect = RefineRectFromChars(best, bestRect, vehicleCrop.Width, vehicleCrop.Height, _refineMode);
         var box = new BoundingBox
         {
             X1 = bestRect.X,
@@ -555,12 +573,15 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
     }
 
     /// <summary>
-    /// Biển rộng hơn dải ký tự khoảng 10% mỗi bên (ngang) và ~28% chiều cao ký tự (dọc) — tỉ lệ đo trên ảnh thực. Chỉ dùng khi có dải ký tự
-    /// hợp lý (nằm gần khung bộ dò và dải không quá lớn/nhỏ so với khung) để không "nhảy" sang vùng khác; ngược lại giữ khung bộ dò.
+    /// Khung biển TRẢ VỀ / HIỂN THỊ sau khi đọc. Khung của bộ dò (YOLO) đã chính xác (mAP50 ≈ 99%) nên MẶC ĐỊNH chỉ ĐƯỢC MỞ RỘNG, không bao giờ thu hẹp:
+    ///   • "expand" (mặc định): dải ký tự đọc được nằm trong khung bộ dò (sai số 4–6%) → GIỮ NGUYÊN khung bộ dò. Chỉ khi dải ký tự lòi hẳn ra ngoài
+    ///     (khung bị cụt) mới mở rộng khung để chứa đủ dải ký tự + lề. Nhờ vậy biển 2 dòng mà chỉ đọc được 1 dòng KHÔNG còn làm khung co về 1 dòng.
+    ///   • "off": luôn giữ khung bộ dò.   • "chars": kiểu cũ — luôn thay bằng khung tính từ dải ký tự (lề cố định 10% ngang / 28% dọc) → hay cắt thừa/cắt thiếu.
+    /// Đổi bằng appsettings: <c>"Anpr": { "BoxRefine": "expand" | "off" | "chars" }</c>.
     /// </summary>
-    private static OpenCvSharp.Rect RefineRectFromChars(PlateVote vote, OpenCvSharp.Rect detected, int imgW, int imgH)
+    private static OpenCvSharp.Rect RefineRectFromChars(PlateVote vote, OpenCvSharp.Rect detected, int imgW, int imgH, string mode)
     {
-        if (!vote.HasSpan) return detected;
+        if (mode == "off" || !vote.HasSpan) return detected;
         double w = vote.SpanX2 - vote.SpanX1, h = vote.SpanY2 - vote.SpanY1;
         if (w < 16 || h < 6) return detected;
 
@@ -571,12 +592,26 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
         bool sane = w <= detected.Width * 3.0 && h <= detected.Height * 3.0;
         if (!near || !sane) return detected;
 
+        if (mode == "expand")
+        {
+            double tolX = Math.Max(2, 0.04 * detected.Width), tolY = Math.Max(2, 0.06 * detected.Height);
+            bool inside = vote.SpanX1 >= detected.X - tolX && vote.SpanX2 <= detected.Right + tolX
+                          && vote.SpanY1 >= detected.Y - tolY && vote.SpanY2 <= detected.Bottom + tolY;
+            if (inside) return detected;          // dai ky tu nam trong khung bo do: khung bo do da dung → khong dung vao
+        }
+
         double padX = Math.Max(3, 0.10 * w), padY = Math.Max(2, 0.28 * h);
         int x1 = (int)Math.Max(0, Math.Floor(vote.SpanX1 - padX));
         int y1 = (int)Math.Max(0, Math.Floor(vote.SpanY1 - padY));
         int x2 = (int)Math.Min(imgW, Math.Ceiling(vote.SpanX2 + padX));
         int y2 = (int)Math.Min(imgH, Math.Ceiling(vote.SpanY2 + padY));
         if (x2 - x1 < 24 || y2 - y1 < 8) return detected;
+
+        if (mode == "expand")                      // hop voi khung bo do: chi to ra, khong co lai
+        {
+            x1 = Math.Min(x1, detected.X); y1 = Math.Min(y1, detected.Y);
+            x2 = Math.Max(x2, detected.Right); y2 = Math.Max(y2, detected.Bottom);
+        }
         return new OpenCvSharp.Rect(x1, y1, x2 - x1, y2 - y1);
     }
 
@@ -637,8 +672,12 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
         {
             if (!_warnedOnnx) { _warnedOnnx = true; _logger.LogWarning(ex, "Model do bien so ONNX loi khi chay — dung PlateLocator thay the."); }
         }
-        return list.Take(relaxed ? 5 : 4).ToList();
+        return ShapeFilter(list, vehicleCrop.Width, vehicleCrop.Height).Take(relaxed ? 5 : 4).ToList();
     }
+
+    /// <summary>Loc khung theo hinh hoc (xem <see cref="PlateBoxFilter"/>): bo khung vo ly, xep khung dung dang truoc khung nghi cut. Tat bang Anpr:PlateShapeFilter.</summary>
+    private List<OpenCvSharp.Rect> ShapeFilter(List<OpenCvSharp.Rect> rects, int searchW, int searchH) =>
+        _shapeFilter ? PlateBoxFilter.Filter(rects, r => (r.Width, r.Height), searchW, searchH) : rects;
 
     /// <summary>
     /// Đọc ký tự bằng CNN trên khung biển với nhiều mức nới viền. Detector (nhất là model train ít ảnh) hay cho khung CỤT ở đầu/cuối biển,
