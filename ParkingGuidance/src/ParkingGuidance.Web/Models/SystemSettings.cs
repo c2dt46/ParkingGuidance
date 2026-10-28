@@ -61,6 +61,13 @@ public class SystemSettings
     /// <summary>1 = xe nào KHÔNG có khung biển do bộ dò tìm thấy thì vẫn chạy tìm biển đầy đủ (chậm, tới vài giây/xe); 0 = bỏ qua ngay (mặc định, nhanh).</summary>
     public int? PlateFullSearch { get; set; }
 
+    /// <summary>Cách tính KHUNG BIỂN SỐ hiển thị/ghi nhận sau khi đọc ký tự: 0 = giữ nguyên khung do bộ dò biển số tìm ra (mặc định),
+    /// 1 = theo kích thước dải ký tự đã nhận diện (khung bao các ký tự + lề). Có hiệu lực ngay khi đổi.</summary>
+    public int? PlateBoxMode { get; set; }
+
+    /// <summary>Khi PlateBoxMode = 0: nới khung biển (ôm sát như tab Train biển số) ra mỗi phía thêm X% chiều rộng/chiều cao khung (0–30, mặc định 4).</summary>
+    public float? PlateBoxOffsetPercent { get; set; }
+
     /// <summary>Thời gian tối đa chờ card/SDK phản hồi khi gửi dữ liệu tới LED hoặc kiểm tra kết nối (giây). Quá hạn thì bridge bị kill và tự khởi động lại.
     /// Có hiệu lực ngay khi đổi. null = chưa đặt (giữ giá trị đang lưu; các trang khác không gửi trường này sẽ không làm mất giá trị).</summary>
     public double? LedRequestTimeoutSeconds { get; set; }
@@ -92,6 +99,8 @@ public class SystemSettings
         ProcessMaxSide = (ProcessMaxSide ?? 0) <= 0 ? 0 : Math.Clamp(ProcessMaxSide!.Value, 320, 4096),
         PlateReadHeight = Math.Clamp(PlateReadHeight ?? 110, 40, 300),
         PlateFullSearch = (PlateFullSearch ?? 0) != 0 ? 1 : 0,
+        PlateBoxMode = (PlateBoxMode ?? 0) != 0 ? 1 : 0,
+        PlateBoxOffsetPercent = Math.Clamp(PlateBoxOffsetPercent ?? 4f, 0f, 30f),
         LedRequestTimeoutSeconds = Math.Clamp(LedRequestTimeoutSeconds ?? 15, 1, 120),
         PreferredBrowser = string.IsNullOrWhiteSpace(PreferredBrowser) ? "default" : PreferredBrowser.Trim().ToLowerInvariant(),
         Ui = (Ui ?? new UiPreferences()).Sanitized()

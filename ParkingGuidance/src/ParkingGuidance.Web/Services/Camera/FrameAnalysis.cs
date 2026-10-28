@@ -137,14 +137,22 @@ public static class FrameAnalysis
         }
 
         foreach (var (idx, list) in perVehicle)
+        {
             // Khung nam gon (>= 85%) trong xe coi nhu ngang nhau: khung DAY DU hoi nho ra mep xe khong con thua khung CUT nam tron ben trong.
-            // Roi uu tien khung dung dang biển (Valid) truoc khung nghi cut (Suspect), sau do moi den ti le nam trong xe va dien tich.
-            result[idx] = list
+            // Roi uu tien khung dung dang biển (Valid) truoc khung nghi cut (Suspect). TIEP THEO la DO TIN CAY CUA BO DO (theo nac 0,1): truoc day
+            // buoc nay khong co nen khung co dien tich lon nhat (vd den xe, hinh vuong nhu bien xe may) thang bien that. Cuoi cung moi den ti le nam trong xe va dien tich.
+            var ordered = list
                 .OrderByDescending(x => x.Ratio >= 0.85 ? 1 : 0)
                 .ThenByDescending(x => (int)PlateBoxFilter.Classify(x.Plate.Width, x.Plate.Height))
+                .ThenByDescending(x => (int)Math.Floor(Math.Clamp(x.Plate.Score, 0f, 1f) * 10))
                 .ThenByDescending(x => x.Ratio)
                 .ThenByDescending(x => (double)x.Plate.Width * x.Plate.Height)
-                .First().Plate;
+                .Select(x => x.Plate)
+                .ToList();
+            result[idx] = ordered[0];
+            // Giu cac khung con lai lam ung vien de buoc doc ky tu SO SANH (khong ghi de khi goi lai chi voi khung da chon: khi do khong co khung nao khac)
+            if (ordered.Count > 1) ordered[0].Alternatives = ordered.Skip(1).Take(5).ToList();
+        }
         return result;
     }
 }

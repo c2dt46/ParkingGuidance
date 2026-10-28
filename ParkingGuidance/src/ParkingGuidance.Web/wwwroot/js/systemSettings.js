@@ -17,7 +17,9 @@ const settingFields = {
     plateMinOverlap: 'setPlateOverlap',
     processMaxSide: 'setProcessMaxSide',
     plateReadHeight: 'setPlateReadHeight',
-    plateFullSearch: 'setPlateFullSearch'
+    plateFullSearch: 'setPlateFullSearch',
+    plateBoxMode: 'setPlateBoxMode',
+    plateBoxOffsetPercent: 'setPlateBoxOffset'
 };
 let queueTimer = null;
 

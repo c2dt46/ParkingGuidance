@@ -54,6 +54,30 @@
                  keyBase: `${relName(files[idx])}|c${cropRect.x},${cropRect.y},${cropRect.w},${cropRect.h}` };
     }
 
+    const PLATE_COLOR_VI = {
+        white: ['Trắng', '#ffffff', '#222'], yellow: ['Vàng', '#f2c200', '#222'],
+        blue: ['Xanh', '#1d4ed8', '#fff'], red: ['Đỏ', '#c62828', '#fff'], unknown: ['không rõ', '#e5e7eb', '#444']
+    };
+    // Màu NỀN biển hệ thống nhận được tại khung biển vừa đọc (dùng để kiểm chứng quy tắc cú pháp theo màu)
+    const PLATE_KIND_VI = {
+        Civilian: 'dân sự', Military: 'quân đội', Foreign: 'nước ngoài / ngoại giao', Special: 'đặc biệt (quy tắc riêng)',
+        StateAgency: 'cơ quan nhà nước', Business: 'kinh doanh vận tải', Diplomatic: 'ngoại giao / quốc tế', Unknown: '⚠ không khớp cú pháp nào'
+    };
+    function plateColorHtml(pb) {
+        if (!pb || (!pb.plateColor && !pb.plateKind)) return '';
+        let html = '';
+        if (pb.plateColor) {
+            const [label, bg, fg] = PLATE_COLOR_VI[pb.plateColor] || PLATE_COLOR_VI.unknown;
+            const pct = pb.plateColorShare > 0 ? ` ${Math.round(pb.plateColorShare * 100)}%` : '';
+            html += ` <span class="hint small" style="margin:0;">· nền biển:</span> <span title="Màu nền biển nhận từ ảnh" style="display:inline-block;padding:0 7px;border-radius:9px;border:1px solid #9ca3af;background:${bg};color:${fg};font-size:12px;">${label}${pct}</span>`;
+        }
+        if (pb.plateKind) {
+            const bad = pb.plateKind === 'Unknown';
+            html += ` <span class="${bad ? 'warn' : 'hint'} small" style="margin:0;">· loại biển: ${pb.plateLabel || PLATE_KIND_VI[pb.plateKind] || pb.plateKind}</span>`;
+        }
+        return html;
+    }
+
     function cardHtml(v, view) {
         const head = `#${v.index} ${esc(TYPE_VI[v.vehicleType] || v.vehicleType)}` + (v.color ? ` · ${esc(v.color)}` : '') +
             (v.isRegion ? '' : ` · ${Math.round(v.confidence * 100)}%`);
@@ -64,7 +88,7 @@
                 : `<span class="bad" style="margin:0;">🔴 không dò được vùng biển</span> <span class="hint small" style="margin:0;">(lỗi ở bước dò biển → thêm vào Train rồi tự cắt khung)</span>`);
         return `<div class="sim-veh">
             <div class="sim-veh-head">${head}</div>
-            <div class="sim-veh-read">Đọc được: ${read}</div>
+            <div class="sim-veh-read">Đọc được: ${read}${plateColorHtml(v.plateBox)}</div>
             <div class="sim-veh-fix"><button type="button" class="btn secondary btn-sm sim-inspect-btn" data-view="${view.name}" data-vi="${v.index}" title="Phóng to, kéo, cắt vùng, chỉnh sáng để đối chiếu biển này với chuỗi đọc được">🔎 Soi biển</button></div>
         </div>`;
     }

@@ -19,6 +19,21 @@ public sealed class PlateVote
     public double SpanX2 { get; set; }
     public double SpanY2 { get; set; }
     public double SpanWeight { get; set; }
+
+    /// <summary>Các bộ đọc ĐỘC LẬP đã cho kết quả này (YOLO / CNN / CRNN / Tesseract). ≥ 2 cờ = có đồng thuận độc lập.</summary>
+    public ReaderSource Sources { get; set; }
+    /// <summary>Số lần đọc (mọi bộ đọc) ra đúng chuỗi này.</summary>
+    public int Reads { get; set; }
+    /// <summary>Chuỗi có ký tự được bổ sung nhờ quét lại vùng khoảng trống (YOLO).</summary>
+    public bool GapFilled { get; set; }
+    /// <summary>Màu nền biển của khung đã cho ra phiếu này (căn cứ chọn cú pháp khi chuẩn hoá / chấm điểm).</summary>
+    public PlateColor Color { get; set; }
+
+    private readonly List<string> _raws = new();
+    /// <summary>Chuỗi THÔ của từng bộ đọc trước khi chuẩn hoá, dạng "Yolo:308-10370" — để ghi log và thống kê bộ đọc sai kiểu gì.</summary>
+    public IReadOnlyList<string> Raws => _raws;
+    public void AddRaw(ReaderSource src, string raw) => AddRawTagged(src + ":" + raw);
+    public void AddRawTagged(string tagged) { if (_raws.Count < 16 && !_raws.Contains(tagged)) _raws.Add(tagged); }
 }
 
 /// <summary>
@@ -42,7 +57,7 @@ public sealed class PlateTextReader
 
     public PlateTextReader(TesseractEngine engine) => _engine = engine;
 
-    public void CollectVotes(Mat plateBgr, Dictionary<string, PlateVote> votes)
+    public void CollectVotes(Mat plateBgr, Dictionary<string, PlateVote> votes, PlateColor color = PlateColor.Unknown)
     {
         if (plateBgr.Empty()) return;
 
@@ -82,17 +97,20 @@ public sealed class PlateTextReader
                     var (raw, conf, lineLengths) = OcrText(img, twoLines);
                     if (raw is null) continue;
 
-                    var pretty = PlateNormalizer.Apply(raw, twoLines ? lineLengths : null);   // ham cua nguoi dung: null / "" = khong nhan dien duoc
+                    var pretty = PlateNormalizer.Apply(raw, twoLines ? lineLengths : null, color);   // ham cua nguoi dung: null / "" = khong nhan dien duoc
                     if (pretty is null) continue;
 
                     var key = Regex.Replace(pretty.ToUpperInvariant(), "[^A-Z0-9]", "");
                     if (!votes.TryGetValue(key, out var vote))
-                        votes[key] = vote = new PlateVote { Pretty = pretty };
+                        votes[key] = vote = new PlateVote { Pretty = pretty, Color = color };
 
                     // Ma tinh la (khong nam trong danh sach thuong gap) thuong la doc sai 1-2 ky tu dau: giam trong so, khong loai han
-                    double weight = (1.0 + conf) * PlateNormalizer.Weight(pretty);
+                    double weight = (1.0 + conf) * PlateNormalizer.Weight(pretty, color);
                     vote.Score += weight;
                     vote.BestConfidence = Math.Max(vote.BestConfidence, conf);
+                    vote.Sources |= ReaderSource.Tesseract;
+                    vote.Reads++;
+                    vote.AddRaw(ReaderSource.Tesseract, raw);
                 }
             }
         }

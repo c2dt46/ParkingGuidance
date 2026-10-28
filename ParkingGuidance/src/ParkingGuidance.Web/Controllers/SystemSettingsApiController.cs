@@ -51,6 +51,8 @@ public class SystemSettingsApiController : ControllerBase
         dto.ProcessMaxSide ??= _settings.Current.ProcessMaxSide;
         dto.PlateReadHeight ??= _settings.Current.PlateReadHeight;
         dto.PlateFullSearch ??= _settings.Current.PlateFullSearch;
+        dto.PlateBoxMode ??= _settings.Current.PlateBoxMode;
+        dto.PlateBoxOffsetPercent ??= _settings.Current.PlateBoxOffsetPercent;
         return Ok(new { settings = _settings.Update(dto), dataDirectory = _persistence.DataDirectory });
     }
 

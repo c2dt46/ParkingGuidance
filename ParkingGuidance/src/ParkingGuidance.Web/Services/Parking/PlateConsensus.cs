@@ -88,7 +88,8 @@ public static class PlateConsensus
                 // Chuoi moi tao ra tu viec bo phieu tung vi tri: cho di qua ham kiem tra/chuan hoa cua nguoi dung nhu moi ket qua doc khac;
                 // bi tu choi (null / "") thi giu nguyen ket qua dan dau.
                 var merged = PlateNormalizer.Apply(ApplyToPretty(leader.Pretty, key));
-                if (merged is not null)
+                // Chuỗi ghép theo từng vị trí không được làm cấu trúc tệ đi (vd biển hợp cấu trúc → "không rõ")
+                if (merged is not null && (PlateSyntax.Classify(merged).Kind != PlateKind.Unknown || PlateSyntax.Classify(leader.Pretty).Kind == PlateKind.Unknown))
                     return new PlateConsensusResult(merged, KeyOf(merged), cluster.Sum(r => r.Weight), cluster.Count);
             }
         }

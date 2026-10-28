@@ -1,69 +1,66 @@
 namespace ParkingGuidance.Web.Services.Anpr;
 
 /// <summary>
-/// NƠI DUY NHẤT quyết định một chuỗi biển số đọc được có HỢP LỆ hay không và sửa các nhầm lẫn (vd "308-10370" → "30B-10370").
+/// NƠI DUY NHẤT quyết định một chuỗi biển số đọc được có dùng được hay không và sửa các nhầm lẫn (vd "308-10370" → "30B-10370").
 ///
-/// Mọi bộ đọc (model OCR, bộ phân loại ký tự, YOLO ký tự, Tesseract) đều đưa từng kết quả đọc được qua <see cref="Apply"/> TRƯỚC khi bỏ phiếu;
-/// kết quả gộp từ nhiều lần đọc cũng được đưa qua lần nữa. Quy ước:
-///   • <see cref="Normalize"/> trả về chuỗi biển (đã sửa / định dạng) → kết quả đọc đó được tính phiếu.
-///   • <see cref="Normalize"/> trả về <c>null</c> hoặc <c>""</c> → kết quả đọc đó bị coi là KHÔNG nhận diện được, bị loại.
-///     Nếu mọi kết quả đọc đều bị loại thì xe không có biển số (không nhận diện được ký tự).
+/// Mọi bộ đọc (model OCR, bộ phân loại ký tự, YOLO ký tự, Tesseract) đều đưa từng kết quả qua <see cref="Apply(string?, IReadOnlyList{int}?, PlateColor)"/>
+/// TRƯỚC khi bỏ phiếu, kèm hai căn cứ lấy từ ảnh biển:
+///   • <see cref="PlateColor"/> — MÀU NỀN (trắng / vàng / xanh / đỏ) do <see cref="PlateColorAnalyzer"/> tính;
+///   • <see cref="PlateKind"/> — LOẠI BIỂN dự kiến (Dân sự, Kinh doanh vận tải, Cơ quan nhà nước, Quân đội, Ngoại giao...); nếu không truyền thì suy từ màu
+///     bằng <see cref="PlateSyntax.ExpectedKind"/>.
+/// Kết quả: trả về chuỗi biển → được tính phiếu; trả về null / "" → bị loại.
+///
+/// Quy tắc cú pháp theo loại biển nằm ở <see cref="PlateSyntax.Classify(string?, IReadOnlyList{int}?, PlateColor, PlateKind)"/>; muốn tự tính cú pháp thì sửa
+/// ngay trong <see cref="Normalize(string, IReadOnlyList{int}?, PlateColor, PlateKind)"/> — cả <c>color</c> lẫn <c>plateType</c> luôn được truyền tường minh.
+/// <see cref="PlateColor.Unknown"/> / <see cref="PlateKind.Unknown"/> = chưa biết → cú pháp tổng quát.
 /// </summary>
 public static class PlateNormalizer
 {
-    /// <summary>
-    /// ========================  VIẾT CODE CỦA BẠN Ở ĐÂY  ========================
-    ///
-    /// <paramref name="raw"/>: chuỗi ký tự đọc được, CHƯA kiểm tra và CHƯA sửa gì, ví dụ "30810370", "51L15217", "30B-10370", "AA1234"
-    /// (có thể lẫn khoảng trắng, dấu; bộ đọc ký tự thì chỉ gồm chữ/số). Mọi loại biển (ô tô, xe máy, quân đội, công an, ngoại giao...) đều đi vào đây.
-    /// <paramref name="lineLengths"/>: số ký tự mỗi dòng nếu biết chắc đây là biển 2 dòng (vd {3, 5}); <c>null</c> nếu biển 1 dòng hoặc không biết.
-    ///
-    /// Trả về: biển đã chuẩn hoá (dạng bạn muốn hiển thị, vd "30B-103.70"), hoặc <c>null</c> / <c>""</c> nếu coi là không nhận diện được.
-    /// Chuỗi trả về sẽ được dùng NGUYÊN VĂN làm kết quả; bộ gộp kết quả so khớp các lần đọc theo phần chữ + số (A–Z, 0–9) của nó, không phân biệt hoa/thường.
-    ///
-    /// MẶC ĐỊNH (tạm thời, chưa kiểm tra cú pháp): chỉ giữ chữ và số (viết hoa, Đ → D); CHỈ CẦN TỪ 3 KÝ TỰ TRỞ LÊN là hợp lệ, dưới 3 ký tự thì trả null.
-    /// Riêng biển có dạng ô tô / xe máy quen thuộc (vd "30810370", "51L15217") vẫn được sửa theo vị trí (8→B ở chữ cái seri...) và định dạng đẹp
-    /// ("30B-103.70") bằng <see cref="VietnamPlateFormatter"/>; các biển khác (quân đội, công an, ngoại giao, biển đặc biệt...) được giữ nguyên chuỗi chữ/số đọc được.
-    /// Khi có quy tắc chính xác cho từng loại biển, hãy thay thân hàm này.
-    /// </summary>
-    public static string? Normalize(string raw, IReadOnlyList<int>? lineLengths)
+    /// <param name="raw">Chuỗi đọc được, CHƯA kiểm tra (có thể lẫn khoảng trắng, dấu).</param>
+    /// <param name="lineLengths">Số ký tự mỗi dòng nếu chắc chắn là biển 2 dòng (vd {3, 5}); null nếu 1 dòng hoặc không biết.</param>
+    /// <param name="color">Màu nền của khung biển chứa chuỗi này.</param>
+    /// <param name="plateType">Loại biển dự kiến: Civilian (dân sự), Business (kinh doanh vận tải), StateAgency (cơ quan nhà nước), Military (quân đội), Diplomatic / Foreign...</param>
+    public static string? Normalize(string raw, IReadOnlyList<int>? lineLengths, PlateColor color, PlateKind plateType)
     {
-        var sb = new System.Text.StringBuilder(raw.Length);
-        foreach (var ch in raw.ToUpperInvariant())
-        {
-            var c = ch == 'Đ' ? 'D' : ch;
-            if (c is >= 'A' and <= 'Z' or >= '0' and <= '9') sb.Append(c);
-        }
-        var cleaned = sb.ToString();
-        if (cleaned.Length < 3) return null;                       // hợp lệ chỉ cần tìm được từ 3 ký tự
+  //      if (plateType == PlateKind.Business)
 
-        var (text, valid) = VietnamPlateFormatter.Normalize(cleaned, lineLengths);
-        return valid ? text : cleaned;
+        var cleaned = PlateSyntax.Clean(raw);
+        if (cleaned.Length < 3) return null;                       // dưới 3 ký tự: không phải biển
+        var c = PlateSyntax.Classify(cleaned, lineLengths, color, plateType);
+        if (c.Kind == PlateKind.Unknown && !PlateSyntax.AcceptUnknown) return null;   // chế độ nghiêm ngặt
+        return c.Pretty;
     }
 
-    /// <summary>
-    /// Trọng số khi bỏ phiếu cho một kết quả đã chuẩn hoá (nhân với độ tin cậy của lần đọc): nhỏ hơn 1 = ít tin hơn.
-    /// MẶC ĐỊNH: chỉ giảm (0.4) những chuỗi BẮT ĐẦU BẰNG 2 SỐ mà 2 số đó không phải mã tỉnh thường gặp — thường là đọc sai 1–2 ký tự đầu của biển thường.
-    /// Biển không bắt đầu bằng 2 số (quân đội, ngoại giao, đặc biệt...) luôn có trọng số 1.0.
-    /// </summary>
-    public static double Weight(string plate)
-    {
-        var p = plate.Trim();
-        bool startsWithTwoDigits = p.Length >= 2 && char.IsAsciiDigit(p[0]) && char.IsAsciiDigit(p[1]);
-        return !startsWithTwoDigits || VietnamPlateFormatter.IsKnownProvinceCode(p) ? 1.0 : 0.4;
-    }
+    public static string? Normalize(string raw, IReadOnlyList<int>? lineLengths, PlateColor color) =>
+        Normalize(raw, lineLengths, color, PlateSyntax.ExpectedKind(color));
+
+    public static string? Normalize(string raw, IReadOnlyList<int>? lineLengths) =>
+        Normalize(raw, lineLengths, PlateColor.Unknown, PlateKind.Unknown);
+
+    /// <summary>Phân loại đầy đủ (loại biển, chuỗi đẹp, độ tin cậy cấu trúc, tên loại biển) của một chuỗi biển.</summary>
+    public static PlateClass Classify(string? raw, IReadOnlyList<int>? lineLengths, PlateColor color, PlateKind plateType) =>
+        PlateSyntax.Classify(raw, lineLengths, color, plateType);
+
+    public static PlateClass Classify(string? raw, IReadOnlyList<int>? lineLengths, PlateColor color) =>
+        PlateSyntax.Classify(raw, lineLengths, color);
 
     /// <summary>
-    /// Gọi <see cref="Normalize"/> một cách an toàn. KHÔNG cần sửa hàm này.
-    /// Trả về <c>null</c> khi chuỗi rỗng hoặc <see cref="Normalize"/> trả về null / "" (= không nhận diện được).
-    /// Nếu <see cref="Normalize"/> ném lỗi (lỗi trong code của bạn) thì dùng tạm quy tắc mặc định cũ để hệ thống không ngừng nhận diện.
+    /// Trọng số khi bỏ phiếu (nhân với độ tin cậy của lần đọc): khớp đúng cú pháp của loại biển dự kiến 1,0; dân sự mã tỉnh lạ 0,4;
+    /// quân đội / nước ngoài khi chưa biết loại 0,85; khác loại dự kiến ×0,6; không khớp cú pháp nào 0,3.
     /// </summary>
-    public static string? Apply(string? raw, IReadOnlyList<int>? lineLengths = null)
+    public static double Weight(string plate, PlateColor color, PlateKind plateType) => PlateSyntax.TrustOf(plate, color, plateType);
+
+    public static double Weight(string plate, PlateColor color) => PlateSyntax.TrustOf(plate, color);
+
+    public static double Weight(string plate) => Weight(plate, PlateColor.Unknown);
+
+    /// <summary>Gọi <see cref="Normalize(string, IReadOnlyList{int}?, PlateColor, PlateKind)"/> an toàn. Lỗi → dùng bộ kiểm tra dân sự cũ để hệ thống không ngừng nhận diện.</summary>
+    public static string? Apply(string? raw, IReadOnlyList<int>? lineLengths, PlateColor color, PlateKind plateType)
     {
         if (string.IsNullOrWhiteSpace(raw)) return null;
         try
         {
-            var result = Normalize(raw, lineLengths);
+            var result = Normalize(raw, lineLengths, color, plateType);
             return string.IsNullOrWhiteSpace(result) ? null : result.Trim();
         }
         catch (Exception ex)
@@ -73,4 +70,10 @@ public static class PlateNormalizer
             return valid ? text : null;
         }
     }
+
+    public static string? Apply(string? raw, IReadOnlyList<int>? lineLengths, PlateColor color) =>
+        Apply(raw, lineLengths, color, PlateSyntax.ExpectedKind(color));
+
+    public static string? Apply(string? raw, IReadOnlyList<int>? lineLengths = null) =>
+        Apply(raw, lineLengths, PlateColor.Unknown, PlateKind.Unknown);
 }

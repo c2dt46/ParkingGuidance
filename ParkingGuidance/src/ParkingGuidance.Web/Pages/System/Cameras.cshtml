@@ -211,6 +211,12 @@
             <div class="prop-field"><label>Biển phải nằm trong khung xe tối thiểu (0 - 1, 0 = tắt)</label><input id="setPlateOverlap" type="number" min="0" max="1" step="0.05" /></div>
             <div class="prop-field"><label>Cạnh dài tối đa ảnh đưa vào dò xe/biển (px, 0 = ảnh gốc)</label><input id="setProcessMaxSide" type="number" min="0" max="4096" step="64" /></div>
             <div class="prop-field"><label>Chiều cao ảnh biển khi đọc ký tự (px, 40 - 300)</label><input id="setPlateReadHeight" type="number" min="40" max="300" step="10" /></div>
+            <div class="prop-field"><label>Kích thước khung biển số hiển thị</label>
+                <select id="setPlateBoxMode">
+                    <option value="0">Giữ nguyên khung theo nhận diện biển số (ôm sát như tab Train + offset)</option>
+                    <option value="1">Theo kích thước ký tự (nhận diện ký tự)</option>
+                </select></div>
+            <div class="prop-field"><label>Offset khung biển số (% mỗi phía, chỉ áp dụng khi chọn "theo nhận diện biển số"; 0 - 30)</label><input id="setPlateBoxOffset" type="number" min="0" max="30" step="0.5" /></div>
             <div class="prop-field"><label>Xe không có khung biển: vẫn tìm biển đầy đủ (0 = bỏ qua, 1 = tìm, chậm)</label><input id="setPlateFullSearch" type="number" min="0" max="1" step="1" /></div>
         </div>
         <div class="prop-actions">
@@ -739,7 +745,7 @@
     <script src="~/js/systemSettings.js"></script>
     <script src="~/js/cameraData.js"></script>
     <script src="~/js/cameraHistory.js"></script>
-    <script src="~/js/cameraSimulation.js"></script>
+    <script src="~/js/cameraSimulation.js" asp-append-version="true"></script>
     <script src="~/js/simInspector.js" asp-append-version="true"></script>
     <script src="~/js/trainHub.js" asp-append-version="true"></script>
     <script src="~/js/trainZoom.js" asp-append-version="true"></script>

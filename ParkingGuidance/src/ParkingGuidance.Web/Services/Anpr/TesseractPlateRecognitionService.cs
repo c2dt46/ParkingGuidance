@@ -39,7 +39,8 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
     private bool _warnedOnnx;
     private readonly int _maxRecognizeMs;                      // tran thoi gian cho 1 lan doc binh thuong (Anpr:MaxRecognizeMs, 0 = khong gioi han)
     private readonly int _quickMaxMs;                          // tran thoi gian cho lan do nhanh tren ca khung hinh (Anpr:QuickMaxMs)
-    private readonly string _refineMode;                        // cach tinh lai khung bien sau khi doc: off | expand (mac dinh) | chars (kieu cu) — xem RefineRectFromChars
+    // Cach tinh khung bien sau khi doc, doi duoc luc dang chay (Cau hinh chung > PlateBoxMode): 0 = giu khung bo do bien so ("off"), 1 = theo dai ky tu ("chars")
+    private bool CharsBoxMode => (_settings.Current.PlateBoxMode ?? 0) == 1;
     private readonly bool _shapeFilter;                         // loc khung bien theo hinh hoc (Anpr:PlateShapeFilter, mac dinh bat): xem PlateBoxFilter
     private readonly bool _classicalFallback;                   // cho phep PlateLocator (xu ly anh) chay du phong KHI DA CO bo do neural (Anpr:ClassicalPlateFallback, mac dinh tat)
     private readonly bool _relaxedSearch;                       // lan do noi long khi lan thuong khong ra bien doc duoc (Anpr:RelaxedSearch, mac dinh bat)
@@ -53,6 +54,23 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
     /// <summary>Điểm bỏ phiếu đủ cao (≈ 2 lần đọc trùng nhau) để dừng sớm cho nhanh.</summary>
     private const double EarlyStopScore = 3.2;
     private const int MaxCandidates = 5;
+
+    /// <summary>true (mặc định): khi kết quả mới chỉ có 1 bộ đọc đồng ý thì nhờ thêm Tesseract đọc độc lập (Anpr:RequireSecondOpinion).</summary>
+    private readonly bool _requireSecondOpinion;
+    /// <summary>true (mặc định): xác định màu nền biển và áp cú pháp theo màu (Anpr:UseColorRules).</summary>
+    private readonly bool _useColorRules;
+    /// <summary>Thư mục ghi log từng lần đọc (JSON lines) để đo bộ đọc nào sai ở đâu; null = tắt (Anpr:ReadLog = false).</summary>
+    private readonly string? _readLogDir;
+    /// <summary>Công cụ chạy thử hàng loạt đặt tên ảnh vào đây trước khi gọi đọc, để script thống kê ghép được với đáp án đúng.</summary>
+    public static readonly AsyncLocal<string?> LogTag = new();
+
+    /// <summary>true (mặc định): tìm thấy khung biển KHÔNG dừng lại — tìm tiếp trong khu vực đó, so sánh các vị trí rồi lấy vị trí đọc tốt nhất (Anpr:RefineAfterFound).</summary>
+    private readonly bool _refineAfterFound;
+    /// <summary>Số khung tối đa thử thêm ở bước tìm tiếp (Anpr:RefineMaxRects).</summary>
+    private readonly int _refineMaxRects;
+    private const double RefineTargetWidth = 640;      // vùng quanh biển nhỏ hơn mức này thì phóng to trước khi dò lại
+    private const double RefineDupIou = 0.9;           // khung trùng ≥ 90% với khung đã thử thì bỏ
+    private const double RefineImproveFactor = 1.05;   // vị trí mới phải hơn vị trí hiện tại ≥ 5% mới được thay (tránh đổi qua lại vì nhiễu)
 
     public bool IsReady => _engine is not null || _onnxReader is not null || _cnnReader is not null || _charDet is not null;
 
@@ -72,11 +90,16 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
         // Mac dinh chi nhan bien 5 so (NNL-NNN.NN). Bien o to doi cu 4 so rat hiem va de bi nhan nham
         // khi OCR roi mat 1 chu so, nen tat mac dinh; bat lai bang Anpr:AllowLegacy4DigitPlates = true.
         VietnamPlateFormatter.AllowLegacyFourDigit = config.GetValue("Anpr:AllowLegacy4DigitPlates", false);
+        PlateSyntax.AcceptUnknown = config.GetValue("Anpr:AcceptUnknownPlates", true);   // false = loại hẳn biển không khớp cấu trúc nào
+        _requireSecondOpinion = config.GetValue("Anpr:RequireSecondOpinion", true);
+        _useColorRules = config.GetValue("Anpr:UseColorRules", true);
+        PlateSyntax.Configure(config);                     // Anpr:BlueSeries, Anpr:PlateRules
+        _refineAfterFound = config.GetValue("Anpr:RefineAfterFound", true);
+        _refineMaxRects = Math.Clamp(config.GetValue("Anpr:RefineMaxRects", 6), 0, 12);
+        _readLogDir = config.GetValue("Anpr:ReadLog", true) ? Path.Combine(persistence.DataDirectory, "anpr-log") : null;
 
         _relaxedSearch = config.GetValue("Anpr:RelaxedSearch", true);
         _shapeFilter = config.GetValue("Anpr:PlateShapeFilter", true);
-        var rm = (config["Anpr:BoxRefine"] ?? "expand").Trim().ToLowerInvariant();
-        _refineMode = rm is "off" or "chars" ? rm : "expand";
         _classicalFallback = config.GetValue("Anpr:ClassicalPlateFallback", false);
         _maxRecognizeMs = Math.Max(0, config.GetValue("Anpr:MaxRecognizeMs", 8000));
         _quickMaxMs = Math.Max(0, config.GetValue("Anpr:QuickMaxMs", 2500));
@@ -410,54 +433,123 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
         lock (_ocrLock)
         {
             // Chi 1 luot nhanh tren ca khung hinh (khong chia o, khong dung PlateLocator) — chay song song voi buoc do xe
-            foreach (var r in DetectPlateRects(frame, relaxed: false, quickOnly: true))
-                result.Add(new BoundingBox { X1 = r.X, Y1 = r.Y, X2 = r.X + r.Width, Y2 = r.Y + r.Height });
+            var scores = new Dictionary<OpenCvSharp.Rect, float>();
+            foreach (var r in DetectPlateRects(frame, relaxed: false, quickOnly: true, scores: scores))
+                result.Add(new BoundingBox
+                {
+                    X1 = r.X, Y1 = r.Y, X2 = r.X + r.Width, Y2 = r.Y + r.Height,
+                    Score = scores.TryGetValue(r, out var sc) ? sc : 0f      // do tin cay cua bo do: dung de xep hang khung khi 1 xe co nhieu khung ung vien
+                });
         }
         return result;
     }
+
+    private static string ColorKey(PlateColor c) => c.ToString().ToLowerInvariant();
+
+    /// <summary>
+    /// Độ tin cậy HIỂN THỊ / ghi nhận = độ tin cậy đọc ký tự giảm theo cú pháp: chuỗi không khớp cú pháp nào ×0,5, biển dân sự mã tỉnh lạ ×0,8.
+    /// Trước đây chuỗi sai cú pháp (vd chỉ đọc được "11916") vẫn hiện 100% và có thể được coi là đã xác thực.
+    /// </summary>
+    private static float ShownConfidence(PlateClass cls, float readConfidence) =>
+        cls.Kind == PlateKind.Unknown ? readConfidence * 0.5f
+        : (cls.Kind is PlateKind.Civilian or PlateKind.Business && !cls.KnownProvince) ? readConfidence * 0.8f
+        : readConfidence;
 
     public (string? PlateNumber, float Confidence, BoundingBox? PlateBox) ReadPlateAt(Mat frame, BoundingBox plateBox)
     {
         if (!IsReady || frame.Empty()) return (null, 0f, null);
 
-        int x1 = Math.Clamp((int)Math.Floor(plateBox.X1), 0, Math.Max(0, frame.Width - 1));
-        int y1 = Math.Clamp((int)Math.Floor(plateBox.Y1), 0, Math.Max(0, frame.Height - 1));
-        int x2 = Math.Clamp((int)Math.Ceiling(plateBox.X2), x1 + 1, frame.Width);
-        int y2 = Math.Clamp((int)Math.Ceiling(plateBox.Y2), y1 + 1, frame.Height);
-        var rect = new OpenCvSharp.Rect(x1, y1, x2 - x1, y2 - y1);
-        if (rect.Width < 8 || rect.Height < 8) return (null, 0f, plateBox);
+        // Khung chinh + cac khung ung vien khac cua CUNG xe (neu co): doc TAT CA roi chon vi tri doc tot nhat — khong dung o khung duoc chon bang hinh hoc.
+        var group = new List<BoundingBox> { plateBox };
+        if (_refineAfterFound && plateBox.Alternatives is { Count: > 0 })
+            group.AddRange(plateBox.Alternatives.Take(4));
 
         lock (_ocrLock)
         {
             ApplyReaderSettings();
-            using var crop = new Mat(frame, rect);
-            var votes = new Dictionary<string, PlateVote>();
+            PlateVote? best = null;
+            Dictionary<string, PlateVote>? bestVotes = null;
+            OpenCvSharp.Rect bestRect = default, firstRect = default;
+            bool haveFirst = false;
+            var bestColor = default(PlateColorAnalyzer.Result);
+            double bestPos = 0;
 
-            // Cung cach doc nhu trong RecognizeLocked, nhung CHI tren khung bien da co (khong do lai, khong tim ung vien khac)
-            if (HasCharReader) AddCnnVotes(frame, rect, votes);
-            if (_onnxReader is not null) AddOnnxVote(crop, votes);
-
-            bool trusted = votes.Values.Any(v => v.BestConfidence >= OnnxTrustedConfidence);
-            if (!trusted && _reader is not null && !(HasCharReader && votes.Count > 0))
+            for (int gi = 0; gi < group.Count; gi++)
             {
-                int padH = (int)(crop.Height * 0.12), padW = (int)(crop.Width * 0.12);
-                using var padded = new Mat();
-                Cv2.CopyMakeBorder(crop, padded, padH, padH, padW, padW, BorderTypes.Replicate);
-                _reader.CollectVotes(padded, votes);
-                _reader.CollectVotes(crop, votes);
+                var pb = group[gi];
+                int x1 = Math.Clamp((int)Math.Floor(pb.X1), 0, Math.Max(0, frame.Width - 1));
+                int y1 = Math.Clamp((int)Math.Floor(pb.Y1), 0, Math.Max(0, frame.Height - 1));
+                int x2 = Math.Clamp((int)Math.Ceiling(pb.X2), x1 + 1, frame.Width);
+                int y2 = Math.Clamp((int)Math.Ceiling(pb.Y2), y1 + 1, frame.Height);
+                var rect = new OpenCvSharp.Rect(x1, y1, x2 - x1, y2 - y1);
+                if (rect.Width < 8 || rect.Height < 8) continue;
+                if (!haveFirst) { firstRect = rect; haveFirst = true; }
+
+                using var crop = new Mat(frame, rect);
+                var votes = new Dictionary<string, PlateVote>();
+                var plateColor = _useColorRules ? PlateColorAnalyzer.Detect(frame, rect) : default;
+
+                // Cung cach doc nhu trong RecognizeLocked, nhung tren khung bien da co
+                if (HasCharReader) AddCnnVotes(frame, rect, votes, plateColor.Color);
+                if (_onnxReader is not null) AddOnnxVote(crop, votes, plateColor.Color);
+
+                bool trusted = votes.Values.Any(v => v.BestConfidence >= OnnxTrustedConfidence);
+                if (!trusted && _reader is not null && !(HasCharReader && votes.Count > 0))
+                {
+                    int padH = (int)(crop.Height * 0.12), padW = (int)(crop.Width * 0.12);
+                    using var padded = new Mat();
+                    Cv2.CopyMakeBorder(crop, padded, padH, padH, padW, padW, BorderTypes.Replicate);
+                    _reader.CollectVotes(padded, votes, plateColor.Color);
+                    _reader.CollectVotes(crop, votes, plateColor.Color);
+                }
+
+                // Diem VI TRI = diem doc ky tu x he so tin cay cua bo do khung (khung khong biet diem → 0,35 trung tinh)
+                float detScore = pb.Score > 0 ? pb.Score : 0.35f;
+                var top = PlateVoteResolver.Best(votes);
+                double posScore = (top?.Score ?? 0) * (0.5 + Math.Clamp(detScore, 0f, 1f));
+                LogReads(votes, top, rect, gi == 0 ? "read" : "alt", pb.Score > 0 ? pb.Score : -1f, plateColor);
+
+                // Khung chinh duoc uu tien: khung khac phai hon >= 5% moi thay
+                if (top is not null && (best is null || posScore > bestPos * RefineImproveFactor))
+                {
+                    best = top;
+                    bestVotes = votes;
+                    bestRect = rect;
+                    bestColor = plateColor;
+                    bestPos = posScore;
+                }
             }
 
-            var best = votes.Values.OrderByDescending(v => v.Score).FirstOrDefault();
             if (best is null)
             {
-                SaveDebug(frame, rect, null, 0f);
-                return (null, 0f, plateBox);
+                if (!haveFirst) return (null, 0f, plateBox);
+                SaveDebug(frame, firstRect, null, 0f);
+                var shown = CharsBoxMode ? firstRect : TightPlateRect(frame, firstRect);
+                var unreadColor = _useColorRules ? PlateColorAnalyzer.Detect(frame, firstRect) : default;
+                return (null, 0f, new BoundingBox
+                {
+                    X1 = shown.X, Y1 = shown.Y, X2 = shown.X + shown.Width, Y2 = shown.Y + shown.Height,
+                    PlateColor = ColorKey(unreadColor.Color), PlateColorShare = (float)unreadColor.Share
+                });
             }
 
-            var refined = RefineRectFromChars(best, rect, frame.Width, frame.Height, _refineMode);
-            var box = new BoundingBox { X1 = refined.X, Y1 = refined.Y, X2 = refined.X + refined.Width, Y2 = refined.Y + refined.Height };
+            // Vi tri thang: neu moi co 1 loai bo doc dong y thi nho Tesseract xac nhan (trong pham vi mau cua chinh vi tri do)
+            PlateClass cls;
+            {
+                EnsureSecondOpinion(frame, bestRect, bestVotes!, () => false, bestColor.Color);
+                best = PlateVoteResolver.Best(bestVotes!) ?? best;
+                cls = PlateSyntax.Classify(best.Pretty, null, bestColor.Color);
+            }
+
+            var refined = FinalPlateRect(frame, best, bestRect);
+            var box = new BoundingBox
+            {
+                X1 = refined.X, Y1 = refined.Y, X2 = refined.X + refined.Width, Y2 = refined.Y + refined.Height,
+                PlateColor = ColorKey(bestColor.Color), PlateColorShare = (float)bestColor.Share,
+                PlateKind = cls.Kind.ToString(), PlateLabel = cls.Label
+            };
             SaveDebug(frame, refined, best.Pretty, best.BestConfidence);
-            return (best.Pretty, best.BestConfidence, box);
+            return (best.Pretty, ShownConfidence(cls, best.BestConfidence), box);
         }
     }
 
@@ -473,10 +565,18 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
 
         PlateVote? best = null;
         OpenCvSharp.Rect bestRect = default;
+        PlateColor bestColor = PlateColor.Unknown;         // mau nen cua vi tri dang dan dau
+        double bestColorShare = 0;
+        Dictionary<string, PlateVote>? bestVotes = null;   // phieu cua vi tri dang dan dau (de nho Tesseract xac nhan sau cung)
+        var detScores = new Dictionary<OpenCvSharp.Rect, float>();   // diem tin cay cua bo do khung bien cho tung khung ung vien
+        double bestPos = 0;                                // diem VI TRI cua vi tri dan dau (truoc y kien thu 2 de so sanh cong bang)
+        bool refine = _refineAfterFound && !quick;         // che do nhanh tren ca khung hinh: khong tim them
 
         // Thu lan luot cac ung vien vung bien (vung dau tien tim duoc KHONG luon la bien so, vd luoi tan nhiet) va chon ket qua
         // khop dinh dang bien so VN co diem bo phieu cao nhat; dung som khi diem du cao (≈ 2 lan doc trung nhau).
-        bool TryRects(IEnumerable<OpenCvSharp.Rect> rects)
+        // stopEarly: dung khi du diem + dong thuan doc lap. secondOpinion: nho Tesseract xac nhan ngay trong vong lap.
+        // improveFactor: vi tri moi phai hon vi tri dan dau bay nhieu lan moi duoc thay. stage: nhan ghi log.
+        bool TryRects(IEnumerable<OpenCvSharp.Rect> rects, bool stopEarly, bool secondOpinion, double improveFactor, string stage)
         {
             int tried0 = 0;
             foreach (var rect in rects)
@@ -485,11 +585,14 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
                 using var crop = new Mat(vehicleCrop, rect);
                 var votes = new Dictionary<string, PlateVote>();
 
+                // Mau nen bien (trang / vang / xanh / do) → moi buoc chuan hoa + cham diem trong khung nay ap cu phap theo mau
+                var plateColor = _useColorRules ? PlateColorAnalyzer.Detect(vehicleCrop, rect) : default;
+
                 // 0) CNN ky tu (neu co): doc o 3 muc le khac nhau cua khung bien (detector hay cat sat/thieu hang tren)
-                if (HasCharReader) AddCnnVotes(vehicleCrop, rect, votes);
+                if (HasCharReader) AddCnnVotes(vehicleCrop, rect, votes, plateColor.Color);
 
                 // 1) Model OCR ONNX (neu co)
-                if (_onnxReader is not null) AddOnnxVote(crop, votes);
+                if (_onnxReader is not null) AddOnnxVote(crop, votes, plateColor.Color);
 
                 // 2) Tesseract: bo qua neu model ONNX da doc duoc voi do tin cay cao
                 bool trusted = votes.Values.Any(v => v.BestConfidence >= OnnxTrustedConfidence);
@@ -500,32 +603,56 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
                     int padH = (int)(crop.Height * 0.12), padW = (int)(crop.Width * 0.12);
                     using var padded = new Mat();
                     Cv2.CopyMakeBorder(crop, padded, padH, padH, padW, padW, BorderTypes.Replicate);
-                    _reader.CollectVotes(padded, votes);
-                    _reader.CollectVotes(crop, votes);
+                    _reader.CollectVotes(padded, votes, plateColor.Color);
+                    _reader.CollectVotes(crop, votes, plateColor.Color);
                 }
 
-                var top = votes.Values.OrderByDescending(v => v.Score).FirstOrDefault();
-                if (top is not null && (best is null || top.Score > best.Score))
+                // Diem cua VI TRI nay = diem doc ky tu cua ket qua dan dau (TRUOC khi nho Tesseract xac nhan, de moi vi tri cung 1 thuoc do)
+                // x he so tin cay cua BO DO khung bien (0,5–1,5): khung co diem do cao (bien that) duoc uu tien hon khung diem thap (den xe, luoi tan nhiet)
+                float detScore = detScores.TryGetValue(rect, out var ds) ? ds : 0.35f;
+                double posScore = (PlateVoteResolver.Best(votes)?.Score ?? 0) * (0.5 + Math.Clamp(detScore, 0f, 1f));
+
+                // Kết quả chỉ có 1 bộ đọc đồng ý → nhờ Tesseract đọc độc lập trước khi tin
+                if (secondOpinion) EnsureSecondOpinion(vehicleCrop, rect, votes, OutOfTime, plateColor.Color);
+
+                var top = PlateVoteResolver.Best(votes);
+                LogReads(votes, top, rect, stage, detScore, plateColor);
+                if (top is not null && (best is null || posScore > bestPos * improveFactor))
                 {
                     best = top;
                     bestRect = rect;
+                    bestVotes = votes;
+                    bestPos = posScore;
+                    bestColor = plateColor.Color;
+                    bestColorShare = plateColor.Share;
                 }
 
-                if (best is not null && best.Score >= EarlyStopScore) return true;
+                // Chỉ dừng sớm khi điểm đủ cao VÀ có ≥ 2 ý kiến độc lập trùng nhau — không dừng chỉ vì 1 lần đọc điểm cao
+                if (stopEarly && best is not null && best.Score >= EarlyStopScore && HasIndependentAgreement(best)) return true;
             }
             return best is not null;
         }
+
+        // Lan tim chinh: che do tim-tiep (refine) thi KHONG dung som va KHONG goi Tesseract trong vong lap — so sanh moi vi tri bang bo doc ky tu,
+        // roi chi nho Tesseract xac nhan vi tri thang cuoi cung.
+        // Ket qua dang dan dau co CAU TRUC (dan su / quan doi / nuoc ngoai) khong? Chuoi "khong ro" (vd doc nham den xe thanh "9RXA7957") KHONG tinh la da tim thay:
+        // khi do van tiep tuc do noi long + du phong thay vi dung lai.
+        bool Solid() => best is not null && PlateSyntax.Classify(best.Pretty, null, bestColor).Kind != PlateKind.Unknown;
+
+        bool Try(IEnumerable<OpenCvSharp.Rect> candidateRects) => TryRects(candidateRects, !refine, !refine, 1.0, "detect");
 
         // Vung bien kha di nhat do bo do tim duoc nhung chua doc duoc ky tu → tra ve de nguoi dung thay/chinh o tab Train
         OpenCvSharp.Rect? unread = null;
         var tried = new List<OpenCvSharp.Rect>();
 
-        var detected = DetectPlateRects(vehicleCrop, relaxed: false);
+        var detected = DetectPlateRects(vehicleCrop, relaxed: false, scores: detScores);
+        // Doc khung co diem bo do cao truoc (neu het thoi gian giua chung thi khung tot nhat da duoc doc)
+        if (refine) detected = detected.OrderByDescending(r0 => detScores.TryGetValue(r0, out var d0) ? d0 : 0f).ToList();
         if (detected.Count > 0)
         {
             unread = detected[0];
             tried.AddRange(detected);
-            TryRects(detected);
+            Try(detected);
         }
 
         // Do nhanh tren ca khung hinh (khong thay xe): co bo do bien da huan luyen ma khong thay bien nao → anh khong co bien, tra ve ngay
@@ -533,43 +660,106 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
             return (null, 0f, null);
 
         // Lan do noi long (ha nguong, o chia nho, can bang sang): chi khi lan thuong chua cho ra bien doc duoc (khong dung o che do nhanh)
-        if (best is null && _relaxedSearch && !quick && !OutOfTime())
+        if (!Solid() && _relaxedSearch && !quick && !OutOfTime())
         {
-            var more = DetectPlateRects(vehicleCrop, relaxed: true).Where(r => tried.All(t => RectIou(r, t) < 0.5)).ToList();
+            var more = DetectPlateRects(vehicleCrop, relaxed: true, scores: detScores).Where(r => tried.All(t => RectIou(r, t) < 0.5)).ToList();
             if (more.Count > 0)
             {
                 unread ??= more[0];
                 tried.AddRange(more);
-                TryRects(more);
+                Try(more);
             }
         }
 
         // Du phong bang xu ly anh. O che do nhanh chi dung khi KHONG co bo do bien da huan luyen (khi do day la cach duy nhat), va chi vai ung vien.
         // (Theo khuyen nghi: khong chay phuong phap co dien song song voi YOLO — yeu hon ro khi anh sang kem/bien ban/nghieng va chi them khung gia.)
         // Chi dung khi KHONG co bo do neural nao (khi do day la cach duy nhat), hoac khi bat Anpr:ClassicalPlateFallback.
-        if (best is null && (!hasLearnedDetector || _classicalFallback) && !OutOfTime())
-            TryRects(PlateLocator.FindPlateCandidates(vehicleCrop, quick ? 2 : MaxCandidates));
+        if (!Solid() && (!hasLearnedDetector || _classicalFallback) && !OutOfTime())
+            Try(PlateLocator.FindPlateCandidates(vehicleCrop, quick ? 2 : MaxCandidates));
+
+        // TIM TIEP trong khu vuc vua tim thay bien: do lai (phong to, ha nguong) + thu vai vi tri lech nhe quanh khung,
+        // doc tat ca roi lay VI TRI doc tot nhat (phai hon vi tri hien tai ≥ 5%).
+        if (refine && best is not null && _refineMaxRects > 0 && !OutOfTime())
+        {
+            var extra = BuildRefineRects(vehicleCrop, bestRect, tried, detScores).Take(_refineMaxRects).ToList();
+            if (extra.Count > 0)
+            {
+                tried.AddRange(extra);
+                TryRects(extra, false, false, RefineImproveFactor, "refine");
+            }
+        }
+
+        // Vi tri thang cuoi: nho Tesseract xac nhan (chi khi ket qua moi co 1 loai bo doc)
+        if (refine && bestVotes is not null && !OutOfTime())
+        {
+            EnsureSecondOpinion(vehicleCrop, bestRect, bestVotes, OutOfTime, bestColor);
+            best = PlateVoteResolver.Best(bestVotes) ?? best;
+        }
 
         if (best is null)
         {
             SaveDebug(vehicleCrop, unread, null, 0f);
-            if (unread is { } u)
+            if (unread is { } u0)
+            {
+                var u = CharsBoxMode ? u0 : TightPlateRect(vehicleCrop, u0);
                 return (null, 0f, new BoundingBox { X1 = u.X, Y1 = u.Y, X2 = u.X + u.Width, Y2 = u.Y + u.Height });
+            }
             return (null, 0f, null);
         }
 
         // Khung bao biển tính lại từ DẢI KÝ TỰ đã đọc được (khung cua bo do, nhat la model train it anh, hay bi cut/lech).
         // Khung nay cung la khung goi y cho tab Train nen khung dung se khong "day" nhan sai vao du lieu train.
-        bestRect = RefineRectFromChars(best, bestRect, vehicleCrop.Width, vehicleCrop.Height, _refineMode);
+        bestRect = FinalPlateRect(vehicleCrop, best, bestRect);
+        var finalCls = PlateSyntax.Classify(best.Pretty, null, bestColor);
         var box = new BoundingBox
         {
             X1 = bestRect.X,
             Y1 = bestRect.Y,
             X2 = bestRect.X + bestRect.Width,
-            Y2 = bestRect.Y + bestRect.Height
+            Y2 = bestRect.Y + bestRect.Height,
+            PlateColor = ColorKey(bestColor), PlateColorShare = (float)bestColorShare,
+            PlateKind = finalCls.Kind.ToString(), PlateLabel = finalCls.Label
         };
         SaveDebug(vehicleCrop, bestRect, best.Pretty, best.BestConfidence);
-        return (best.Pretty, best.BestConfidence, box);
+        return (best.Pretty, ShownConfidence(finalCls, best.BestConfidence), box);
+    }
+
+    /// <summary>Khung biển cuối cùng trả về/hiển thị: PlateBoxMode = 1 → theo dải ký tự đã đọc; PlateBoxMode = 0 → khung ôm sát của bộ dò + offset (xem <see cref="TightPlateRect"/>).</summary>
+    private OpenCvSharp.Rect FinalPlateRect(Mat image, PlateVote vote, OpenCvSharp.Rect readRect) =>
+        CharsBoxMode ? RefineRectFromChars(vote, readRect, image.Width, image.Height, "chars") : TightPlateRect(image, readRect);
+
+    /// <summary>
+    /// Khung biển ÔM SÁT như tab Train biển số (cùng cách dò của <see cref="SuggestBoxes"/>: model đã train trước, không nới viền), cộng thêm offset
+    /// (cài đặt PlateBoxOffsetPercent, % mỗi phía). Khung dùng để ĐỌC ký tự có thể đã bị nới viền/lấy từ Darknet (rộng hơn biển) nên ở đây dò lại
+    /// và chọn khung ôm sát trùng nhiều nhất với khung đã đọc; không tìm được thì dùng chính khung đã đọc. Chỉ ảnh hưởng khung HIỂN THỊ/ghi nhận, không ảnh hưởng việc đọc.
+    /// </summary>
+    private OpenCvSharp.Rect TightPlateRect(Mat image, OpenCvSharp.Rect readRect)
+    {
+        var tight = readRect;
+        try
+        {
+            double bestIou = 0.3;
+            foreach (var b in SuggestBoxes(image, PlateBoxConf))   // _ocrLock là khoá tái nhập (cùng luồng) nên gọi lồng được
+            {
+                int x1 = (int)Math.Floor(b.X1), y1 = (int)Math.Floor(b.Y1);
+                var r = new OpenCvSharp.Rect(x1, y1, (int)Math.Ceiling(b.X2) - x1, (int)Math.Ceiling(b.Y2) - y1);
+                if (r.Width < 8 || r.Height < 4) continue;
+                double iou = RectIou(r, readRect);
+                if (iou > bestIou) { bestIou = iou; tight = r; }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Khong tinh duoc khung bien om sat — dung khung da doc.");
+        }
+
+        double off = Math.Clamp(_settings.Current.PlateBoxOffsetPercent ?? 4f, 0f, 30f) / 100.0;
+        double dx = tight.Width * off, dy = tight.Height * off;
+        int nx1 = (int)Math.Max(0, Math.Floor(tight.X - dx));
+        int ny1 = (int)Math.Max(0, Math.Floor(tight.Y - dy));
+        int nx2 = (int)Math.Min(image.Width, Math.Ceiling(tight.Right + dx));
+        int ny2 = (int)Math.Min(image.Height, Math.Ceiling(tight.Bottom + dy));
+        return nx2 - nx1 < 8 || ny2 - ny1 < 4 ? tight : new OpenCvSharp.Rect(nx1, ny1, nx2 - nx1, ny2 - ny1);
     }
 
     /// <summary>
@@ -577,7 +767,7 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
     ///   • "expand" (mặc định): dải ký tự đọc được nằm trong khung bộ dò (sai số 4–6%) → GIỮ NGUYÊN khung bộ dò. Chỉ khi dải ký tự lòi hẳn ra ngoài
     ///     (khung bị cụt) mới mở rộng khung để chứa đủ dải ký tự + lề. Nhờ vậy biển 2 dòng mà chỉ đọc được 1 dòng KHÔNG còn làm khung co về 1 dòng.
     ///   • "off": luôn giữ khung bộ dò.   • "chars": kiểu cũ — luôn thay bằng khung tính từ dải ký tự (lề cố định 10% ngang / 28% dọc) → hay cắt thừa/cắt thiếu.
-    /// Đổi bằng appsettings: <c>"Anpr": { "BoxRefine": "expand" | "off" | "chars" }</c>.
+    /// Hiện chọn qua Cấu hình chung (SystemSettings.PlateBoxMode): 0 → "off" (giữ khung bộ dò), 1 → "chars" (theo dải ký tự); "expand" không còn được chọn.
     /// </summary>
     private static OpenCvSharp.Rect RefineRectFromChars(PlateVote vote, OpenCvSharp.Rect detected, int imgW, int imgH, string mode)
     {
@@ -624,9 +814,13 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
         return uni <= 0 ? 0 : inter / uni;
     }
 
-    private List<OpenCvSharp.Rect> DetectPlateRects(Mat vehicleCrop, bool relaxed, bool quickOnly = false)
+    private List<OpenCvSharp.Rect> DetectPlateRects(Mat vehicleCrop, bool relaxed, bool quickOnly = false, bool applyShapeFilter = true,
+                                                    Dictionary<OpenCvSharp.Rect, float>? scores = null)
     {
         float boxConf = PlateBoxConf;
+        // Che do tim-tiep: lay NHIEU khung hon (ngưỡng thấp sinh nhiều khung nhiễu như đèn xe, nên nếu cắt còn 3–4 khung thì biển thật có thể bị loại);
+        // tất cả đều được đọc và so sánh nên khung nhiễu không gây hại, chỉ tốn thời gian (có giới hạn thời gian chung).
+        bool wide = _refineAfterFound && !relaxed;
         var list = new List<OpenCvSharp.Rect>();
         var custom = _customPlateDetector;
         if (custom is null && _plateDetector is null && _darknetDetector is null) return list;
@@ -639,16 +833,20 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
         // Gop khung cua NHIEU bo do (model da train them + Darknet mac dinh) thay vi dung o bo do dau tien co ket qua:
         // model train them co the cho khung bi cut (mat ky tu dau/cuoi), khi do khung cua Darknet moi cho doc dung.
         // Chi bo khung gan nhu TRUNG HAN (IoU > 0.85); khung cut van co IoU ~0.7 voi khung day du nen duoc giu lai de thu ca hai.
-        void AddRect(OpenCvSharp.Rect r)
+        void AddRect(OpenCvSharp.Rect r, double score)
         {
-            if (list.All(x => RectIou(x, r) <= 0.85)) list.Add(r);
+            if (list.All(x => RectIou(x, r) <= 0.85))
+            {
+                list.Add(r);
+                if (scores is not null) scores[r] = (float)score;      // diem tin cay cua BO DO cho khung nay
+            }
         }
 
         try
         {
             // Duong nhanh tren ca khung hinh (quickOnly) can khung OM SAT bien (khong noi vien): phan doc ky tu tu noi vien khi cat
             if (custom is not null && useYolo)
-                foreach (var (rect, _) in custom.Detect(vehicleCrop, relaxed ? 0.15f : boxConf, relaxed ? 4 : 3, expand: quickOnly ? 0f : 0.06f)) AddRect(rect);
+                foreach (var (rect, sc) in custom.Detect(vehicleCrop, relaxed ? 0.15f : boxConf, relaxed ? 4 : (wide ? 6 : 3), expand: quickOnly ? 0f : 0.06f)) AddRect(rect, sc);
         }
         catch (Exception ex)
         {
@@ -663,16 +861,16 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
                 var found = relaxed ? _darknetDetector.DetectRelaxed(vehicleCrop)
                           : (quickOnly || list.Count > 0) ? _darknetDetector.DetectQuick(vehicleCrop, boxConf)
                           : _darknetDetector.Detect(vehicleCrop, boxConf);
-                foreach (var (rect, _) in found) AddRect(rect);
+                foreach (var (rect, sc) in found) AddRect(rect, sc);
             }
             if (!relaxed && list.Count == 0 && _plateDetector is not null && useYolo)
-                foreach (var (rect, _) in _plateDetector.Detect(vehicleCrop, boxConf)) AddRect(rect);
+                foreach (var (rect, sc) in _plateDetector.Detect(vehicleCrop, boxConf)) AddRect(rect, sc);
         }
         catch (Exception ex)
         {
             if (!_warnedOnnx) { _warnedOnnx = true; _logger.LogWarning(ex, "Model do bien so ONNX loi khi chay — dung PlateLocator thay the."); }
         }
-        return ShapeFilter(list, vehicleCrop.Width, vehicleCrop.Height).Take(relaxed ? 5 : 4).ToList();
+        return (applyShapeFilter ? ShapeFilter(list, vehicleCrop.Width, vehicleCrop.Height) : list).Take(relaxed ? 5 : (wide ? 8 : 4)).ToList();
     }
 
     /// <summary>Loc khung theo hinh hoc (xem <see cref="PlateBoxFilter"/>): bo khung vo ly, xep khung dung dang truoc khung nghi cut. Tat bang Anpr:PlateShapeFilter.</summary>
@@ -685,7 +883,7 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
     /// (biển 1 dòng mà tỉ lệ rộng/cao &lt; 4, hoặc ký tự chạm mép ảnh cắt) thì thử thêm các mức nới ngang mạnh (một phía và hai phía).
     /// Phiếu của các mức nới mạnh có trọng số thấp hơn (dễ lẫn nền xe) — chỉ thắng khi các mức thường không đọc được/không đồng thuận.
     /// </summary>
-    private void AddCnnVotes(Mat vehicleCrop, OpenCvSharp.Rect rect, Dictionary<string, PlateVote> votes)
+    private void AddCnnVotes(Mat vehicleCrop, OpenCvSharp.Rect rect, Dictionary<string, PlateVote> votes, PlateColor color)
     {
         try
         {
@@ -698,14 +896,14 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
             var yolo = _charDet;
             if (yolo is not null)
             {
-                bool cut = ReadYoloLevel(yolo, vehicleCrop, rect, 0.10, 0.10, 0.20, 1.0, votes);
+                bool cut = ReadYoloLevel(yolo, vehicleCrop, rect, 0.10, 0.10, 0.20, 1.0, votes, color);
                 if (votes.Count == 0 || suspectCut || cut)
-                    ReadYoloLevel(yolo, vehicleCrop, rect, 0.30, 0.30, 0.25, votes.Count == 0 ? 1.0 : 0.7, votes);
-                if (votes.Count > 0)
+                    ReadYoloLevel(yolo, vehicleCrop, rect, 0.30, 0.30, 0.25, votes.Count == 0 ? 1.0 : 0.7, votes, color);
+                if (votes.Count > 0 && (_cnnReader is null || HasStructuredVote(votes)))
                 {
                     // Ket hop: YOLO chua chac (do tin cay thap / cac lan doc bat dong / khung nghi cut) -> nho Tesseract kiem chung (tuy chon)
                     if ((_settings.Current.CharCombine ?? 1) != 0 && _reader is not null && YoloUncertain(votes, suspectCut || cut))
-                        AddTesseractVerification(vehicleCrop, rect, votes);
+                        AddTesseractVerification(vehicleCrop, rect, votes, color);
                     return;
                 }
             }
@@ -713,14 +911,14 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
 
             // (le trai, le phai, le doc) theo ty le khung: sat, vua, rong hon; khung do co the cat mat hang chu tren
             foreach (var (fl, fr, fy) in new[] { (0.08, 0.08, 0.08), (0.12, 0.12, 0.25) })
-                edgeCut |= ReadCnnLevel(vehicleCrop, rect, fl, fr, fy, 1.0, votes);
-            ReadCnnLevel(vehicleCrop, rect, 0.0, 0.0, 0.0, 1.0, votes);   // cat sat (cham mep la binh thuong nen khong tinh vao edgeCut)
+                edgeCut |= ReadCnnLevel(vehicleCrop, rect, fl, fr, fy, 1.0, votes, color);
+            ReadCnnLevel(vehicleCrop, rect, 0.0, 0.0, 0.0, 1.0, votes, color);   // cat sat (cham mep la binh thuong nen khong tinh vao edgeCut)
 
             if (votes.Count == 0 || suspectCut || edgeCut)
             {
                 double ws = votes.Count == 0 ? 1.0 : 0.6;
                 foreach (var (fl, fr, fy) in new[] { (0.0, 0.4, 0.2), (0.4, 0.0, 0.2), (0.4, 0.4, 0.25) })
-                    ReadCnnLevel(vehicleCrop, rect, fl, fr, fy, ws, votes);
+                    ReadCnnLevel(vehicleCrop, rect, fl, fr, fy, ws, votes, color);
             }
         }
         catch (Exception ex)
@@ -746,7 +944,7 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
     /// Tesseract làm bước KIỂM CHỨNG cho kết quả YOLO (không phải bộ đọc ngang hàng): Tesseract đọc nhiều biến thể ảnh rồi bỏ phiếu, điểm mỗi kết quả bị chặn ở
     /// <see cref="TesseractVerifyCap"/>. Cùng kết quả với YOLO → cộng điểm/độ tin cậy; khác → chỉ có tác dụng khi YOLO chưa phân thắng bại.
     /// </summary>
-    private void AddTesseractVerification(Mat vehicleCrop, OpenCvSharp.Rect rect, Dictionary<string, PlateVote> votes)
+    private void AddTesseractVerification(Mat vehicleCrop, OpenCvSharp.Rect rect, Dictionary<string, PlateVote> votes, PlateColor color)
     {
         try
         {
@@ -761,20 +959,25 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
             Cv2.CopyMakeBorder(crop, padded, padH, padH, padW, padW, BorderTypes.Replicate);
 
             var tess = new Dictionary<string, PlateVote>();
-            _reader!.CollectVotes(padded, tess);
-            _reader.CollectVotes(crop, tess);
+            _reader!.CollectVotes(padded, tess, color);
+            _reader.CollectVotes(crop, tess, color);
 
             foreach (var (key, tv) in tess)
             {
                 double add = Math.Min(tv.Score, TesseractVerifyCap);
                 if (votes.TryGetValue(key, out var v))
                 {
-                    v.Score += add;                                                  // dong y voi YOLO
+                    v.Score += add;                                                  // dong y voi bo doc truoc
                     v.BestConfidence = Math.Max(v.BestConfidence, tv.BestConfidence);
+                    v.Sources |= tv.Sources;
+                    v.Reads += tv.Reads;
+                    foreach (var r in tv.Raws) v.AddRawTagged(r);
                 }
                 else
                 {
-                    votes[key] = new PlateVote { Pretty = tv.Pretty, Score = add, BestConfidence = tv.BestConfidence * 0.5f };   // Tesseract tu de xuat
+                    var nv = new PlateVote { Pretty = tv.Pretty, Score = add, BestConfidence = tv.BestConfidence * 0.5f, Sources = tv.Sources, Reads = tv.Reads, Color = tv.Color };   // Tesseract tu de xuat
+                    foreach (var r in tv.Raws) nv.AddRawTagged(r);
+                    votes[key] = nv;
                 }
             }
         }
@@ -785,50 +988,180 @@ public class TesseractPlateRecognitionService : IPlateRecognitionService, ICharM
     }
 
     /// <summary>Cắt khung biển nới (trái, phải, dọc — theo tỉ lệ kích thước khung) rồi đọc bằng model dò ký tự YOLO. Trả về true nếu ký tự chạm mép ảnh cắt.</summary>
-    private static bool ReadYoloLevel(YoloCharReader yolo, Mat vehicleCrop, OpenCvSharp.Rect rect, double fl, double fr, double fy, double weightScale, Dictionary<string, PlateVote> votes)
+    private static bool ReadYoloLevel(YoloCharReader yolo, Mat vehicleCrop, OpenCvSharp.Rect rect, double fl, double fr, double fy, double weightScale, Dictionary<string, PlateVote> votes, PlateColor color)
     {
         int pl = (int)(rect.Width * fl), pr = (int)(rect.Width * fr), py = (int)(rect.Height * fy);
         int x1 = Math.Max(0, rect.X - pl), y1 = Math.Max(0, rect.Y - py);
         int x2 = Math.Min(vehicleCrop.Width, rect.Right + pr), y2 = Math.Min(vehicleCrop.Height, rect.Bottom + py);
         if (x2 - x1 < 8 || y2 - y1 < 8) return false;
         using var c = new Mat(vehicleCrop, new OpenCvSharp.Rect(x1, y1, x2 - x1, y2 - y1));
-        return yolo.CollectVotes(c, votes, weightScale, x1, y1);
+        return yolo.CollectVotes(c, votes, weightScale, x1, y1, color);
     }
 
     /// <summary>Cắt khung biển nới (trái, phải, dọc — theo tỉ lệ kích thước khung) rồi đọc bằng CNN. Trả về true nếu ký tự chạm mép ảnh cắt.</summary>
-    private bool ReadCnnLevel(Mat vehicleCrop, OpenCvSharp.Rect rect, double fl, double fr, double fy, double weightScale, Dictionary<string, PlateVote> votes)
+    private bool ReadCnnLevel(Mat vehicleCrop, OpenCvSharp.Rect rect, double fl, double fr, double fy, double weightScale, Dictionary<string, PlateVote> votes, PlateColor color)
     {
         int pl = (int)(rect.Width * fl), pr = (int)(rect.Width * fr), py = (int)(rect.Height * fy);
         int x1 = Math.Max(0, rect.X - pl), y1 = Math.Max(0, rect.Y - py);
         int x2 = Math.Min(vehicleCrop.Width, rect.Right + pr), y2 = Math.Min(vehicleCrop.Height, rect.Bottom + py);
         if (x2 - x1 < 8 || y2 - y1 < 8) return false;
         using var c = new Mat(vehicleCrop, new OpenCvSharp.Rect(x1, y1, x2 - x1, y2 - y1));
-        return _cnnReader!.CollectVotes(c, votes, weightScale, x1, y1);
+        return _cnnReader!.CollectVotes(c, votes, weightScale, x1, y1, color);
     }
 
-    private void AddOnnxVote(Mat plateCrop, Dictionary<string, PlateVote> votes)
+    private void AddOnnxVote(Mat plateCrop, Dictionary<string, PlateVote> votes, PlateColor color)
     {
         try
         {
             var (raw, conf, lineLengths) = _onnxReader!.Read(plateCrop);
             if (raw is null) return;
 
-            var pretty = PlateNormalizer.Apply(raw, lineLengths);      // ham cua nguoi dung: null / "" = khong nhan dien duoc
+            var pretty = PlateNormalizer.Apply(raw, lineLengths, color);      // ham cua nguoi dung: null / "" = khong nhan dien duoc
             if (pretty is null) return;
 
             var key = Regex.Replace(pretty.ToUpperInvariant(), "[^A-Z0-9]", "");
             if (!votes.TryGetValue(key, out var vote))
-                votes[key] = vote = new PlateVote { Pretty = pretty };
+                votes[key] = vote = new PlateVote { Pretty = pretty, Color = color };
 
             // Doc tin cay cao tu model chuyen dung dang 2 lan doc Tesseract; ma tinh la thi giam trong so (xem PlateTextReader)
             double weight = (conf >= OnnxTrustedConfidence ? 2.0 : 1.0) * (1.0 + conf)
-                            * PlateNormalizer.Weight(pretty);
+                            * PlateNormalizer.Weight(pretty, color);
             vote.Score += weight;
             vote.BestConfidence = Math.Max(vote.BestConfidence, conf);
+            vote.Sources |= ReaderSource.Crnn;
+            vote.Reads++;
+            vote.AddRaw(ReaderSource.Crnn, raw);
         }
         catch (Exception ex)
         {
             if (!_warnedOnnx) { _warnedOnnx = true; _logger.LogWarning(ex, "Model OCR ONNX loi khi chay — dung Tesseract thay the."); }
+        }
+    }
+
+    /// <summary>
+    /// "Tìm tiếp trong khu vực" quanh khung biển đã tìm thấy: (1) cắt vùng rộng hơn khung (±35% ngang, ±50% dọc), phóng to nếu nhỏ rồi chạy LẠI các bộ dò
+    /// với ngưỡng thấp — bộ dò thường định vị tốt hơn khi biển to trong ảnh; (2) thử thêm 4 khung lệch nhẹ (trái/phải 10% rộng, lên/xuống 12% cao).
+    /// Khung quá giống khung đã thử bị bỏ. Khung từ bước (1) phải có hình dạng và cỡ gần với khung đã tìm (tỉ lệ 1–7,5; rộng 0,5–2 lần).
+    /// </summary>
+    private List<OpenCvSharp.Rect> BuildRefineRects(Mat vehicleCrop, OpenCvSharp.Rect found, List<OpenCvSharp.Rect> tried, Dictionary<OpenCvSharp.Rect, float> scores)
+    {
+        var result = new List<OpenCvSharp.Rect>();
+        float parentScore = scores.TryGetValue(found, out var ps) ? ps : 0.35f;
+        int w = vehicleCrop.Width, h = vehicleCrop.Height;
+
+        bool Fresh(OpenCvSharp.Rect r) =>
+            r.Width >= 8 && r.Height >= 4
+            && tried.All(t => RectIou(r, t) < RefineDupIou)
+            && result.All(t => RectIou(r, t) < RefineDupIou);
+
+        try
+        {
+            int ax1 = Math.Max(0, found.X - (int)(found.Width * 0.35));
+            int ay1 = Math.Max(0, found.Y - (int)(found.Height * 0.50));
+            int ax2 = Math.Min(w, found.X + found.Width + (int)(found.Width * 0.35));
+            int ay2 = Math.Min(h, found.Y + found.Height + (int)(found.Height * 0.50));
+            var area = new OpenCvSharp.Rect(ax1, ay1, ax2 - ax1, ay2 - ay1);
+            if (area.Width >= 16 && area.Height >= 16)
+            {
+                using var areaMat = new Mat(vehicleCrop, area);
+                double scale = Math.Clamp(RefineTargetWidth / area.Width, 1.0, 3.0);
+                using var zoomed = new Mat();
+                if (scale > 1.01) Cv2.Resize(areaMat, zoomed, new OpenCvSharp.Size(), scale, scale, InterpolationFlags.Cubic);
+                else areaMat.CopyTo(zoomed);
+
+                var zoomScores = new Dictionary<OpenCvSharp.Rect, float>();
+                foreach (var r in DetectPlateRects(zoomed, relaxed: true, applyShapeFilter: false, scores: zoomScores))
+                {
+                    int x1 = Math.Clamp(area.X + (int)Math.Round(r.X / scale), 0, w - 1);
+                    int y1 = Math.Clamp(area.Y + (int)Math.Round(r.Y / scale), 0, h - 1);
+                    int x2 = Math.Clamp(area.X + (int)Math.Round((r.X + r.Width) / scale), x1 + 1, w);
+                    int y2 = Math.Clamp(area.Y + (int)Math.Round((r.Y + r.Height) / scale), y1 + 1, h);
+                    var mapped = new OpenCvSharp.Rect(x1, y1, x2 - x1, y2 - y1);
+
+                    double aspect = mapped.Width / (double)Math.Max(1, mapped.Height);
+                    if (aspect < 1.0 || aspect > 7.5) continue;
+                    if (mapped.Width < 0.5 * found.Width || mapped.Width > 2.0 * found.Width) continue;
+                    if (Fresh(mapped)) { result.Add(mapped); scores[mapped] = zoomScores.TryGetValue(r, out var zs) ? zs : 0.35f; }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Do lai trong khu vuc quanh khung bien loi — bo qua buoc nay.");
+        }
+
+        int dx = (int)Math.Round(found.Width * 0.10), dy = (int)Math.Round(found.Height * 0.12);
+        foreach (var (sx, sy) in new[] { (-dx, 0), (dx, 0), (0, -dy), (0, dy) })
+        {
+            var v = ClampRect(new OpenCvSharp.Rect(found.X + sx, found.Y + sy, found.Width, found.Height), w, h);
+            if (Fresh(v)) { result.Add(v); scores[v] = parentScore; }   // khung lech nhe thua huong diem do cua khung goc
+        }
+        return result;
+    }
+
+    private static OpenCvSharp.Rect ClampRect(OpenCvSharp.Rect r, int w, int h)
+    {
+        int rw = Math.Min(r.Width, w), rh = Math.Min(r.Height, h);
+        return new OpenCvSharp.Rect(Math.Clamp(r.X, 0, w - rw), Math.Clamp(r.Y, 0, h - rh), rw, rh);
+    }
+
+    private int AvailableReaderKinds() =>
+        (_charDet is not null ? 1 : 0) + (_cnnReader is not null ? 1 : 0) + (_onnxReader is not null ? 1 : 0) + (_reader is not null ? 1 : 0);
+
+    /// <summary>≥ 2 bộ đọc khác loại cùng ra chuỗi này. Nếu hệ thống chỉ có 1 loại bộ đọc thì không thể có 2 ý kiến độc lập → chấp nhận ≥ 2 lần đọc trùng.</summary>
+    private bool HasIndependentAgreement(PlateVote v) =>
+        System.Numerics.BitOperations.PopCount((uint)v.Sources) >= 2 || (AvailableReaderKinds() < 2 && v.Reads >= 2);
+
+    private static bool HasStructuredVote(Dictionary<string, PlateVote> votes) =>
+        votes.Values.Any(v => PlateSyntax.Classify(v.Pretty, null, v.Color).Kind != PlateKind.Unknown);
+
+    /// <summary>Kết quả đứng đầu mới chỉ có 1 loại bộ đọc → chạy Tesseract làm ý kiến thứ 2 (điểm bị chặn, xem <see cref="TesseractVerifyCap"/>).</summary>
+    private void EnsureSecondOpinion(Mat vehicleCrop, OpenCvSharp.Rect rect, Dictionary<string, PlateVote> votes, Func<bool> outOfTime, PlateColor color)
+    {
+        if (!_requireSecondOpinion || _reader is null || votes.Count == 0 || outOfTime()) return;
+        if (votes.Values.Any(v => (v.Sources & ReaderSource.Tesseract) != 0)) return;      // Tesseract đã đọc rồi
+        var top = PlateVoteResolver.Best(votes);
+        if (top is null || System.Numerics.BitOperations.PopCount((uint)top.Sources) >= 2) return;
+        AddTesseractVerification(vehicleCrop, rect, votes, color);
+    }
+
+    /// <summary>Ghi 1 dòng JSON cho mỗi lần đọc: các ứng viên (kèm loại cấu trúc, bộ đọc, chuỗi thô của từng bộ đọc) và kết quả được chọn.</summary>
+    private void LogReads(Dictionary<string, PlateVote> votes, PlateVote? chosen, OpenCvSharp.Rect rect, string stage = "read", float detScore = -1f, PlateColorAnalyzer.Result color = default)
+    {
+        if (_readLogDir is null) return;
+        try
+        {
+            Directory.CreateDirectory(_readLogDir);
+            var file = Path.Combine(_readLogDir, $"reads-{DateTime.Now:yyyyMMdd}.jsonl");
+            if (File.Exists(file) && new FileInfo(file).Length > 50_000_000) return;
+
+            var line = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                time = DateTime.Now.ToString("o"),
+                tag = LogTag.Value,
+                stage,
+                color = color.Color.ToString(),
+                colorShare = Math.Round(color.Share, 2),
+                det = detScore < 0 ? (double?)null : Math.Round(detScore, 2),
+                rect = $"{rect.X},{rect.Y},{rect.Width},{rect.Height}",
+                chosen = chosen?.Pretty,
+                candidates = votes.Values.OrderByDescending(v => v.Score).Select(v => new
+                {
+                    plate = v.Pretty,
+                    kind = PlateSyntax.Classify(v.Pretty, null, v.Color).Kind.ToString(),
+                    score = Math.Round(v.Score, 2),
+                    conf = Math.Round(v.BestConfidence, 2),
+                    sources = v.Sources.ToString(),
+                    reads = v.Reads,
+                    gapFilled = v.GapFilled,
+                    raws = v.Raws
+                })
+            });
+            File.AppendAllText(file, line + "\n");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Khong ghi duoc log doc bien.");
         }
     }
 

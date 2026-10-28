@@ -59,7 +59,7 @@ public sealed class CnnPlateReader : IDisposable
     /// <summary>Đọc 1 ảnh biển (BGR) theo 4 kiểu nhị phân hoá, mỗi kiểu thành 1 phiếu nếu hợp định dạng biển VN.
     /// <paramref name="weightScale"/>: hệ số nhân trọng số phiếu (&lt; 1 cho lần đọc trên khung đã nới rộng — dễ lẫn nền xe nên chỉ để bổ trợ).
     /// Trả về true nếu có ký tự CHẠM MÉP TRÁI/PHẢI ảnh cắt (dấu hiệu khung biển bị cụt) — phiếu của lần đọc đó bị giảm trọng số.</summary>
-    public bool CollectVotes(Mat plateBgr, Dictionary<string, PlateVote> votes, double weightScale = 1.0, int originX = 0, int originY = 0)
+    public bool CollectVotes(Mat plateBgr, Dictionary<string, PlateVote> votes, double weightScale = 1.0, int originX = 0, int originY = 0, PlateColor color = PlateColor.Unknown)
     {
         bool anyEdgeCut = false;
         if (plateBgr.Empty()) return false;
@@ -92,19 +92,22 @@ public sealed class CnnPlateReader : IDisposable
 
                 string raw = string.Concat(texts);
                 var lineLengths = texts.Count == 2 ? new[] { texts[0].Length, texts[1].Length } : null;
-                var pretty = PlateNormalizer.Apply(raw, lineLengths);      // ham cua nguoi dung: null / "" = khong nhan dien duoc
+                var pretty = PlateNormalizer.Apply(raw, lineLengths, color);      // ham cua nguoi dung: null / "" = khong nhan dien duoc
                 if (pretty is null) continue;
 
                 var key = Regex.Replace(pretty.ToUpperInvariant(), "[^A-Z0-9]", "");
                 if (!votes.TryGetValue(key, out var vote))
-                    votes[key] = vote = new PlateVote { Pretty = pretty };
+                    votes[key] = vote = new PlateVote { Pretty = pretty, Color = color };
 
-                double weight = (1.0 + conf) * PlateNormalizer.Weight(pretty);
+                double weight = (1.0 + conf) * PlateNormalizer.Weight(pretty, color);
                 if (key.Length >= 8 && Regex.IsMatch(key, @"\d{5}$")) weight += 0.2; // uu tien duoi 5 so (doc thieu so cuoi la loi hay gap)
                 weight *= weightScale;
                 if (edgeCut) weight *= 0.3;                                          // ky tu cham mep -> khung bien co the bi cut, doc de bi sai/thieu
                 vote.Score += weight;
                 vote.BestConfidence = Math.Max(vote.BestConfidence, (float)conf);
+                vote.Sources |= ReaderSource.Cnn;
+                vote.Reads++;
+                vote.AddRaw(ReaderSource.Cnn, raw);
 
                 // Ghi lai dai ky tu (toa do anh goc cua nguoi goi = anh cat + origin) tu lan doc tot nhat, uu tien lan doc khong cham mep
                 if (span.Width > 0 && !edgeCut && weight > vote.SpanWeight)
