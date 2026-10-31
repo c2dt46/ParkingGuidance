@@ -17,5 +17,9 @@ public class DetectionZone
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "";
     public string? SlotId { get; set; }
+
+    /// <summary>Biển số xe được chỉ định đỗ vào ô này (đã chuẩn hoá: bỏ khoảng trắng, viết hoa). null/rỗng = xe nào đỗ cũng được.
+    /// Có khai báo: xe đỗ trong vùng đọc ra biển trùng → đỗ đúng, khác → đỗ sai.</summary>
+    public string? AssignedPlate { get; set; }
     public List<ZonePoint> Points { get; set; } = new();
 }

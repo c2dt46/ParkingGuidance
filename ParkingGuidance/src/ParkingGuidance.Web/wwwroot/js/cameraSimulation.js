@@ -78,6 +78,19 @@
         return html;
     }
 
+    // Độ tin cậy TỪNG ký tự của biển (mảng plateChars): ký tự < 60% tô cam; ký tự đã bị bỏ gạch ngang (rê chuột xem lý do)
+    function plateCharsHtml(pb) {
+        const cs = pb && pb.plateChars;
+        if (!cs || !cs.length) return '';
+        const items = cs.map(c => {
+            const pct = Math.round((c.score || 0) * 100);
+            const style = c.dropped ? 'text-decoration:line-through;opacity:.6;' : (pct < 60 ? 'color:#b45309;font-weight:600;' : '');
+            const tip = c.dropped ? `Đã bỏ — ${c.dropped} (${pct}%)` : `Độ tin cậy ${pct}%`;
+            return `<span title="${tip}" style="${style}">${c.value}<sub style="font-size:10px;">${pct}</sub></span>`;
+        });
+        return `<div class="hint small" style="margin-top:2px;">Từng ký tự: ${items.join(' ')}</div>`;
+    }
+
     function cardHtml(v, view) {
         const head = `#${v.index} ${esc(TYPE_VI[v.vehicleType] || v.vehicleType)}` + (v.color ? ` · ${esc(v.color)}` : '') +
             (v.isRegion ? '' : ` · ${Math.round(v.confidence * 100)}%`);
@@ -88,7 +101,7 @@
                 : `<span class="bad" style="margin:0;">🔴 không dò được vùng biển</span> <span class="hint small" style="margin:0;">(lỗi ở bước dò biển → thêm vào Train rồi tự cắt khung)</span>`);
         return `<div class="sim-veh">
             <div class="sim-veh-head">${head}</div>
-            <div class="sim-veh-read">Đọc được: ${read}${plateColorHtml(v.plateBox)}</div>
+            <div class="sim-veh-read">Đọc được: ${read}${plateColorHtml(v.plateBox)}</div>${plateCharsHtml(v.plateBox)}
             <div class="sim-veh-fix"><button type="button" class="btn secondary btn-sm sim-inspect-btn" data-view="${view.name}" data-vi="${v.index}" title="Phóng to, kéo, cắt vùng, chỉnh sáng để đối chiếu biển này với chuỗi đọc được">🔎 Soi biển</button></div>
         </div>`;
     }

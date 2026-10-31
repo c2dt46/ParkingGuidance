@@ -53,7 +53,14 @@ public interface IParkingService
     /// <summary>Vùng nhận diện của ô bị xoá: đóng phiên đang mở và đưa ô về "Còn trống" (không tính là xe ra).</summary>
     void ResetSlot(string slotId);
 
+    /// <summary>Đặt (hoặc xoá bằng null/rỗng) biển số được chỉ định cho ô, rồi đối chiếu lại với xe đang đỗ. Gọi lại nhiều lần với cùng giá trị là vô hại.</summary>
+    void SetAssignedPlate(string slotId, string? plate);
+
     ParkingSlot? FindSlot(string slotId);
+
+    /// <summary>Xoá TOÀN BỘ dữ liệu bãi xe của 1 mặt bằng (tầng): ô đỗ, phiên đỗ (đang mở + lịch sử), sự kiện, camera/LED gắn với tầng đó.
+    /// Dùng khi xoá mặt bằng, để tạo lại cùng mã sau này thì như mặt bằng hoàn toàn mới.</summary>
+    void RemoveFloorData(string floor);
 
     /// <summary>Lấy ô đỗ theo Id, hoặc tạo mới (trạng thái Empty) nếu chưa tồn tại — dùng cho Layout Editor.</summary>
     ParkingSlot EnsureSlot(string slotId, string floor, string? zone);

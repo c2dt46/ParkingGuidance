@@ -1,4 +1,3 @@
-<partial name="_LogoutButton" />
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -9,7 +8,7 @@
     <script src="~/js/prefs.js"></script>
     <script src="~/js/viewToggle.js"></script>
 </head>
-<body>
+<body class="@ViewData["BodyClass"]">
     @{
         var currentPath = (Context.Request.Path.Value ?? "/").ToLowerInvariant();
         Func<string, bool> isActive = p => currentPath == p.ToLowerInvariant();
@@ -25,57 +24,183 @@
             </div>
 
             <nav class="sidebar-nav">
-                <div class="nav-group-title" data-i18n="nav.operate">VẬN HÀNH</div>
-                <a href="/" class="nav-link @(isActive("/") ? "active" : "")" data-i18n="nav.monitor">🗂️ Giám sát</a>
-                <a href="/Search" class="nav-link @(isActive("/Search") ? "active" : "")" data-i18n="nav.search">🔍 Tìm xe</a>
-                <a href="#" class="nav-link disabled" data-i18n="nav.report">📈 Báo cáo</a>
-
-                <div class="nav-group-title" data-i18n="nav.manage">QUẢN LÝ BÃI XE</div>
-                <a href="#" class="nav-link disabled" data-i18n="nav.catalog">🗄️ Danh mục</a>
-                <a href="#" class="nav-link disabled" data-i18n="nav.map">🗺️ Bản đồ</a>
-                <a href="#" class="nav-link disabled" data-i18n="nav.import">⬆️ Import</a>
-                <a href="#" class="nav-link disabled" data-i18n="nav.kiosk">🖥️ Kiosk &amp; đường đi</a>
-
-                <div class="nav-group-title" data-i18n="nav.tasks">TASKS</div>
-                <a href="/Tasks/Tags" class="nav-link @(isActive("/Tasks/Tags") ? "active" : "")" data-i18n="nav.tags">🏷️ Tags</a>
-                <a href="/Tasks/Script" class="nav-link @(isActive("/Tasks/Script") ? "active" : "")" data-i18n="nav.script">📜 Script</a>
-
-                <div class="nav-group-title" data-i18n="nav.settings">CÀI ĐẶT &amp; HỆ THỐNG</div>
-                <a href="#" class="nav-link disabled" data-i18n="nav.user">👤 Người dùng</a>
-
-                <a href="/User/Preferences" class="nav-link nav-sublink @(isActive("/User/Preferences") ? "active" : "")" data-i18n="nav.prefs">🎨 Giao diện &amp; ngôn ngữ</a>
-
-                <div class="nav-subgroup-title" data-i18n="nav.device">Thiết bị</div>
-                <a href="/System/Cameras" class="nav-link nav-sublink @(isActive("/System/Cameras") ? "active" : "")" data-i18n="nav.camera">📷 Camera</a>
-                <a href="/System/Sensors" class="nav-link nav-sublink @(isActive("/System/Sensors") ? "active" : "")" data-i18n="nav.sensor">📡 Cảm biến</a>
-                <a href="/System/Leds" class="nav-link nav-sublink @(isActive("/System/Leds") ? "active" : "")" data-i18n="nav.led">💡 LED</a>
-                <a href="/System/External" class="nav-link nav-sublink @(isActive("/System/External") ? "active" : "")" data-i18n="nav.other">🧩 Thiết bị ngoài</a>
-            </nav>
-
-            <div class="sidebar-footer">
-                <div class="profile-row">
-                    <div class="avatar">TV</div>
-                    <div class="profile-icons">
-                        <span title="Đổi mật khẩu">🔑</span>
-                        <span title="Thông tin">ℹ️</span>
-                        <span title="Khoá màn hình">🔒</span>
-                        <span title="Đăng xuất">↪️</span>
+                <div class="nav-group" data-group="operate">
+                    <button type="button" class="nav-group-title" aria-expanded="true">
+                        <span data-i18n="nav.operate">VẬN HÀNH</span><span class="nav-chevron" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="nav-group-body">
+                        <div class="nav-item" id="navMonitor">
+                            <div class="nav-row">
+                                <a href="/" class="nav-link @(isActive("/") ? "active" : "")"><span class="nav-ico" aria-hidden="true">🗂️</span><span data-i18n="nav.monitor">Giám sát</span></a>
+                                <button type="button" class="nav-expander" id="navMonitorToggle" aria-expanded="true" aria-controls="navFloorList" title="Thu / xổ danh sách mặt bằng"><span class="nav-chevron" aria-hidden="true">▾</span></button>
+                            </div>
+                            <div class="nav-sub" id="navFloorList"></div>
+                        </div>
+                        <a href="/Search" class="nav-link @(isActive("/Search") ? "active" : "")"><span class="nav-ico" aria-hidden="true">🔍</span><span data-i18n="nav.search">Tìm xe</span></a>
+                        <a href="#" class="nav-link" data-soon><span class="nav-ico" aria-hidden="true">📈</span><span data-i18n="nav.report">Báo cáo</span></a>
                     </div>
                 </div>
-                <div class="profile-name" data-i18n="prof.admin">Quản trị viên</div>
-                <div class="profile-role">Quản trị viên</div>
-            </div>
+                <div class="nav-group" data-group="manage">
+                    <button type="button" class="nav-group-title" aria-expanded="true">
+                        <span data-i18n="nav.manage">QUẢN LÝ BÃI XE</span><span class="nav-chevron" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="nav-group-body">
+                        <a href="#" class="nav-link" data-soon><span class="nav-ico" aria-hidden="true">🗄️</span><span data-i18n="nav.catalog">Danh mục</span></a>
+                        <a href="#" class="nav-link" data-soon><span class="nav-ico" aria-hidden="true">🗺️</span><span data-i18n="nav.map">Bản đồ</span></a>
+                        <a href="#" class="nav-link" data-soon><span class="nav-ico" aria-hidden="true">⬆️</span><span data-i18n="nav.import">Import</span></a>
+                        <a href="#" class="nav-link" data-soon><span class="nav-ico" aria-hidden="true">🖥️</span><span data-i18n="nav.kiosk">Kiosk &amp; đường đi</span></a>
+                    </div>
+                </div>
+                <div class="nav-group" data-group="tasks">
+                    <button type="button" class="nav-group-title" aria-expanded="true">
+                        <span data-i18n="nav.tasks">TASKS</span><span class="nav-chevron" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="nav-group-body">
+                        <a href="/Tasks/Tags" class="nav-link @(isActive("/Tasks/Tags") ? "active" : "")"><span class="nav-ico" aria-hidden="true">🏷️</span><span data-i18n="nav.tags">Tags</span></a>
+                        <a href="/Tasks/Script" class="nav-link @(isActive("/Tasks/Script") ? "active" : "")"><span class="nav-ico" aria-hidden="true">📜</span><span data-i18n="nav.script">Script</span></a>
+                    </div>
+                </div>
+                <div class="nav-group" data-group="settings">
+                    <button type="button" class="nav-group-title" aria-expanded="true">
+                        <span data-i18n="nav.settings">CÀI ĐẶT &amp; HỆ THỐNG</span><span class="nav-chevron" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="nav-group-body">
+                        <a href="#" class="nav-link" data-soon><span class="nav-ico" aria-hidden="true">👤</span><span data-i18n="nav.user">Người dùng</span></a>
+                        <a href="/User/Preferences" class="nav-link nav-sublink @(isActive("/User/Preferences") ? "active" : "")"><span class="nav-ico" aria-hidden="true">🎨</span><span data-i18n="nav.prefs">Giao diện &amp; ngôn ngữ</span></a>
+                        <a href="/System/License" class="nav-link nav-sublink @(isActive("/System/License") ? "active" : "")"><span class="nav-ico" aria-hidden="true">🔑</span><span data-i18n="nav.license">Giấy phép</span></a>
+                    </div>
+                </div>
+                <div class="nav-group" data-group="device">
+                    <button type="button" class="nav-group-title" aria-expanded="true">
+                        <span data-i18n="nav.device">THIẾT BỊ</span><span class="nav-chevron" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="nav-group-body">
+                        <a href="/System/Cameras" class="nav-link @(isActive("/System/Cameras") ? "active" : "")"><span class="nav-ico" aria-hidden="true">📷</span><span data-i18n="nav.camera">Camera</span></a>
+                        <a href="/System/Sensors" class="nav-link @(isActive("/System/Sensors") ? "active" : "")"><span class="nav-ico" aria-hidden="true">📡</span><span data-i18n="nav.sensor">Cảm biến</span></a>
+                        <a href="/System/Leds" class="nav-link @(isActive("/System/Leds") ? "active" : "")"><span class="nav-ico" aria-hidden="true">💡</span><span data-i18n="nav.led">LED</span></a>
+                        <a href="/System/External" class="nav-link @(isActive("/System/External") ? "active" : "")"><span class="nav-ico" aria-hidden="true">🧩</span><span data-i18n="nav.other">Thiết bị ngoài</span></a>
+                    </div>
+                </div>
+            </nav>
+
+            <partial name="_LogoutButton" />
         </aside>
-        <main class="content">
+        <main class="content @(ViewData["ContentClass"])">
             @RenderBody()
         </main>
     </div>
 
-    <div class="view-fab" id="viewFab">
-        <button type="button" id="fabSidebar" title="Ẩn / hiện thanh menu bên trái">☰</button>
-        <button type="button" id="fabFull" title="Toàn màn hình: ẩn thanh tab + địa chỉ của trình duyệt (F11)">⛶</button>
-    </div>
+    <dialog id="soonDialog" class="soon-dialog">
+        <div class="soon-icon" aria-hidden="true">🚧</div>
+        <p class="soon-msg" data-i18n="soon.msg">Tính năng đang được phát triển</p>
+        <form method="dialog"><button class="soon-ok" data-i18n="soon.ok">Đóng</button></form>
+    </dialog>
+    <script>
+        // Mục menu chưa có tính năng: bấm vào thì hiện hộp thoại thông báo
+        document.addEventListener('click', function (e) {
+            var a = e.target.closest('a[data-soon]');
+            if (!a) return;
+            e.preventDefault();
+            var d = document.getElementById('soonDialog');
+            if (d && !d.open) d.showModal();
+        });
+        document.getElementById('soonDialog').addEventListener('click', function (e) {
+            if (e.target === this) this.close();      // bấm ra ngoài hộp thoại thì đóng
+        });
+    </script>
+    <script>
+        // Nhóm menu lớn: bấm tiêu đề để thu / xổ (mặc định xổ ra, nhớ riêng từng máy)
+        (function () {
+            var KEY = 'pg.navCollapsed';
+            var saved = [];
+            try { saved = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { }
+            function save() {
+                var c = [].map.call(document.querySelectorAll('.nav-group.collapsed'), function (g) { return g.dataset.group; });
+                try { localStorage.setItem(KEY, JSON.stringify(c)); } catch (e) { }
+            }
+            function set(g, collapsed) {
+                g.classList.toggle('collapsed', collapsed);
+                g.querySelector('.nav-group-title').setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            }
+            document.querySelectorAll('.nav-group').forEach(function (g) {
+                // nhóm đang chứa trang hiện tại thì luôn xổ ra
+                var hasActive = !!g.querySelector('.nav-link.active');
+                set(g, saved.indexOf(g.dataset.group) >= 0 && !hasActive);
+                g.querySelector('.nav-group-title').addEventListener('click', function () {
+                    set(g, !g.classList.contains('collapsed'));
+                    save();
+                });
+            });
+        })();
+    </script>
+    <script>
+        // Mục con của "Giám sát": mỗi mặt bằng là 1 mục. Tự cập nhật khi thêm / xoá / đổi tên / đặt khởi động mặt bằng
+        // (floorManager.js phát sự kiện 'floorlistchange'); bấm 1 mục = mở trang Giám sát ở mặt bằng đó.
+        (function () {
+            var item = document.getElementById('navMonitor');
+            var list = document.getElementById('navFloorList');
+            var toggle = document.getElementById('navMonitorToggle');
+            if (!item || !list || !toggle) return;
+            var KEY = 'pg.navMonitorOpen';
+            var floors = [];
+            var onMonitor = location.pathname === '/';
+
+            function setOpen(open, remember) {
+                item.classList.toggle('sub-collapsed', !open);
+                toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                if (remember) { try { localStorage.setItem(KEY, open ? '1' : '0'); } catch (e) { } }
+            }
+            var saved = null;
+            try { saved = localStorage.getItem(KEY); } catch (e) { }
+            setOpen(saved !== '0', false);                  // mặc định xổ ra, nhớ riêng từng máy
+            toggle.addEventListener('click', function () { setOpen(item.classList.contains('sub-collapsed'), true); });
+
+            function render() {
+                list.textContent = '';
+                floors.forEach(function (f) {
+                    var a = document.createElement('a');
+                    a.className = 'nav-link nav-floor';
+                    a.href = '/?floor=' + encodeURIComponent(f.id);
+                    a.dataset.floor = f.id;
+                    a.title = f.id + ' — ' + f.name;
+                    var ico = document.createElement('span'); ico.className = 'nav-ico'; ico.setAttribute('aria-hidden', 'true'); ico.textContent = f.isStartup ? '★' : '▫';
+                    var txt = document.createElement('span'); txt.className = 'nav-floor-name'; txt.textContent = f.name || f.id;
+                    a.appendChild(ico); a.appendChild(txt);
+                    list.appendChild(a);
+                });
+                markActive();
+            }
+            function markActive() {
+                var cur = onMonitor ? window.currentFloor : null;
+                list.querySelectorAll('.nav-floor').forEach(function (a) { a.classList.toggle('active', a.dataset.floor === cur); });
+            }
+
+            // Đang ở trang Giám sát: chọn mặt bằng ngay tại chỗ (không tải lại trang)
+            list.addEventListener('click', function (e) {
+                var a = e.target.closest('.nav-floor');
+                var sel = document.getElementById('floorSelect');
+                if (!a || !sel || !onMonitor) return;
+                e.preventDefault();
+                sel.value = a.dataset.floor;
+                sel.dispatchEvent(new Event('change'));
+            });
+
+            window.addEventListener('floorlistchange', function (e) { floors = e.detail || []; render(); });
+            window.addEventListener('floorchange', markActive);
+
+            // Trang khác không có floorManager.js: tự nạp danh sách
+            if (!onMonitor) {
+                fetch('/api/floors').then(function (r) { return r.ok ? r.json() : []; })
+                    .then(function (d) { floors = d; render(); }).catch(function () { });
+            }
+        })();
+    </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    @* Cấp 2/3 mới nạp bộ canh giữ bản quyền; cấp 0/1 không bao giờ bị kiểm tra nên không nạp gì thêm. *@
+    @if (User.Identity?.IsAuthenticated == true && !ParkingGuidance.Web.Services.Licensing.AccessLevel.IsPrivileged(User))
+    {
+        <script src="~/js/licenseGuard.js" asp-append-version="true"></script>
+    }
     @RenderSection("Scripts", required: false)
 </body>
 </html>

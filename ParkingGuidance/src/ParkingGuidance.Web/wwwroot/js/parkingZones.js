@@ -496,6 +496,7 @@ zoneOverlay.addEventListener('mouseup', (e) => {
         id: 'tmp_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
         name: `Ô ${slotId}`,
         slotId,
+        assignedPlate: null,
         points
     });
 
@@ -570,6 +571,7 @@ function renderZoneList() {
                 <button class="btn secondary btn-sm zone-points-toggle${pointsHiddenZones.has(z) ? '' : ' mode-active'}" data-togpts="${zi}" aria-pressed="${pointsHiddenZones.has(z) ? 'false' : 'true'}" title="Ẩn / hiện toạ độ điểm đầu - điểm cuối của vùng này">📐</button>
                 <button class="btn secondary btn-sm" data-delzone="${zi}">🗑️</button>
             </div>
+            <input class="zone-plate-input" data-zi="${zi}" type="text" maxlength="20" value="${escAttr(z.assignedPlate || '')}" placeholder="Biển số chỉ định (trống = xe nào cũng được)" title="Biển số xe được chỉ định đỗ vào ô này. Xe đỗ ở đây đọc ra biển trùng → đỗ đúng, khác → đỗ sai. Để trống: xe nào đỗ cũng được." />
             <table class="zone-points-table">
                 <tbody>
                     <tr>
@@ -601,6 +603,16 @@ function renderZoneList() {
             zones[zi].name = `Ô ${n}`;
             input.value = n;
             redrawCanvas();
+        });
+    });
+
+    container.querySelectorAll('.zone-plate-input').forEach(input => {
+        input.addEventListener('input', () => {
+            const zi = parseInt(input.dataset.zi, 10);
+            const v = input.value.toUpperCase().replace(/[^0-9A-Z.\-\s]/g, '');   // chi cho chu/so (dau . - cach de dan bien dang 51K-163.27)
+            if (v !== input.value) input.value = v;
+            const key = v.replace(/[^0-9A-Z]/g, '');
+            zones[zi].assignedPlate = key || null;
         });
     });
 
@@ -773,27 +785,50 @@ function drawTestResults(result) {
     redrawCanvas(); // ve lai cac vung truoc
     const unit = Math.max(1, zoneOverlay.width / 700);
     const lw = Math.max(2, Math.round(2.5 * unit));
-    const fs = Math.max(13, Math.round(15 * unit));
+    const fs = Math.max(10, Math.round(10 * unit));   // chu nhan nho gon de khong che xe/bien
 
     result.vehicles.forEach(v => {
         const { x1, y1, x2, y2 } = v.box;
         const matched = !!v.slotId;
-        zoneCtx.strokeStyle = matched ? '#22c55e' : '#94a3b8';
+        zoneCtx.strokeStyle = v.plateCheck === 'Invalid' ? '#ef4444' : matched ? '#22c55e' : '#94a3b8';
         zoneCtx.lineWidth = lw;
         zoneCtx.strokeRect(x1, y1, x2 - x1, y2 - y1);
 
+        // Vung bien so: khung vang quanh bien doc duoc (cung huong voi khung xe; sai bien van ve de doi chieu)
+        if (v.plateBox) {
+            const pb = v.plateBox;
+            zoneCtx.strokeStyle = '#facc15';
+            zoneCtx.lineWidth = Math.max(2, Math.round(2 * unit));
+            zoneCtx.strokeRect(pb.x1, pb.y1, pb.x2 - pb.x1, pb.y2 - pb.y1);
+            zoneCtx.lineWidth = lw;
+        }
+
         const label = matched
-            ? `${v.slotId} · ${v.plateNumber || '?'} (${Math.round(v.coverage * 100)}%)`
+            ? `${v.slotId} · ${v.plateNumber || '?'} (${Math.round(v.coverage * 100)}%)` +
+              (v.plateCheck === 'Valid' ? ' ✔' : v.plateCheck === 'Invalid' ? ' ✖ SAI' : '')
             : `${v.vehicleType.toLowerCase()} · ${v.reason === 'zoneTaken' ? 'vùng đã có xe khác' : 'ngoài ô đỗ'}`;
         zoneCtx.font = `bold ${fs}px sans-serif`;
         const tw = zoneCtx.measureText(label).width + 10 * unit;
-        zoneCtx.fillStyle = matched ? '#16a34a' : '#475569';
-        zoneCtx.fillRect(x1, Math.max(0, y1 - fs - 8 * unit), tw, fs + 8 * unit);
+        zoneCtx.fillStyle = v.plateCheck === 'Invalid' ? '#dc2626' : matched ? '#16a34a' : '#475569';
+        zoneCtx.fillRect(x1, Math.max(0, y1 - fs - 6 * unit), tw, fs + 6 * unit);
         zoneCtx.fillStyle = '#fff';
         zoneCtx.textBaseline = 'middle';
-        zoneCtx.fillText(label, x1 + 5 * unit, Math.max(0, y1 - fs - 8 * unit) + (fs + 8 * unit) / 2);
+        zoneCtx.fillText(label, x1 + 5 * unit, Math.max(0, y1 - fs - 6 * unit) + (fs + 6 * unit) / 2);
         zoneCtx.textBaseline = 'alphabetic';
     });
+}
+
+// Escape cho gia tri dua vao thuoc tinh/noi dung HTML (bien so chi dinh do nguoi dung nhap)
+function escAttr(v) {
+    return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function plateCheckText(v) {
+    if (!v.plateCheck) return '';
+    const want = escAttr(v.assignedPlate || '');
+    if (v.plateCheck === 'Valid') return `<span style="color:#22c55e">✔ Đỗ đúng (${want})</span>`;
+    if (v.plateCheck === 'Invalid') return `<span style="color:#ef4444">✖ Đỗ sai — chỉ định ${want}</span>`;
+    return `<span style="color:#f59e0b">… Chưa đọc được biển (chỉ định ${want})</span>`;
 }
 
 function renderTestSummary(result) {
@@ -805,6 +840,7 @@ function renderTestSummary(result) {
             <span class="detection-index">${v.slotId ? '✅' : '—'}</span>
             <span>${v.slotId ? `<strong>${v.slotId}</strong>` : (v.reason === 'zoneTaken' ? 'Vùng đã có xe khác (bỏ qua)' : 'Ngoài mọi ô đỗ')}</span>
             <span>${v.plateNumber ? `<span class="plate-tag">${v.plateNumber}</span>` : ''}</span>
+            <span>${plateCheckText(v)}</span>
             <span>Độ che phủ: ${Math.round(v.coverage * 100)}%</span>
             <span>Loại: ${v.vehicleType.toLowerCase()}</span>
         </div>

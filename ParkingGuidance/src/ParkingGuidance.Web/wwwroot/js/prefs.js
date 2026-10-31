@@ -9,7 +9,7 @@
 (function () {
     const KEY = 'pg.prefs';
     const API = '/api/system/ui-prefs';
-    const DEFAULTS = { theme: 'dark', lang: 'vi', font: 'segoe', size: 100, accent: '#3b82f6' };
+    const DEFAULTS = { theme: 'dark', lang: 'vi', font: 'segoe', size: 110, accent: '#3b82f6' };
     const VALUE_KEYS = Object.keys(DEFAULTS);
     const FONTS = {
         segoe:  '"Segoe UI", Roboto, sans-serif',
@@ -23,11 +23,11 @@
     // Tu dien: chi can them khoa moi o day + data-i18n="khoa" tren the HTML. Tieng Viet la ngon ngu goc.
     const I18N = {
         en: {
-            'nav.operate': 'OPERATIONS', 'nav.monitor': '🗂️ Monitoring', 'nav.search': '🔍 Find vehicle', 'nav.report': '📈 Reports',
-            'nav.manage': 'PARKING MANAGEMENT', 'nav.catalog': '🗄️ Catalog', 'nav.map': '🗺️ Map', 'nav.import': '⬆️ Import', 'nav.kiosk': '🖥️ Kiosk & routes',
-            'nav.settings': 'SETTINGS & SYSTEM', 'nav.user': '👤 User', 'nav.prefs': '🎨 Appearance & language',
-            'nav.camera': '📷 Camera', 'nav.sensor': '📡 Sensors', 'nav.led': '💡 LED', 'nav.other': '🧩 External devices',
-            'brand.sub': 'Parking guidance', 'prof.admin': 'Administrator',
+            'nav.operate': 'OPERATIONS', 'nav.monitor': 'Monitoring', 'nav.search': 'Find vehicle', 'nav.report': 'Reports',
+            'nav.manage': 'PARKING MANAGEMENT', 'nav.catalog': 'Catalog', 'nav.map': 'Map', 'nav.import': 'Import', 'nav.kiosk': 'Kiosk & routes',
+            'nav.settings': 'SETTINGS & SYSTEM', 'nav.user': 'User', 'nav.prefs': 'Appearance & language',
+            'nav.camera': 'Camera', 'nav.sensor': 'Sensors', 'nav.led': 'LED', 'nav.other': 'External devices', 'nav.license': 'License',
+            'brand.sub': 'Parking guidance', 'acc.dev': 'Developer', 'acc.lic': 'Licensing', 'acc.admin': 'Administrator', 'acc.user': 'User', 'acc.logout': 'Log out', 'soon.msg': 'This feature is under development', 'soon.ok': 'Close',
             'pref.title': 'User — Appearance & language',
             'pref.hint': 'Changes apply immediately. Choose below whether they are for this computer only or for every computer.',
             'pref.scope': 'Apply to', 'pref.local': '🖥️ This computer only', 'pref.global': '🌐 All computers (saved on server)',
@@ -113,8 +113,8 @@
             "led.t.Number": "Number",
             "led.empty": "No display areas yet",
             "nav.tasks": "TASKS",
-            "nav.tags": "🏷️ Tags",
-            "nav.script": "📜 Script",
+            "nav.tags": "Tags",
+            "nav.script": "Script",
             "tag.title": "Tasks — Tags",
             "tag.tabSystem": "System tags",
             "tag.tabProject": "Project tags",

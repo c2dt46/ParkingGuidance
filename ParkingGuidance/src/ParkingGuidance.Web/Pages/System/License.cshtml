@@ -1,0 +1,107 @@
+@page "/System/License"
+@using ParkingGuidance.Web.Services.Licensing
+@{
+    ViewData["Title"] = "Giấy phép";
+    // Tab "Tạo giấy phép" chỉ hiển thị với đăng nhập cấp 0 (dev) hoặc cấp 1 (lic). API cũng chặn lại ở phía máy chủ.
+    var canIssue = AccessLevel.IsPrivileged(User);
+}
+
+<div class="page-header">
+    <h1><span data-i18n="nav.settings">CÀI ĐẶT &amp; HỆ THỐNG</span> — <span data-i18n="lic.head">Giấy phép</span></h1>
+</div>
+
+<div id="lcBanner" class="lc-banner">Đang tải trạng thái bản quyền…</div>
+
+<div class="source-tabs">
+    <button class="tab-btn active" data-tab="request"><span class="ico">📝</span> <span data-i18n="lic.tabRequest">Tạo yêu cầu</span></button>
+    <button class="tab-btn" data-tab="receive"><span class="ico">📥</span> <span data-i18n="lic.tabReceive">Nhận giấy phép</span></button>
+    @if (canIssue)
+    {
+        <button class="tab-btn" data-tab="issue"><span class="ico">🔐</span> <span data-i18n="lic.tabIssue">Tạo giấy phép</span></button>
+    }
+</div>
+
+<!-- =============== TAB: TẠO YÊU CẦU =============== -->
+<section id="tab-request" class="panel">
+    <div class="hint small" style="margin-top:0" data-i18n="lic.reqHint">Tạo chuỗi yêu cầu chứa số seri ổ cứng, tất cả card mạng và main của máy này. Gửi chuỗi này cho nhà cung cấp để nhận giấy phép.</div>
+    <div class="prop-field">
+        <label for="lcReqOut" data-i18n="lic.reqOut">Yêu cầu được tạo</label>
+        <textarea id="lcReqOut" class="lc-text" rows="6" readonly spellcheck="false"></textarea>
+    </div>
+    <div class="lc-toolbar">
+        <button id="lcReqBtn" class="btn primary btn-sm"><span class="ico">📝</span> <span data-i18n="lic.reqBtn">Tạo yêu cầu</span></button>
+        <button id="lcReqCopy" class="btn secondary btn-sm" disabled><span class="ico">📋</span> <span data-i18n="lic.copy">Sao chép</span></button>
+        <span id="lcReqState" class="hint small" style="margin:0"></span>
+    </div>
+    <div id="lcReqHw"></div>
+</section>
+
+<!-- =============== TAB: NHẬN GIẤY PHÉP =============== -->
+<section id="tab-receive" class="panel" style="display:none;">
+    <div class="hint small" style="margin-top:0" data-i18n="lic.recvHint">Dán giấy phép nhận được vào ô bên dưới. Chương trình giải mã và hiển thị các số seri + thời hạn; bấm Kích hoạt để sử dụng.</div>
+    <div class="prop-field">
+        <label for="lcLicIn" data-i18n="lic.recvIn">Giấy phép được cấp</label>
+        <textarea id="lcLicIn" class="lc-text" rows="6" spellcheck="false" autocomplete="off"></textarea>
+    </div>
+
+    <div id="lcPreview" class="lc-preview" style="display:none;">
+        <div class="lc-line"><b data-i18n="lic.duration">Thời hạn</b>: <span id="lcPvDuration"></span></div>
+        <table class="data-table lc-table">
+            <thead>
+                <tr>
+                    <th style="width:50px" data-i18n="tag.colNo">STT</th>
+                    <th style="width:130px" data-i18n="lic.colKind">Loại</th>
+                    <th data-i18n="lic.colSerial">Số seri</th>
+                    <th style="width:150px" data-i18n="lic.colMatch">Máy này</th>
+                </tr>
+            </thead>
+            <tbody id="lcPvBody"></tbody>
+        </table>
+    </div>
+    <div id="lcPvMsg" class="lc-msg"></div>
+
+    <div class="lc-toolbar">
+        <button id="lcCancel" class="btn secondary btn-sm"><span class="ico">✖️</span> <span data-i18n="lic.cancel">Hủy</span></button>
+        <button id="lcActivate" class="btn primary btn-sm" disabled><span class="ico">✅</span> <span data-i18n="lic.activate">Kích hoạt</span></button>
+    </div>
+
+    <h3 class="lc-sub" data-i18n="lic.current">Giấy phép đang sử dụng</h3>
+    <div id="lcCurrent" class="lc-current"></div>
+</section>
+
+@if (canIssue)
+{
+    <!-- =============== TAB: TẠO GIẤY PHÉP (cấp 0/1) =============== -->
+    <section id="tab-issue" class="panel" style="display:none;">
+        <div class="hint small" style="margin-top:0" data-i18n="lic.issHint">Dán yêu cầu nhận từ máy khách, chọn thời hạn rồi tạo giấy phép. Mỗi giấy phép dùng một quy luật mã hoá mới.</div>
+        <div class="prop-field">
+            <label for="lcIssReq" data-i18n="lic.issReq">Nhập yêu cầu</label>
+            <textarea id="lcIssReq" class="lc-text" rows="5" spellcheck="false" autocomplete="off"></textarea>
+        </div>
+        <div id="lcIssHw"></div>
+        <div class="prop-field" style="max-width:260px">
+            <label for="lcIssDur" data-i18n="lic.duration">Thời hạn</label>
+            <select id="lcIssDur">
+                <option value="1m">1 tháng</option>
+                <option value="3m">3 tháng</option>
+                <option value="6m">6 tháng</option>
+                <option value="1y">1 năm</option>
+                <option value="3y">3 năm</option>
+                <option value="perm">Vĩnh viễn</option>
+            </select>
+        </div>
+        <div class="lc-toolbar">
+            <button id="lcIssBtn" class="btn primary btn-sm"><span class="ico">🔐</span> <span data-i18n="lic.issBtn">Tạo giấy phép</span></button>
+            <button id="lcIssCopy" class="btn secondary btn-sm" disabled><span class="ico">📋</span> <span data-i18n="lic.copy">Sao chép</span></button>
+            <span id="lcIssState" class="hint small" style="margin:0"></span>
+        </div>
+        <div class="prop-field">
+            <label for="lcIssOut" data-i18n="lic.issOut">Giấy phép đã tạo</label>
+            <textarea id="lcIssOut" class="lc-text" rows="6" readonly spellcheck="false"></textarea>
+        </div>
+    </section>
+}
+
+@section Scripts {
+    <script src="~/js/license.js" asp-append-version="true"></script>
+}

@@ -10,6 +10,10 @@ public interface ILayoutService
     LayoutElement AddElement(LayoutElement element);
     LayoutElement? UpdateElement(string id, Action<LayoutElement> apply);
     bool DeleteElement(string id);
+
+    /// <summary>Xoá mọi đối tượng của 1 mặt bằng (và nút ấn ở mặt bằng khác đang trỏ tới nó thì bỏ hành động chuyển).
+    /// Trả về danh sách URL ảnh (ảnh upload) của các đối tượng đã xoá để nơi gọi dọn file.</summary>
+    IReadOnlyList<string> RemoveFloor(string floor);
 }
 
 /// <summary>Lưu trữ các đối tượng layout — tự tải lại khi khởi động và tự lưu sau mỗi thay đổi
@@ -70,6 +74,41 @@ public class LayoutService : ILayoutService
         apply(element);
         SaveState();
         return element;
+    }
+
+    public IReadOnlyList<string> RemoveFloor(string floor)
+    {
+        var norm = SlotKey.NormalizeFloor(floor);
+        var urls = new List<string>();
+        bool changed = false;
+
+        foreach (var el in _elements.Values.ToList())
+        {
+            if (SlotKey.NormalizeFloor(el.Floor) == norm)
+            {
+                if (_elements.TryRemove(el.Id, out var removed))
+                {
+                    changed = true;
+                    foreach (var u in new[] { removed.ImageUrl, removed.StateImage0, removed.StateImage1 })
+                        if (!string.IsNullOrWhiteSpace(u)) urls.Add(u!);
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(el.TargetFloorId)
+                     && SlotKey.NormalizeFloor(el.TargetFloorId) == norm)
+            {
+                el.TargetFloorId = null;   // nut an o mat bang khac tro toi mat bang da xoa -> bo hanh dong
+                changed = true;
+            }
+        }
+
+        if (changed) SaveState();
+
+        // Chi tra ve anh KHONG con doi tuong nao (o mat bang khac) dung chung, de khong xoa nham file dang duoc dung
+        var stillUsed = _elements.Values
+            .SelectMany(e => new[] { e.ImageUrl, e.StateImage0, e.StateImage1 })
+            .Where(u => !string.IsNullOrWhiteSpace(u))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return urls.Where(u => !stillUsed.Contains(u)).Distinct().ToList();
     }
 
     public bool DeleteElement(string id)

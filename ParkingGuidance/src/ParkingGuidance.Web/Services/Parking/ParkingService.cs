@@ -275,6 +275,35 @@ public class ParkingService : IParkingService
         }
     }
 
+    /// <summary>Đối chiếu biển xe đang đỗ với biển được chỉ định cho ô. Chỉ truy cập trong _lock.
+    /// Trùng → Valid ngay. Khác → Invalid khi biển đã xác thực (>= 2 lần đọc giống nhau) hoặc ảnh nạp tay; chưa chắc thì Pending để 1 lần OCR sai không báo nhầm.</summary>
+    private void RefreshPlateCheck(ParkingSlot slot, bool immediate = false)
+    {
+        var assigned = PlateKey(slot.AssignedPlate);
+        if (assigned.Length == 0 || slot.Status == SlotStatus.Empty) { slot.PlateCheck = null; return; }
+        if (slot.Status == SlotStatus.Error) return; // camera loi: giu ket qua truoc do
+
+        if (string.IsNullOrWhiteSpace(slot.PlateNumber) || slot.PlateNumber == UnknownPlate) { slot.PlateCheck = "Pending"; return; }
+        if (PlateKey(slot.PlateNumber) == assigned) { slot.PlateCheck = "Valid"; return; }
+
+        bool decisive = immediate || (_activeSessions.TryGetValue(slot.SlotId, out var s) && s.IsVerified);
+        slot.PlateCheck = decisive ? "Invalid" : "Pending";
+    }
+
+    public void SetAssignedPlate(string slotId, string? plate)
+    {
+        lock (_lock)
+        {
+            if (!_slots.TryGetValue(slotId, out var slot)) return;
+            var normalized = PlateKey(plate);
+            var value = normalized.Length == 0 ? null : normalized;
+            var before = (slot.AssignedPlate, slot.PlateCheck);
+            slot.AssignedPlate = value;
+            RefreshPlateCheck(slot);
+            if (before != (slot.AssignedPlate, slot.PlateCheck)) SaveState();
+        }
+    }
+
     public ParkingEvent RegisterDetection(string cameraId, string slotId, DetectionResult detection, bool immediate = false)
     {
         lock (_lock)
@@ -371,6 +400,7 @@ public class ParkingService : IParkingService
             slot.ErrorMessage = null;
             slot.PlateNumber = session.PlateNumber;
             slot.ParkedAt = session.EntryTime;
+            RefreshPlateCheck(slot, immediate);
 
             var evt = new ParkingEvent
             {
@@ -422,6 +452,7 @@ public class ParkingService : IParkingService
             slot.ErrorMessage = null;
             slot.LastExitPlate = session.PlateNumber;
             slot.LastExitTime = now;
+            RefreshPlateCheck(slot);
 
             var evt = new ParkingEvent
             {
@@ -482,6 +513,7 @@ public class ParkingService : IParkingService
                     slot.ParkedAt = null;
                 }
                 slot.ErrorMessage = null;
+                RefreshPlateCheck(slot);
                 changed = true;
             }
             if (changed) SaveState();
@@ -505,12 +537,47 @@ public class ParkingService : IParkingService
             slot.PlateNumber = null;
             slot.ParkedAt = null;
             slot.ErrorMessage = null;
+            slot.AssignedPlate = null;   // vung bi xoa -> chi dinh bien cung het hieu luc
+            slot.PlateCheck = null;
             _vacancyMisses.TryRemove(slotId, out _);
             SaveState();
         }
     }
 
     public ParkingSlot? FindSlot(string slotId) => _slots.TryGetValue(slotId, out var s) ? s : null;
+
+    public void RemoveFloorData(string floor)
+    {
+        var norm = SlotKey.NormalizeFloor(floor);
+        lock (_lock)
+        {
+            var slotIds = _slots.Values
+                .Where(s => SlotKey.NormalizeFloor(s.Floor) == norm)
+                .Select(s => s.SlotId)
+                .ToHashSet(StringComparer.Ordinal);
+
+            foreach (var id in slotIds)
+            {
+                _slots.TryRemove(id, out _);
+                _activeSessions.TryRemove(id, out _);
+                _vacancyMisses.TryRemove(id, out _);
+                _trackers.Remove(id);
+            }
+
+            _history.RemoveAll(h => slotIds.Contains(h.SlotId));
+
+            var keepEvents = _events.Where(e => !slotIds.Contains(e.SlotId)).ToList();
+            while (_events.TryDequeue(out _)) { }
+            foreach (var e in keepEvents) _events.Enqueue(e);
+
+            foreach (var c in _cameras.Values.Where(c => SlotKey.NormalizeFloor(c.Floor) == norm).ToList())
+                _cameras.TryRemove(c.CameraId, out _);
+            foreach (var l in _leds.Values.Where(l => SlotKey.NormalizeFloor(l.Floor) == norm).ToList())
+                _leds.TryRemove(l.LedId, out _);
+
+            SaveState();
+        }
+    }
 
     private static ParkingSession NewSession(string slotId, string? plate, float conf) => new()
     {
@@ -558,6 +625,7 @@ public class ParkingService : IParkingService
             slot.PlateNumber = status == SlotStatus.Occupied ? plateNumber : null;
             slot.ParkedAt = status == SlotStatus.Occupied ? (parkedAt ?? DateTime.Now) : null;
             slot.ErrorMessage = status == SlotStatus.Error ? errorMessage : null;
+            RefreshPlateCheck(slot, immediate: true);
 
             // Dong bo phien do xe (de trang "Tim xe" van tra cuu dung) cho thao tac thu cong nay
             if (status == SlotStatus.Occupied && !string.IsNullOrWhiteSpace(plateNumber))

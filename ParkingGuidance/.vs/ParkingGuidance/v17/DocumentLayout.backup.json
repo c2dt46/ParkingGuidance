@@ -3,6 +3,14 @@
   "WorkspaceRootPath": "E:\\Google Driver Data\\Phai sao luu\\Du an do xe\\ParkingGuidance\\ParkingGuidance\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{6F1D0B2A-7C2E-4F1E-9C3D-1A2B3C4D5E6F}|src\\ParkingGuidance.Web\\ParkingGuidance.Web.csproj|e:\\google driver data\\phai sao luu\\du an do xe\\parkingguidance\\parkingguidance\\src\\parkingguidance.web\\pages\\index.cshtml||{40D31677-CBC0-4297-A9EF-89D907823A98}",
+      "RelativeMoniker": "D:0:0:{6F1D0B2A-7C2E-4F1E-9C3D-1A2B3C4D5E6F}|src\\ParkingGuidance.Web\\ParkingGuidance.Web.csproj|solutionrelative:src\\parkingguidance.web\\pages\\index.cshtml||{40D31677-CBC0-4297-A9EF-89D907823A98}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{6F1D0B2A-7C2E-4F1E-9C3D-1A2B3C4D5E6F}|src\\ParkingGuidance.Web\\ParkingGuidance.Web.csproj|e:\\google driver data\\phai sao luu\\du an do xe\\parkingguidance\\parkingguidance\\src\\parkingguidance.web\\services\\licensing\\hardwareidprovider.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{6F1D0B2A-7C2E-4F1E-9C3D-1A2B3C4D5E6F}|src\\ParkingGuidance.Web\\ParkingGuidance.Web.csproj|solutionrelative:src\\parkingguidance.web\\services\\licensing\\hardwareidprovider.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{6F1D0B2A-7C2E-4F1E-9C3D-1A2B3C4D5E6F}|src\\ParkingGuidance.Web\\ParkingGuidance.Web.csproj|e:\\google driver data\\phai sao luu\\du an do xe\\parkingguidance\\parkingguidance\\src\\parkingguidance.web\\services\\anpr\\platenormalizer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{6F1D0B2A-7C2E-4F1E-9C3D-1A2B3C4D5E6F}|src\\ParkingGuidance.Web\\ParkingGuidance.Web.csproj|solutionrelative:src\\parkingguidance.web\\services\\anpr\\platenormalizer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
@@ -18,7 +26,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 5,
+          "SelectedChildIndex": 6,
           "Children": [
             {
               "$type": "Bookmark",
@@ -37,8 +45,54 @@
               "Name": "ST:0:0:{1c4feeaa-4718-4aa9-859d-94ce25d182ba}"
             },
             {
+              "$type": "Bookmark",
+              "Name": "ST:2:0:{d212f56b-c48a-434c-a121-1c5d80b59b9f}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:1:0:{d212f56b-c48a-434c-a121-1c5d80b59b9f}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "Index.cshtml",
+              "DocumentMoniker": "E:\\Google Driver Data\\Phai sao luu\\Du an do xe\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.Web\\Pages\\Index.cshtml",
+              "RelativeDocumentMoniker": "src\\ParkingGuidance.Web\\Pages\\Index.cshtml",
+              "ToolTip": "E:\\Google Driver Data\\Phai sao luu\\Du an do xe\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.Web\\Pages\\Index.cshtml",
+              "RelativeToolTip": "src\\ParkingGuidance.Web\\Pages\\Index.cshtml",
+              "ViewState": "AgIAABUAAAAAAAAAAAAAABMAAAAJAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000759|",
+              "WhenOpened": "2026-10-31T05:37:27.794Z",
+              "EditorCaption": ""
+            },
+            {
               "$type": "Document",
               "DocumentIndex": 1,
+              "Title": "HardwareIdProvider.cs",
+              "DocumentMoniker": "E:\\Google Driver Data\\Phai sao luu\\Du an do xe\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.Web\\Services\\Licensing\\HardwareIdProvider.cs",
+              "RelativeDocumentMoniker": "src\\ParkingGuidance.Web\\Services\\Licensing\\HardwareIdProvider.cs",
+              "ToolTip": "E:\\Google Driver Data\\Phai sao luu\\Du an do xe\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.Web\\Services\\Licensing\\HardwareIdProvider.cs",
+              "RelativeToolTip": "src\\ParkingGuidance.Web\\Services\\Licensing\\HardwareIdProvider.cs",
+              "ViewState": "AgIAAIgAAAAAAAAAAAAmwJcAAAAVAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-10-30T11:58:11.971Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "PlateNormalizer.cs",
+              "DocumentMoniker": "E:\\Google Driver Data\\Phai sao luu\\Du an do xe\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.Web\\Services\\Anpr\\PlateNormalizer.cs",
+              "RelativeDocumentMoniker": "src\\ParkingGuidance.Web\\Services\\Anpr\\PlateNormalizer.cs",
+              "ToolTip": "E:\\Google Driver Data\\Phai sao luu\\Du an do xe\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.Web\\Services\\Anpr\\PlateNormalizer.cs",
+              "RelativeToolTip": "src\\ParkingGuidance.Web\\Services\\Anpr\\PlateNormalizer.cs",
+              "ViewState": "AgIAAB4AAAAAAAAAAAAxwCMAAAAIAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-10-28T16:06:40.859Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
               "Title": "appsettings.json",
               "DocumentMoniker": "E:\\Google Driver Data\\Phai sao luu\\Du an do xe\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.Web\\appsettings.json",
               "RelativeDocumentMoniker": "src\\ParkingGuidance.Web\\appsettings.json",
@@ -47,19 +101,6 @@
               "ViewState": "AgIAAAwAAAAAAAAAAAAAACoAAAARAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001642|",
               "WhenOpened": "2026-10-27T23:57:14.189Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 0,
-              "Title": "PlateNormalizer.cs",
-              "DocumentMoniker": "E:\\Google Driver Data\\Phai sao luu\\Du an do xe\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.Web\\Services\\Anpr\\PlateNormalizer.cs",
-              "RelativeDocumentMoniker": "src\\ParkingGuidance.Web\\Services\\Anpr\\PlateNormalizer.cs",
-              "ToolTip": "E:\\Google Driver Data\\Phai sao luu\\Du an do xe\\ParkingGuidance\\ParkingGuidance\\src\\ParkingGuidance.Web\\Services\\Anpr\\PlateNormalizer.cs",
-              "RelativeToolTip": "src\\ParkingGuidance.Web\\Services\\Anpr\\PlateNormalizer.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAACMAAAAAAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-10-20T20:58:47.72Z",
-              "EditorCaption": ""
             }
           ]
         }

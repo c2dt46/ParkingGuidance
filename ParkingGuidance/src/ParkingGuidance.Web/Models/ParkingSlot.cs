@@ -20,6 +20,13 @@ public class ParkingSlot
     /// <summary>Số thứ tự của ô trong tầng (số tự nhiên: 1, 2, 3...) — phần hiển thị; <see cref="SlotId"/> là khoá "{tầng}-{số}".</summary>
     public string Number { get; set; } = "";
 
+    /// <summary>Biển số được chỉ định đỗ ở ô này (khai báo ở vùng nhận diện). null = xe nào đỗ cũng được.</summary>
+    public string? AssignedPlate { get; set; }
+
+    /// <summary>Kết quả đối chiếu biển số xe đang đỗ với <see cref="AssignedPlate"/>: "Valid" = đỗ đúng, "Invalid" = đỗ sai (biển khác),
+    /// "Pending" = chưa kết luận (chưa đọc được biển, hoặc biển khác nhưng chưa đủ lần đọc xác nhận). null = ô không có chỉ định hoặc đang trống.</summary>
+    public string? PlateCheck { get; set; }
+
     /// <summary>Biển số của xe GẦN NHẤT đã rời khỏi ô đỗ này ("UNKNOWN" nếu lúc đó chưa đọc được biển).</summary>
     public string? LastExitPlate { get; set; }
 

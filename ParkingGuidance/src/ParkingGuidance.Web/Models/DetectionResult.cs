@@ -24,6 +24,8 @@ public class BoundingBox
     public string? PlateKind { get; set; }
     /// <summary>Tên LOẠI BIỂN (tiếng Việt) để hiển thị, vd "Biển kinh doanh vận tải (nền vàng)".</summary>
     public string? PlateLabel { get; set; }
+    /// <summary>MẢNG từng ký tự bộ đọc YOLO nhận được trên biển (kèm độ tin cậy, vị trí, dòng, và ký tự nào đã bị bỏ + lý do). Null nếu kết quả không đến từ bộ đọc YOLO.</summary>
+    public List<PlateCharInfo>? PlateChars { get; set; }
 
     public float Width => X2 - X1;
     public float Height => Y2 - Y1;
@@ -56,4 +58,22 @@ public class FrameDetectionResponse
 
     /// <summary>Bước 2: danh sách xe kèm biển số (rỗng nếu HasVehicle = false).</summary>
     public List<DetectionResult> Vehicles { get; set; } = new();
+}
+
+/// <summary>Một ký tự trên biển số do bộ đọc ký tự nhận được: để kiểm tra độ tin cậy từng ký tự và lọc ký tự yếu gây sai cú pháp.</summary>
+public class PlateCharInfo
+{
+    /// <summary>Ký tự (A–Z, 0–9).</summary>
+    public string Value { get; set; } = "";
+    /// <summary>Độ tin cậy của bộ dò ký tự (0–1).</summary>
+    public float Score { get; set; }
+    /// <summary>Khung ký tự trên ảnh đầu vào của dịch vụ nhận diện.</summary>
+    public float X1 { get; set; }
+    public float Y1 { get; set; }
+    public float X2 { get; set; }
+    public float Y2 { get; set; }
+    /// <summary>Dòng của biển (0 = dòng trên / biển 1 dòng, 1 = dòng dưới); −1 nếu ký tự đã bị bỏ.</summary>
+    public int Row { get; set; }
+    /// <summary>null = ký tự dùng để tạo chuỗi biển; khác null = đã bị bỏ, kèm lý do ("non-ink: hình dán màu", "low-confidence: bỏ để đúng cú pháp").</summary>
+    public string? Dropped { get; set; }
 }

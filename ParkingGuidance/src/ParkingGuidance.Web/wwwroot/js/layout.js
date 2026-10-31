@@ -165,6 +165,7 @@ async function refreshZoneCount() {
 function renderLayout() {
     canvas.innerHTML = '';
     elements.forEach(el => canvas.appendChild(buildElementNode(el)));
+    updateResizeFrame();
 }
 
 function buildElementNode(el) {
@@ -273,22 +274,33 @@ function renderSlotNode(div, el) {
     const wasSelected = div.classList.contains('selected');
 
     div.className = 'layout-el layout-el-parkingslot as-slot';
-    div.classList.add(el.showStatusColor === false ? 'neutral' : SLOT_STATUS_CLASS[status]);
+    // Co chi dinh bien: do sai -> doi mau rieng (tim/noi bat), khac voi do thuong
+    const wrongPark = status === 'Occupied' && slot.plateCheck === 'Invalid';
+    div.classList.add(el.showStatusColor === false ? 'neutral' : (wrongPark ? 'wrong' : SLOT_STATUS_CLASS[status]));
     if (wasSelected) div.classList.add('selected');
 
     const row = (k, v) => `<div class="slot-row"><span class="k">${k}</span><span class="v">${escHtml(v)}</span></div>`;
     let html = `<div class="slot-id" title="${floorZoneCount > 1 ? 'Zone ' + escHtml(slotZoneOf(el) || '—') + ' · ' : ''}vị trí ${escHtml(slotNumberOf(el))}">${escHtml(slotLabelOf(el))}</div>`;
-    if (el.showStatusText !== false) html += `<div class="slot-status-tag">${SLOT_STATUS_LABEL[status] ?? status}</div>`;
+    let statusText = SLOT_STATUS_LABEL[status] ?? status;
+    if (status === 'Occupied' && slot.plateCheck === 'Invalid') statusText = 'Đỗ sai';
+    else if (status === 'Occupied' && slot.plateCheck === 'Valid') statusText = 'Đỗ đúng';
+    if (el.showStatusText !== false) html += `<div class="slot-status-tag">${statusText}</div>`;
 
     // Dang Loi (camera mat ket noi): bien/gio vao la cua xe do truoc khi loi, van hien de biet xe nao dang o do
     const hasVehicle = (status === 'Occupied' || status === 'Error') && slot.plateNumber;
     if (el.showPlate !== false) html += row('Biển', hasVehicle ? fmtPlate(slot.plateNumber) : '—');
+    if (el.showPlate !== false && slot.assignedPlate) html += row('Chỉ định', slot.assignedPlate);
     if (el.showEntryTime !== false) html += row('Vào', hasVehicle ? fmtDateTime(slot.parkedAt) : '—');
     if (el.showLastExitPlate !== false) html += row('Ra gần nhất', fmtPlate(slot.lastExitPlate));
     if (el.showExitTime !== false) html += row('Giờ ra', fmtDateTime(slot.lastExitTime));
 
     div.innerHTML = html;
-    div.title = status === 'Error' ? (slot.errorMessage || 'Lỗi camera') : '';
+    div.title = status === 'Error' ? (slot.errorMessage || 'Lỗi camera')
+        : (status === 'Occupied' && slot.assignedPlate && slot.plateCheck
+            ? (slot.plateCheck === 'Invalid' ? `Đỗ sai: ô chỉ định cho biển ${slot.assignedPlate}`
+                : slot.plateCheck === 'Valid' ? `Đỗ đúng biển chỉ định ${slot.assignedPlate}`
+                : `Chờ xác nhận biển số (chỉ định ${slot.assignedPlate})`)
+            : '');
     applyCommonStyle(div, el);
 }
 
@@ -795,6 +807,7 @@ function onDragMove(e) {
 
     drag.el.style.left = `${newLeftPct}%`;
     drag.el.style.top = `${newTopPct}%`;
+    updateResizeFrame();
 }
 
 async function onDragEnd() {
@@ -811,6 +824,147 @@ async function onDragEnd() {
 
     selectElement(drag.id);
     drag = null;
+}
+
+// ---------------------------------------------------------------------------
+// Co gian doi tuong bang chuot (chi o che do Build): doi tuong dang chon co khung 8 tay nam
+// (4 goc + 4 canh). Keo tay nam de doi kich thuoc; Shift + keo tay nam o GOC de giu ty le.
+// Duong thang chi co 2 tay nam 2 dau (doi chieu dai). Doi tuong dang xoay van co gian dung theo truc cua no.
+// Khung nam trong canvas, KHONG nam trong doi tuong nen khong bi mat khi doi tuong ve lai noi dung.
+// ---------------------------------------------------------------------------
+const RESIZE_HANDLES = [['nw', -1, -1], ['n', 0, -1], ['ne', 1, -1], ['e', 1, 0], ['se', 1, 1], ['s', 0, 1], ['sw', -1, 1], ['w', -1, 0]];
+let resizeFrame = null;
+let rsz = null;
+
+function ensureResizeFrame() {
+    if (resizeFrame && resizeFrame.parentNode === canvas) return resizeFrame;
+    resizeFrame = document.createElement('div');
+    resizeFrame.className = 'layout-resize-frame';
+    resizeFrame.hidden = true;
+    RESIZE_HANDLES.forEach(([name, hx, hy]) => {
+        const h = document.createElement('span');
+        h.className = `resize-handle rh-${name}`;
+        h.dataset.hx = hx;
+        h.dataset.hy = hy;
+        h.dataset.h = name;
+        h.addEventListener('mousedown', onResizeHandleDown);
+        resizeFrame.appendChild(h);
+    });
+    canvas.appendChild(resizeFrame);
+    return resizeFrame;
+}
+
+// Dat khung theo dung vi tri / kich thuoc / goc xoay hien tai cua doi tuong dang chon (doc tu style cua node).
+function updateResizeFrame() {
+    const frame = ensureResizeFrame();
+    const div = editMode && selectedId ? canvas.querySelector(`.layout-el[data-id="${selectedId}"]`) : null;
+    if (!div) { frame.hidden = true; return; }
+
+    const el = elements.find(x => x.id === selectedId);
+    const isLine = el?.type === 'Line';
+    frame.style.left = div.style.left;
+    frame.style.top = div.style.top;
+    frame.style.width = div.style.width;
+    frame.style.height = div.style.height;
+    frame.style.transform = div.style.transform;
+    frame.querySelectorAll('.resize-handle').forEach(h => {
+        h.hidden = isLine && (h.dataset.hy !== '0');   // duong thang: chi 2 dau (doi chieu dai)
+    });
+    frame.hidden = false;
+}
+
+function onResizeHandleDown(e) {
+    if (!editMode || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const el = elements.find(x => x.id === selectedId);
+    const div = el && canvas.querySelector(`.layout-el[data-id="${el.id}"]`);
+    if (!div) return;
+
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    const w0 = (parseFloat(div.style.width) / 100) * W;
+    const h0 = (parseFloat(div.style.height) / 100) * H;
+    const left0 = (parseFloat(div.style.left) / 100) * W;
+    const top0 = (parseFloat(div.style.top) / 100) * H;
+
+    rsz = {
+        id: el.id, div, W, H, w0, h0, left0, top0,
+        cx0: left0 + w0 / 2, cy0: top0 + h0 / 2,
+        hx: Number(e.currentTarget.dataset.hx), hy: Number(e.currentTarget.dataset.hy),
+        th: ((Number(el.rotation) || 0) * Math.PI) / 180,
+        rotated: (((Number(el.rotation) || 0) % 360) + 360) % 360 !== 0,
+        startX: e.clientX, startY: e.clientY,
+        minW: Math.max(W * 0.01, 6), minH: Math.max(H * 0.01, 6),
+        last: null
+    };
+    document.body.classList.add('is-resizing');
+    document.addEventListener('mousemove', onResizeMove);
+    document.addEventListener('mouseup', onResizeEnd);
+}
+
+function onResizeMove(e) {
+    if (!rsz) return;
+    const s = rsz;
+    const dx = e.clientX - s.startX, dy = e.clientY - s.startY;
+    const cos = Math.cos(s.th), sin = Math.sin(s.th);
+    const lx = dx * cos + dy * sin;       // do doi cua chuot theo truc cua doi tuong (da xoay nguoc goc xoay)
+    const ly = -dx * sin + dy * cos;
+
+    let w = s.w0 + s.hx * lx;
+    let h = s.h0 + s.hy * ly;
+
+    // Gioi han: khong nho hon toi thieu va khong tran ra ngoai khung (canh dang keo bi chan o mep khung)
+    const rightRoom = s.W - s.left0, leftRoom = s.left0 + s.w0;
+    const bottomRoom = s.H - s.top0, topRoom = s.top0 + s.h0;
+    const maxW = s.rotated ? s.W : (s.hx === 1 ? rightRoom : s.hx === -1 ? leftRoom : s.w0);
+    const maxH = s.rotated ? s.H : (s.hy === 1 ? bottomRoom : s.hy === -1 ? topRoom : s.h0);
+
+    if (e.shiftKey && s.hx !== 0 && s.hy !== 0) {
+        // Giu ty le (chi o 4 goc)
+        let k = Math.max(w / s.w0, h / s.h0);
+        k = Math.min(k, maxW / s.w0, maxH / s.h0);
+        k = Math.max(k, s.minW / s.w0, s.minH / s.h0);
+        w = s.w0 * k; h = s.h0 * k;
+    } else {
+        w = s.hx === 0 ? s.w0 : Math.min(Math.max(w, s.minW), maxW);
+        h = s.hy === 0 ? s.h0 : Math.min(Math.max(h, s.minH), maxH);
+    }
+
+    // Diem doi dien voi tay nam dung yen: tinh lai tam moi theo he truc da xoay
+    const ax = (-s.hx * s.w0) / 2, ay = (-s.hy * s.h0) / 2;
+    const bx = (-s.hx * w) / 2, by = (-s.hy * h) / 2;
+    const ddx = ax - bx, ddy = ay - by;
+    const cx = s.cx0 + (ddx * cos - ddy * sin);
+    const cy = s.cy0 + (ddx * sin + ddy * cos);
+
+    let left = cx - w / 2, top = cy - h / 2;
+    left = Math.min(Math.max(left, 0), s.W - w);
+    top = Math.min(Math.max(top, 0), s.H - h);
+
+    const r = v => Math.round(v * 100) / 100;
+    s.last = { x: r((left / s.W) * 100), y: r((top / s.H) * 100), width: r((w / s.W) * 100), height: r((h / s.H) * 100) };
+    s.div.style.left = `${s.last.x}%`;
+    s.div.style.top = `${s.last.y}%`;
+    s.div.style.width = `${s.last.width}%`;
+    s.div.style.height = `${s.last.height}%`;
+    updateResizeFrame();
+}
+
+async function onResizeEnd() {
+    document.removeEventListener('mousemove', onResizeMove);
+    document.removeEventListener('mouseup', onResizeEnd);
+    document.body.classList.remove('is-resizing');
+    const s = rsz;
+    rsz = null;
+    if (!s || !s.last) return;
+
+    const el = elements.find(x => x.id === s.id);
+    if (!el) return;
+    Object.assign(el, s.last);
+    await persistElement(el);
+    selectElement(el.id);          // cap nhat o nhap X/Y/Rong/Cao trong hop thoai thuoc tinh (neu dang mo)
+    refreshNode(el);               // ve lai noi dung theo kich thuoc moi (chu, net ve, ...)
 }
 
 // ---------------------------------------------------------------------------
@@ -938,6 +1092,7 @@ function selectElement(id) {
     if (!pending || pending.id !== id) pending = { id, snapshot: cloneObj(el), dirty: false };
 
     document.querySelectorAll('.layout-el').forEach(n => n.classList.toggle('selected', n.dataset.id === id));
+    updateResizeFrame();
 
     // Hop thoai thuoc tinh dang dong: chi chon (to vien), khong hien thuoc tinh. Nhay dup vao doi tuong de mo.
     if (!propsOpen) return;
@@ -983,6 +1138,7 @@ function refreshNode(el) {
     const fresh = buildElementNode(el);
     if (old.classList.contains('selected')) fresh.classList.add('selected');
     old.replaceWith(fresh);
+    updateResizeFrame();
 }
 
 // Roi khoi doi tuong (chon doi tuong khac / doi mat bang / chuyen che do Chay / dong trang) ma thuoc tinh da doi
@@ -1867,33 +2023,37 @@ document.getElementById('clearBgBtn').addEventListener('click', async () => {
 // ---------------------------------------------------------------------------
 // Chế độ Build / Chạy
 // ---------------------------------------------------------------------------
-const buildModeBtn = document.getElementById('buildModeBtn');
 const runModeBtn = document.getElementById('runModeBtn');
 
-buildModeBtn.addEventListener('click', exitRunMode);
 runModeBtn.addEventListener('click', enterRunMode);
 
+// Nho che do dang dung (theo tai khoan) de lan sau mo trang / chuyen trang van giu nguyen; tai khoan User luon Chay nen khong can nho
+function saveLayoutMode(mode) {
+    if (window.PG_FORCE_RUN || !window.PG_MODE_KEY) return;
+    try { localStorage.setItem(window.PG_MODE_KEY, mode); } catch { /* bo qua */ }
+}
+function savedLayoutMode() {
+    try { return window.PG_MODE_KEY ? localStorage.getItem(window.PG_MODE_KEY) : null; } catch { return null; }
+}
+
 function enterRunMode() {
+    saveLayoutMode('run');
     closePropsDialog();      // luu thay doi dang do va dong hop thoai thuoc tinh
     if (live) { clearTimeout(live.timer); live = null; }
     flushPending();
     editMode = false;
+    updateResizeFrame();
     document.body.classList.add('layout-run-mode');
-    buildModeBtn.classList.remove('primary', 'active');
-    buildModeBtn.classList.add('secondary');
-    runModeBtn.classList.remove('secondary');
-    runModeBtn.classList.add('primary', 'active');
     showRunExitButton();
 }
 
 function exitRunMode() {
+    if (window.PG_FORCE_RUN) return;   // tai khoan User: luon o che do Chay
+    saveLayoutMode('build');
     releaseAllMomentary();
     editMode = true;
+    updateResizeFrame();
     document.body.classList.remove('layout-run-mode');
-    runModeBtn.classList.remove('primary', 'active');
-    runModeBtn.classList.add('secondary');
-    buildModeBtn.classList.remove('secondary');
-    buildModeBtn.classList.add('primary', 'active');
     hideRunExitButton();
 }
 
@@ -1903,6 +2063,7 @@ function hideRunExitButton() { document.getElementById('layoutRunHint')?.remove(
 
 // Goi y nho "ESC de thoat", tu mo dan sau ~2.5s de khong che ban do
 function showRunHint() {
+    if (window.PG_FORCE_RUN) return;   // User khong thoat duoc che do Chay nen khong hien goi y ESC
     document.getElementById('layoutRunHint')?.remove();
     const tip = document.createElement('div');
     tip.id = 'layoutRunHint';
@@ -1914,12 +2075,14 @@ function showRunHint() {
 }
 
 document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || editMode) return;
+    if (e.key !== 'Escape' || editMode || window.PG_FORCE_RUN) return;
     e.preventDefault();
     exitRunMode();
 });
 
 applyFloorBackground(window.currentFloorData);
+// User: luon Chay. Tai khoan khac: giu che do da dung lan truoc (Chay cho toi khi tu thoat bang ESC / nut Build)
+if (window.PG_FORCE_RUN || savedLayoutMode() === 'run') enterRunMode();
 loadLayout();
 pollBits();
 

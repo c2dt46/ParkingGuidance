@@ -146,8 +146,9 @@ Chi tiết luồng end-to-end với camera nền:
 
 ## 6b. Phạm vi nhận diện & cách đọc biển số
 
-- **Chỉ nhận diện ô tô**: xe con (`car`), xe khách (`bus`), xe tải (`truck`). **Không** nhận diện
-  xe máy (đã bỏ lớp `motorcycle` khỏi `CocoVehicleClasses`). Model chỉ xét đúng 3 lớp này.
+- **Loại xe nhận diện chọn được** ở Hệ thống › Camera › Cấu hình chung › 🚗 Nhận diện xe: ô tô (`car`), xe buýt (`bus`),
+  xe tải (`truck`), xe máy (`motorcycle`) — mỗi loại Có/Không, có hiệu lực ngay cho Mô phỏng, Thử nhận diện và camera thật.
+  Mặc định: ô tô/buýt/tải = Có, xe máy theo `Detection:IncludeMotorcycle` (mặc định Không). Tab Train xe luôn gợi ý đủ 4 loại.
 - **Toạ độ khung tự nhận biết**: một số file `yolov8n.onnx` xuất ra toạ độ khung **chuẩn hoá 0–1**
   thay vì pixel 0–640 (đúng trường hợp file bạn đã tải). Nếu không xử lý, mọi khung bị co về ~0px
   nên "không thấy xe". `YoloVehicleDetectionService` giờ tự phát hiện và quy đổi cả 2 kiểu.

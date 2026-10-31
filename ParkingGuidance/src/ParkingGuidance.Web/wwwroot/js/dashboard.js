@@ -7,13 +7,6 @@
 let dashboardFloor = 'B1';
 window.addEventListener('floorchange', (e) => { dashboardFloor = e.detail; });
 
-const liveBadge = document.getElementById('liveBadge');
-function setLive(state) {
-    if (!liveBadge) return;
-    liveBadge.classList.toggle('off', state !== 'on');
-    liveBadge.textContent = state === 'on' ? '● Realtime' : (state === 'retry' ? '● Đang kết nối lại…' : '● Mất kết nối');
-}
-
 const connection = new signalR.HubConnectionBuilder()
     .withUrl('/hubs/monitoring')
     .withAutomaticReconnect()
@@ -22,9 +15,7 @@ const connection = new signalR.HubConnectionBuilder()
 // Co su kien nhan dien moi / camera mat ket noi hoac hoat dong lai -> cap nhat o do tren ban do
 connection.on('ParkingEvent', () => { if (typeof refreshLayoutSlots === 'function') refreshLayoutSlots(); });
 connection.on('SlotsChanged', () => { if (typeof refreshLayoutSlots === 'function') refreshLayoutSlots(); });
-connection.onreconnecting(() => setLive('retry'));
-connection.onreconnected(() => { setLive('on'); if (typeof refreshLayoutSlots === 'function') refreshLayoutSlots(); });
-connection.onclose(() => setLive('off'));
+// Huy hieu "Realtime" da bo khoi giao dien; van tu ket noi lai va nap lai o do sau khi noi lai.
+connection.onreconnected(() => { if (typeof refreshLayoutSlots === 'function') refreshLayoutSlots(); });
 
-setLive('retry');
-connection.start().then(() => setLive('on')).catch(err => { console.error('SignalR error:', err); setLive('off'); });
+connection.start().catch(err => console.error('SignalR error:', err));

@@ -51,7 +51,7 @@ def main():
             for c in rec.get("candidates", []):
                 for raw in c.get("raws", []):
                     src, _, text = raw.partition(":")
-                    text = key(text.replace("(+)", ""))
+                    text = key(text.replace("(+)", "").replace("(-)", ""))
                     total[src] += 1
                     if text == t: exact[src] += 1; continue
                     for e in diff(t, text):

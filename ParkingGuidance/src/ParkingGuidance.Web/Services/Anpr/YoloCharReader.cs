@@ -98,6 +98,7 @@ public sealed class YoloCharReader : IDisposable
     private const float EdgeSearchFactor = 1.8f;
     private const double GapFillWeight = 0.85;      // lần đọc có ký tự bổ sung kém tin hơn lần đọc gốc
     private const int MaxPlateChars = 10;
+    private const double RepairWeight = 0.9;        // phieu da bo ky tu thua: hoi kem phieu goc ve do tin cay thuan, nhung duoc he so cau truc cuu
 
     /// <summary>
     /// Đọc 1 ảnh biển (BGR). Trả về true nếu ký tự chạm mép trái/phải ảnh cắt (khung biển nghi bị cụt — phiếu bị giảm trọng số).
@@ -110,25 +111,31 @@ public sealed class YoloCharReader : IDisposable
         if (plateBgr.Empty()) return false;
 
         var dets = Detect(plateBgr, BoxConfidence);
+        dets = DropNonInk(plateBgr, dets, color, out var removedInk);          // bo "ky tu" la hinh dan mau (co do sao vang...) tren bien trang / vang
         if (dets.Count < 3) return false;
 
         float margin = Math.Max(2f, 0.01f * plateBgr.Width);
         bool edgeCut = dets.Min(d => d.X1) <= margin || dets.Max(d => d.X2) >= plateBgr.Width - margin;
         double conf = dets.Average(d => d.Score);     // độ tin cậy tính trên các ký tự gốc (ký tự bổ sung có điểm thấp theo thiết kế)
 
-        AddReadVote(dets, conf, votes, weightScale, originX, originY, edgeCut, 1.0, false, color);
+        AddReadVote(dets, conf, votes, weightScale, originX, originY, edgeCut, 1.0, false, color, removed: removedInk);
+
+        // Chuoi khong khop cu phap ma bo di DUNG 1 ky tu diem thap nhat thi khop → them 1 phieu cho chuoi da bo ky tu thua.
+        // Viec bo ky tu nam trong PlateNormalizer.Normalize, dua tren MANG do tin cay tung ky tu (charScores) ma o day truyen vao.
+        AddReadVote(dets, conf, votes, weightScale, originX, originY, edgeCut, RepairWeight, false, color, "(-)", removedInk, prune: true);
 
         if (FillGaps)
         {
             var filled = FillMissingChars(plateBgr, dets);
             if (filled is not null)
-                AddReadVote(filled, conf, votes, weightScale, originX, originY, edgeCut, GapFillWeight, true, color);
+                AddReadVote(filled, conf, votes, weightScale, originX, originY, edgeCut, GapFillWeight, true, color, removed: removedInk);
         }
         return edgeCut;
     }
 
     private void AddReadVote(List<Det> dets, double conf, Dictionary<string, PlateVote> votes, double weightScale,
-                             int originX, int originY, bool edgeCut, double extraWeight, bool filled, PlateColor color)
+                             int originX, int originY, bool edgeCut, double extraWeight, bool filled, PlateColor color, string mark = "",
+                             IReadOnlyList<(Det D, string Reason)>? removed = null, bool prune = false)
     {
         if (conf < MinCharConfidence) return;
 
@@ -136,7 +143,20 @@ public sealed class YoloCharReader : IDisposable
         var texts = rows.Select(r => string.Concat(r.Select(d => _alphabet[d.Cls]))).ToList();
         string raw = string.Concat(texts);
         var lineLengths = texts.Count == 2 ? new[] { texts[0].Length, texts[1].Length } : null;
-        var pretty = PlateNormalizer.Apply(raw, lineLengths, color);      // null / "" = không nhận diện được
+        // MANG do tin cay tung ky tu, cung thu tu voi `raw`
+        var scores = rows.SelectMany(r => r).Select(d => d.Score).ToArray();
+        IReadOnlyList<int> dropped = Array.Empty<int>();
+        string? pretty;
+        if (prune)
+        {
+            // Lan nay cho phep Normalize bo ky tu yeu nhat; khong bo duoc gi thi khong them phieu (da co phieu goc)
+            pretty = PlateNormalizer.Apply(raw, lineLengths, color, PlateSyntax.ExpectedKind(color), scores, out dropped);
+            if (dropped.Count == 0) return;
+        }
+        else
+        {
+            pretty = PlateNormalizer.Apply(raw, lineLengths, color);
+        }      // null / "" = không nhận diện được
         if (pretty is null) return;
 
         var key = Regex.Replace(pretty.ToUpperInvariant(), "[^A-Z0-9]", "");
@@ -153,7 +173,31 @@ public sealed class YoloCharReader : IDisposable
         vote.Sources |= ReaderSource.Yolo;
         vote.Reads++;
         vote.GapFilled |= filled;
-        vote.AddRaw(ReaderSource.Yolo, filled ? raw + "(+)" : raw);
+        vote.AddRaw(ReaderSource.Yolo, (filled ? raw + "(+)" : raw) + mark);
+
+        // MANG tung ky tu (do tin cay, vi tri, dong) + cac ky tu da bi bo kem ly do: de kiem tra / loc ky tu yeu gay sai cu phap
+        if (vote.Chars is null || weight > vote.CharsWeight)
+        {
+            var infos = new List<ParkingGuidance.Web.Models.PlateCharInfo>();
+            int gi = 0;
+            for (int ri = 0; ri < rows.Count; ri++)
+                foreach (var d in rows[ri])
+                    infos.Add(new ParkingGuidance.Web.Models.PlateCharInfo
+                    {
+                        Value = _alphabet[d.Cls].ToString(), Score = d.Score, Row = ri,
+                        Dropped = dropped.Contains(gi++) ? "low-confidence: bỏ để đúng cú pháp" : null,
+                        X1 = originX + d.X1, Y1 = originY + d.Y1, X2 = originX + d.X2, Y2 = originY + d.Y2
+                    });
+            if (removed is not null)
+                foreach (var (d, why) in removed)
+                    infos.Add(new ParkingGuidance.Web.Models.PlateCharInfo
+                    {
+                        Value = _alphabet[d.Cls].ToString(), Score = d.Score, Row = -1, Dropped = why,
+                        X1 = originX + d.X1, Y1 = originY + d.Y1, X2 = originX + d.X2, Y2 = originY + d.Y2
+                    });
+            vote.Chars = infos;
+            vote.CharsWeight = weight;
+        }
 
         float minX = dets.Min(d => d.X1), maxX = dets.Max(d => d.X2);
         float minY = dets.Min(d => d.Y1), maxY = dets.Max(d => d.Y2);
@@ -166,6 +210,30 @@ public sealed class YoloCharReader : IDisposable
             vote.SpanX2 = originX + maxX;
             vote.SpanY2 = originY + maxY;
         }
+    }
+
+    /// <summary>
+    /// Biển nền TRẮNG (hoặc VÀNG) có chữ ĐEN. Khung "ký tự" nào chủ yếu là màu bão hoà (trắng: đỏ / vàng; vàng: đỏ) là hình dán — thường là cờ đỏ sao vàng
+    /// ở mép biển, hay bị đọc nhầm thành số "6" — nên bị bỏ. An toàn: nếu định bỏ quá nhiều khung (≥ 30% hoặc &gt; 2) thì coi là cả ảnh bị ám màu và KHÔNG bỏ gì.
+    /// </summary>
+    private static List<Det> DropNonInk(Mat plate, List<Det> dets, PlateColor color, out List<(Det D, string Reason)> removed)
+    {
+        removed = new List<(Det D, string Reason)>();
+        if (dets.Count < 4 || (color != PlateColor.White && color != PlateColor.Yellow)) return dets;
+
+        bool redOnly = color == PlateColor.Yellow;     // nền vàng thì chỉ màu đỏ mới là hình dán
+        var keep = new List<Det>(dets.Count);
+        var dropList = new List<(Det D, string Reason)>();
+        foreach (var d in dets)
+        {
+            if (PlateColorAnalyzer.SaturatedFraction(plate, d.X1, d.Y1, d.X2, d.Y2, redOnly) <= 0.30) keep.Add(d);
+            else dropList.Add((d, "non-ink: hình dán màu (cờ, tem), không phải chữ in"));
+        }
+
+        int dropped = dropList.Count;
+        if (dropped == 0 || dropped > 2 || dropped >= dets.Count * 0.3) return dets;
+        removed = dropList;
+        return keep;
     }
 
     /// <summary>

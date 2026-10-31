@@ -28,6 +28,9 @@ public sealed class PlateVote
     public bool GapFilled { get; set; }
     /// <summary>Màu nền biển của khung đã cho ra phiếu này (căn cứ chọn cú pháp khi chuẩn hoá / chấm điểm).</summary>
     public PlateColor Color { get; set; }
+    /// <summary>Từng ký tự của lần đọc YOLO tốt nhất tạo ra phiếu này (độ tin cậy, vị trí, ký tự đã bỏ + lý do).</summary>
+    public List<ParkingGuidance.Web.Models.PlateCharInfo>? Chars { get; set; }
+    public double CharsWeight { get; set; }
 
     private readonly List<string> _raws = new();
     /// <summary>Chuỗi THÔ của từng bộ đọc trước khi chuẩn hoá, dạng "Yolo:308-10370" — để ghi log và thống kê bộ đọc sai kiểu gì.</summary>

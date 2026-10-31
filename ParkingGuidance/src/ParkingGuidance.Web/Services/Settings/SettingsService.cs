@@ -21,6 +21,8 @@ public class SettingsService : ISettingsService
         {
             // File cũ chưa có LedRequestTimeoutSeconds -> lấy từ appsettings (Led:RequestTimeoutSeconds)
             saved.LedRequestTimeoutSeconds ??= config.GetValue("Led:RequestTimeoutSeconds", 15.0);
+            // File cũ chưa có lựa chọn loại xe -> giữ đúng hành vi cũ (xe máy theo Detection:IncludeMotorcycle)
+            saved.DetectMotorcycle ??= config.GetValue("Detection:IncludeMotorcycle", false) ? 1 : 0;
             _current = saved.Sanitized();
             _persistence.Save(StateKey, _current);
             return;
@@ -35,6 +37,7 @@ public class SettingsService : ISettingsService
             OpenTimeoutSeconds = config.GetValue("Detection:OpenTimeoutSeconds", d.OpenTimeoutSeconds),
             FrameReadTimeoutSeconds = config.GetValue("Detection:FrameReadTimeoutSeconds", d.FrameReadTimeoutSeconds),
             MaxRetryBackoffSeconds = config.GetValue("Detection:MaxRetryBackoffSeconds", d.MaxRetryBackoffSeconds),
+            DetectMotorcycle = config.GetValue("Detection:IncludeMotorcycle", false) ? 1 : 0,
             QueueWarnSeconds = d.QueueWarnSeconds,
             VacancyConfirmFrames = d.VacancyConfirmFrames,
             LedRequestTimeoutSeconds = config.GetValue("Led:RequestTimeoutSeconds", 15.0)

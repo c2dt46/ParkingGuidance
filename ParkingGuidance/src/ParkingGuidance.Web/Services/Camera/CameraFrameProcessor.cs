@@ -63,6 +63,7 @@ public class CameraFrameProcessor : ICameraFrameProcessor
                 occupiedZoneIds.Add(a.Zone.Id);
 
                 _parking.EnsureSlot(key, floor ?? "B1", zone);
+                _parking.SetAssignedPlate(key, a.Zone.AssignedPlate);   // bien chi dinh lay tu vung (nguon su that), doi chieu khi xe duoc ghi nhan
                 await RegisterOne(cameraId, key, frame, detections[a.VehicleIndex], vehicleBoxes, a.VehicleIndex, ct, manual);
                 registered++;
             }

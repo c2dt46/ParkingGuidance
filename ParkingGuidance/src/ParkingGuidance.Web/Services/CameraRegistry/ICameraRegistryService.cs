@@ -32,4 +32,8 @@ public interface ICameraRegistryService
     ManagedCamera? Commit(string id);
 
     bool Delete(string id);
+
+    /// <summary>Gỡ mọi camera khỏi 1 mặt bằng đã bị xoá: xoá vùng nhận diện (vị trí đỗ) và bỏ gán tầng/Zone.
+    /// Camera (IP, nguồn video...) vẫn được giữ. Trả về số camera bị ảnh hưởng.</summary>
+    int ClearFloor(string floor);
 }

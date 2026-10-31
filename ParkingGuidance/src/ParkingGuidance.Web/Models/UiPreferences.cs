@@ -17,7 +17,7 @@ public class UiPreferences
     /// <summary>Khoá font: segoe, roboto, arial, verdana, georgia, mono.</summary>
     public string Font { get; set; } = "segoe";
     /// <summary>Cỡ chữ theo % (85–130).</summary>
-    public int Size { get; set; } = 100;
+    public int Size { get; set; } = 110;
     /// <summary>Màu nhấn dạng #rrggbb.</summary>
     public string Accent { get; set; } = "#3b82f6";
 

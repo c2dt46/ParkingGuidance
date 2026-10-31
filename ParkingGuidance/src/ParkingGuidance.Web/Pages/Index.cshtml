@@ -1,42 +1,35 @@
 @page "/"
+@using ParkingGuidance.Web.Services.Licensing
 @{
     ViewData["Title"] = "Giám sát bãi xe";
+    ViewData["ContentClass"] = "content-fill";   // trang này dùng tối đa không gian cho khung thiết kế
+
+    // Tài khoản "User" (cấp 3) luôn ở chế độ Chạy: không có Build, không thoát được bằng ESC.
+    // Đặt class ngay từ server để không bị nháy giao diện Build trước khi script chạy.
+    var forceRun = AccessLevel.Of(User) == AccessLevel.User;
+    if (forceRun) ViewData["BodyClass"] = "layout-run-mode";
+
+    // Các tài khoản khác: nhớ chế độ (Chạy/Build) theo từng tài khoản trên trình duyệt này, chỉ đổi khi người dùng tự đổi (nút Build/Chạy, ESC)
+    var modeKey = global::System.Text.Json.JsonSerializer.Serialize("pg.layoutMode:" + (User.Identity?.Name ?? ""));
 }
 
-<span id="liveBadge" class="badge-live badge-live-corner" title="Trạng thái kết nối realtime">● Realtime</span>
-
-<div class="floor-bar">
-    <label>Mặt bằng:</label>
-    <select id="floorSelect"></select>
-    <button id="addFloorBtn" class="btn secondary fb-btn">➕ Thêm mặt bằng</button>
-    <button id="renameFloorBtn" class="btn secondary fb-btn">✏️ Đổi tên</button>
-    <button id="deleteFloorBtn" class="btn secondary fb-btn">🗑️ Xoá mặt bằng</button>
-</div>
+@* Chạy ngay khi trang đang dựng để vào đúng chế độ đã nhớ, không bị nháy giao diện Build *@
+<script>
+    window.PG_MODE_KEY = @Html.Raw(modeKey);
+    try { if (!@(forceRun ? "true" : "false") && localStorage.getItem(window.PG_MODE_KEY) === 'run') document.body.classList.add('layout-run-mode'); } catch (e) { }
+</script>
 
 <div id="mainSplit" class="main-split">
 <section class="panel layout-panel">
-    <div class="layout-header">
-        <h2>Bản đồ tuỳ chỉnh (Layout Editor)</h2>
-        <div class="zoom-box" title="Phóng to / thu nhỏ riêng phần thiết kế (Ctrl + lăn chuột)">
-            <label for="zoomSelect">Zoom</label>
-            <select id="zoomSelect">
-                <option value="0.25">25%</option>
-                <option value="0.5">50%</option>
-                <option value="0.75">75%</option>
-                <option value="1" selected>100%</option>
-                <option value="1.5">150%</option>
-                <option value="2">200%</option>
-                <option value="3">300%</option>
-                <option value="4">400%</option>
-            </select>
-            <button id="zoomOutBtn" type="button" class="btn secondary zoom-btn" title="Thu nhỏ">-</button>
-            <button id="zoomInBtn" type="button" class="btn secondary zoom-btn" title="Phóng to">+</button>
-        </div>
-    </div>
-
     <div class="layout-toolbar ribbon">
-        <div class="ribbon-tabs"><span class="ribbon-tab active">Đồ họa</span></div>
-        <div class="ribbon-body">
+        <div class="ribbon-tabs" role="tablist">
+            <button type="button" class="ribbon-tab active" role="tab" aria-selected="true" data-ribbon-tab="graphics">Đồ họa</button>
+            <button type="button" class="ribbon-tab" role="tab" aria-selected="false" data-ribbon-tab="floors">Mặt bằng</button>
+            <button type="button" class="ribbon-tab" role="tab" aria-selected="false" data-ribbon-tab="zoom">Phóng to / Thu nhỏ</button>
+            <button type="button" class="ribbon-run" id="runModeBtn" title="Chạy mặt bằng (nhấn ESC để thoát)" aria-label="Chạy mặt bằng"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg></button>
+            <span class="ribbon-title">Bản đồ tuỳ chỉnh (Layout Editor)</span>
+        </div>
+        <div class="ribbon-body" data-ribbon-panel="graphics" role="tabpanel">
 
             <div class="rb-group">
                 <div class="rb-items">
@@ -113,15 +106,70 @@
                 </div>
                 <span class="rb-label">Ảnh nền</span>
             </div>
+        </div>
 
-            <div class="rb-group rb-mode">
-                <div class="rb-items">
-                    <button type="button" class="rb-btn large active" id="buildModeBtn"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5a4 4 0 00-5 5L4 17l3 3 5.5-5.5a4 4 0 005-5l-2.5 2.5-2.5-.5-.5-2.5z"/></svg><span>Build</span></button>
-                    <button type="button" class="rb-btn large " id="runModeBtn" title="Chạy mặt bằng (nhấn ESC để thoát)"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg><span>Chạy</span></button>
+        <div class="ribbon-body" data-ribbon-panel="floors" role="tabpanel" hidden>
+            <div class="rb-group">
+                <div class="rb-items rb-center">
+                    <div class="rb-field">
+                        <label for="floorSelect">Mặt bằng</label>
+                        <select id="floorSelect" class="rb-select wide"></select>
+                    </div>
                 </div>
-                <span class="rb-label">Chế độ</span>
+                <span class="rb-label">Chọn mặt bằng</span>
             </div>
+            <div class="rb-group">
+                <div class="rb-items">
+                    <button type="button" id="addFloorBtn" class="rb-btn large" title="Thêm mặt bằng mới"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Thêm mặt bằng</span></button>
+                    <button type="button" id="renameFloorBtn" class="rb-btn large" title="Đổi tên hiển thị của mặt bằng đang chọn"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg><span>Đổi tên</span></button>
+                    <button type="button" id="deleteFloorBtn" class="rb-btn large" title="Xoá mặt bằng đang chọn khỏi danh sách"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg><span>Xoá mặt bằng</span></button>
+                </div>
+                <span class="rb-label">Quản lý mặt bằng</span>
+            </div>
+            <div class="rb-group">
+                <div class="rb-items rb-center">
+                    <label class="rb-check" id="startupFloorLabel" title="Mặt bằng được mở đầu tiên khi vào trang Giám sát. Luôn có đúng 1 mặt bằng khởi động.">
+                        <input type="checkbox" id="startupFloorChk" />
+                        <span>Mặt bằng khởi động đầu tiên</span>
+                    </label>
+                </div>
+                <span class="rb-label">Khởi động</span>
+            </div>
+        </div>
 
+        <div class="ribbon-body" data-ribbon-panel="zoom" role="tabpanel" hidden>
+            <div class="rb-group">
+                <div class="rb-items rb-center">
+                    <div class="rb-field">
+                        <label for="zoomSelect">Zoom</label>
+                        <select id="zoomSelect" class="rb-select">
+                            <option value="0.25">25%</option>
+                            <option value="0.5">50%</option>
+                            <option value="0.75">75%</option>
+                            <option value="1" selected>100%</option>
+                            <option value="1.5">150%</option>
+                            <option value="2">200%</option>
+                            <option value="3">300%</option>
+                            <option value="4">400%</option>
+                        </select>
+                    </div>
+                </div>
+                <span class="rb-label">Mức phóng đại</span>
+            </div>
+            <div class="rb-group">
+                <div class="rb-items">
+                    <button type="button" id="zoomOutBtn" class="rb-btn large" title="Thu nhỏ"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5M8.5 11h5"/></svg><span>Thu nhỏ</span></button>
+                    <button type="button" id="zoomInBtn" class="rb-btn large" title="Phóng to"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5M8.5 11h5M11 8.5v5"/></svg><span>Phóng to</span></button>
+                    <button type="button" id="zoomFitBtn" class="rb-btn large" title="Về 100% (vừa khung thiết kế)"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><span>Vừa khung</span></button>
+                </div>
+                <span class="rb-label">Thao tác</span>
+            </div>
+            <div class="rb-group">
+                <div class="rb-items rb-center">
+                    <span class="rb-hint">Giữ <b>Ctrl</b> + lăn chuột để phóng to / thu nhỏ tại vị trí con trỏ (chế độ Build).</span>
+                </div>
+                <span class="rb-label">Mẹo</span>
+            </div>
         </div>
     </div>
 
@@ -161,7 +209,30 @@
 </div>
 
 @section Scripts {
-    <script src="~/js/floors.js"></script>
-    <script src="~/js/dashboard.js"></script>
-    <script src="~/js/layout.js"></script>
+    <script>window.PG_FORCE_RUN = @(forceRun ? "true" : "false");</script>
+    <script>
+        // Chuyển tab thanh công cụ (Đồ họa / Mặt bằng / Phóng to - Thu nhỏ). Các phần tử chỉ bị ẩn, không bị xoá khỏi trang
+        // nên floors.js và layout.js vẫn tìm thấy đúng ID như cũ.
+        (function () {
+            var tabs = document.querySelectorAll('.ribbon-tab[data-ribbon-tab]');
+            function show(name) {
+                tabs.forEach(function (t) {
+                    var on = t.dataset.ribbonTab === name;
+                    t.classList.toggle('active', on);
+                    t.setAttribute('aria-selected', on ? 'true' : 'false');
+                });
+                document.querySelectorAll('[data-ribbon-panel]').forEach(function (p) {
+                    p.hidden = p.dataset.ribbonPanel !== name;
+                });
+                window.dispatchEvent(new Event('resize'));   // khung thiết kế tính lại kích thước vừa khung
+            }
+            tabs.forEach(function (t) { t.addEventListener('click', function () { show(t.dataset.ribbonTab); }); });
+            // Nút "Vừa khung": đưa Zoom về 100% qua chính ô chọn Zoom (layout.js tự xử lý)
+            var fit = document.getElementById('zoomFitBtn'), zs = document.getElementById('zoomSelect');
+            if (fit && zs) fit.addEventListener('click', function () { zs.value = '1'; zs.dispatchEvent(new Event('change')); });
+        })();
+    </script>
+    <script src="~/js/floorManager.js" asp-append-version="true"></script>
+    <script src="~/js/dashboard.js" asp-append-version="true"></script>
+    <script src="~/js/layout.js" asp-append-version="true"></script>
 }

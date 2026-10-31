@@ -141,3 +141,35 @@ Trước đây khi model dò xe không thấy xe nào, hệ thống vẫn tìm b
 - Không thấy xe → chỉ chạy **dò nhanh** (`RecognizeQuick`): chỉ dùng bộ dò biển số đã huấn luyện; **không có biển thì trả về ngay**; nếu có biển mới đọc ký tự. Không chạy lần dò nới lỏng và không thử vùng rác. (Nếu máy chưa cài bộ dò biển nào thì dùng xử lý ảnh với tối đa 2 ứng viên.)
 - Mọi lần đọc đều có **trần thời gian**: `Anpr:MaxRecognizeMs` (mặc định 8000 ms, đọc bình thường / vùng đã cắt) và `Anpr:QuickMaxMs` (mặc định 2500 ms, dò nhanh). Hết hạn mức thì ngưng thử thêm ứng viên (luôn thử ít nhất 1). Đặt 0 để tắt giới hạn.
 - Ảnh chụp sát biển (vùng đã cắt / chế độ "coi là biển") vẫn đọc đầy đủ như cũ.
+
+---
+
+## Cài đặt & hệ thống › 🔑 Giấy phép
+
+Trang `/System/License` (menu dưới **Thiết bị ngoài**) có 3 tab:
+
+| Tab | Ai thấy | Việc làm |
+|---|---|---|
+| **Tạo yêu cầu** | cấp 0–3 | Đọc số seri **ổ cứng, tất cả card mạng, main** của máy → chuỗi yêu cầu để gửi nhà cung cấp |
+| **Nhận giấy phép** | cấp 0–3 | Dán giấy phép → giải mã, hiện các số seri (✔/✖ khớp máy này) + thời hạn → **Kích hoạt** / **Hủy** |
+| **Tạo giấy phép** | **chỉ cấp 0 và 1** (chặn cả ở API) | Dán yêu cầu + chọn thời hạn (1/3/6 tháng, 1/3 năm, vĩnh viễn) → giấy phép mới, quy luật mã hoá mới |
+
+**Cấp đăng nhập:** 0 = `DEV`, 1 = `Lic` (chưa có tài khoản, sẽ tạo sau — `AccessLevel` đã nhận sẵn role `Lic`), 2 = `Megatech` (admin), 3 = `User`.
+Cấp 0/1: bản quyền mặc định đã được cấp, **không bao giờ bị kiểm tra** (không nạp script canh giữ, middleware bỏ qua).
+
+**Quy luật mã hoá** (`Services/Licensing/LicenseCodec.cs`, bảng ở `LicenseTables.cs`):
+20 bảng hoán vị của 36 ký tự `0-9A-Z` (10 loại 1 + 10 loại 2) sinh ngẫu nhiên 1 lần và cố định trong code → 100 cặp (i, j).
+Mỗi giấy phép chọn 1 cặp ngẫu nhiên, mã hoá AES-256-GCM (khoá HKDF từ bảng + cặp), rồi xáo ký tự qua bảng loại 1[i] / loại 2[j]
+có liên kết ký tự trước. Sửa/thiếu/thừa **1 ký tự** là giải mã thất bại. Bên nhận thử cả 100 cặp. **Không sửa `LicenseTables.cs`** sau khi đã cấp giấy phép.
+
+**Tính thời gian:** giấy phép cấp một lượng *thời gian sử dụng* (1 tháng = 30 ngày, 1 năm = 365 ngày). Luồng nền `LicenseWorker` cộng
+thời gian mỗi 15 giây, **chỉ khi có ≥ 2 số seri trong giấy phép trùng với máy** (giấy phép chỉ có 1 số seri thì cần 1). Dùng đồng hồ đơn điệu nên
+chỉnh giờ Windows không đổi thời gian còn lại. Trạng thái lưu 2 nơi: `{DataDirectory}/license.dat` và `%ProgramData%\ParkingGuidance\license.sys`
+(khi nạp lấy bản mới nhất và số giây đã dùng lớn nhất). Giấy phép đã kích hoạt một lần được ghi sổ, **không thể kích hoạt lại để reset thời gian**; giấy phép cấp quá 90 ngày mà chưa kích hoạt bị từ chối (`ActivationWindowDays`).
+
+**Chạy thử:** khi chưa có giấy phép nào, mỗi lần khởi động ứng dụng được chạy 15 phút (`TrialDuration` trong `LicenseService.cs`), tính từ lúc ứng dụng khởi động; hết 15 phút thì hiện thông báo → xác nhận → tắt, như khi hết hạn. Kích hoạt giấy phép trong lúc chạy thử thì dùng tiếp bình thường. Giấy phép đã hết hạn hoặc dữ liệu bản quyền bị hỏng thì *không* được chạy thử.
+
+**Hết hạn:** trình duyệt của cấp 2/3 hỏi `/api/license/status` mỗi 60 giây (chỉ đọc bộ nhớ). Khi giấy phép chuyển từ dùng được sang không dùng được
+→ hiện thông báo → **Xác nhận** → `POST /api/license/shutdown` → ứng dụng tắt. Khi chưa có giấy phép / đã hết, cấp 2/3 chỉ vào được trang Giấy phép và trang đăng nhập (`LicenseGateMiddleware`).
+
+**Không làm chậm chương trình chính:** lỗi trong luồng giấy phép bị chặn tại chỗ; request web chỉ đọc 1 biến `bool`; đọc phần cứng (WMI) chạy trên luồng nền ~30 phút/lần.

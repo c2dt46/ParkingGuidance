@@ -45,7 +45,6 @@ public class YoloVehicleDetectionService : IVehicleDetectionService, IDisposable
     private readonly ILogger<YoloVehicleDetectionService> _logger;
     private readonly ISettingsService _settings;
     private readonly IConfiguration _config;
-    private readonly bool _includeMotorcycle;
     private readonly int _threads;
     private readonly object _runLock = new();          // Detect va Reload khong chay cung luc (huy model cu an toan)
     private ModelState? _state;
@@ -66,7 +65,6 @@ public class YoloVehicleDetectionService : IVehicleDetectionService, IDisposable
         _logger = logger;
         _settings = settings;
         _config = config;
-        _includeMotorcycle = config.GetValue("Detection:IncludeMotorcycle", false);
         _threads = Math.Max(0, config.GetValue("Detection:Threads", 0));
         ModelPath = config["Detection:ModelPath"] ?? "models/yolo11n.onnx";
         CustomModelPath = Path.Combine(persistence.DataDirectory, "vehicle-train", "active", "vehicle.onnx");
@@ -191,12 +189,15 @@ public class YoloVehicleDetectionService : IVehicleDetectionService, IDisposable
         return CocoClasses.Where(kv => numClasses <= 0 || kv.Key < numClasses).ToDictionary(kv => kv.Key, kv => kv.Value);
     }
 
-    public List<DetectionResult> Detect(Mat frame, float? confThreshold = null) =>
-        Run(frame, confThreshold ?? _settings.Current.ConfidenceThreshold, _includeMotorcycle);   // cai dat doi la co hieu luc ngay
+    public List<DetectionResult> Detect(Mat frame, float? confThreshold = null)
+    {
+        var st = _settings.Current;   // cai dat (nguong + loai xe) doi la co hieu luc ngay
+        return Run(frame, confThreshold ?? st.ConfidenceThreshold, st.AllowsVehicle);
+    }
 
-    public List<DetectionResult> DetectAll(Mat frame, float confThreshold) => Run(frame, confThreshold, includeMotorcycle: true);
+    public List<DetectionResult> DetectAll(Mat frame, float confThreshold) => Run(frame, confThreshold, _ => true);
 
-    private List<DetectionResult> Run(Mat frame, float threshold, bool includeMotorcycle)
+    private List<DetectionResult> Run(Mat frame, float threshold, Func<VehicleType, bool> allow)
     {
         var results = new List<DetectionResult>();
         if (frame.Empty()) return results;
@@ -206,7 +207,7 @@ public class YoloVehicleDetectionService : IVehicleDetectionService, IDisposable
             var st = _state;
             if (st is null) return results;
 
-            var classes = st.Classes.Where(kv => includeMotorcycle || kv.Value != VehicleType.Motorcycle).ToArray();
+            var classes = st.Classes.Where(kv => allow(kv.Value)).ToArray();
             if (classes.Length == 0) return results;
 
             var (input, scale, padX, padY) = Letterbox(frame, st.InputSize);

@@ -189,42 +189,90 @@
 </div>
 
 <div id="configTab" class="sys-tab-panel">
+    <p class="hint small">
+        Các thông số này được <strong>lưu lại</strong> và có hiệu lực ngay (không cần khởi động lại).
+        Camera nào không đặt ngưỡng thay đổi ảnh riêng ở tab Vị trí đỗ sẽ dùng giá trị mặc định ở đây.
+    </p>
+
+    <!-- ===== CAMERA ===== -->
     <section class="panel">
-        <h2>Cài đặt nhận diện chung</h2>
-        <p class="hint small">
-            Các thông số này được <strong>lưu lại</strong> và có hiệu lực ngay (không cần khởi động lại).
-            Camera nào không đặt ngưỡng thay đổi ảnh riêng ở tab Vị trí đỗ sẽ dùng giá trị mặc định ở đây.
-        </p>
+        <h2>📷 Camera</h2>
         <div class="settings-grid">
             <div class="prop-field"><label>Chu kỳ lấy ảnh mỗi camera (giây)</label><input id="setInterval" type="number" min="0.5" step="0.5" /></div>
             <div class="prop-field"><label>Ngưỡng thay đổi ảnh mặc định (%)</label><input id="setMotion" type="number" min="0" max="100" step="0.5" /></div>
-            <div class="prop-field"><label>Độ tin cậy tối thiểu nhận diện xe (0.05 - 0.95)</label><input id="setConf" type="number" min="0.05" max="0.95" step="0.05" /></div>
             <div class="prop-field"><label>Chờ mở kết nối camera tối đa (giây)</label><input id="setOpenTimeout" type="number" min="1" step="1" /></div>
             <div class="prop-field"><label>Chờ lấy 1 khung hình tối đa (giây)</label><input id="setReadTimeout" type="number" min="1" step="1" /></div>
             <div class="prop-field"><label>Camera lỗi: nghỉ tối đa trước khi thử lại (giây)</label><input id="setBackoff" type="number" min="1" step="1" /></div>
             <div class="prop-field"><label>Cảnh báo khi hàng đợi AI chờ quá (giây)</label><input id="setQueueWarn" type="number" min="1" step="1" /></div>
-            <div class="prop-field"><label>Xác nhận xe đã rời sau (số lần xử lý liên tiếp không thấy xe)</label><input id="setVacancy" type="number" min="1" max="20" step="1" /></div>
-            <div class="prop-field"><label>Bộ dò khung biển (0 = tự động, 1 = chỉ YOLO11n đã train, 2 = chỉ Darknet)</label><input id="setPlateDetector" type="number" min="0" max="2" step="1" /></div>
-            <div class="prop-field"><label>Độ tin cậy tối thiểu khung biển số (0.05 - 0.95)</label><input id="setPlateBoxConf" type="number" min="0.05" max="0.95" step="0.05" /></div>
-            <div class="prop-field"><label>Kết hợp Tesseract kiểm chứng khi YOLO chưa chắc (0 = tắt, 1 = bật)</label><input id="setCharCombine" type="number" min="0" max="1" step="1" /></div>
-            <div class="prop-field"><label>Độ tin cậy tối thiểu ký tự biển số (0 - 0.95)</label><input id="setCharConf" type="number" min="0" max="0.95" step="0.05" /></div>
-            <div class="prop-field"><label>Biển phải nằm trong khung xe tối thiểu (0 - 1, 0 = tắt)</label><input id="setPlateOverlap" type="number" min="0" max="1" step="0.05" /></div>
-            <div class="prop-field"><label>Cạnh dài tối đa ảnh đưa vào dò xe/biển (px, 0 = ảnh gốc)</label><input id="setProcessMaxSide" type="number" min="0" max="4096" step="64" /></div>
-            <div class="prop-field"><label>Chiều cao ảnh biển khi đọc ký tự (px, 40 - 300)</label><input id="setPlateReadHeight" type="number" min="40" max="300" step="10" /></div>
-            <div class="prop-field"><label>Kích thước khung biển số hiển thị</label>
-                <select id="setPlateBoxMode">
-                    <option value="0">Giữ nguyên khung theo nhận diện biển số (ôm sát như tab Train + offset)</option>
-                    <option value="1">Theo kích thước ký tự (nhận diện ký tự)</option>
-                </select></div>
-            <div class="prop-field"><label>Offset khung biển số (% mỗi phía, chỉ áp dụng khi chọn "theo nhận diện biển số"; 0 - 30)</label><input id="setPlateBoxOffset" type="number" min="0" max="30" step="0.5" /></div>
-            <div class="prop-field"><label>Xe không có khung biển: vẫn tìm biển đầy đủ (0 = bỏ qua, 1 = tìm, chậm)</label><input id="setPlateFullSearch" type="number" min="0" max="1" step="1" /></div>
         </div>
-        <div class="prop-actions">
-            <button id="saveSettingsBtn" class="btn primary">💾 Lưu cài đặt</button>
-            <span id="settingsStatus" class="hint small"></span>
-        </div>
-        <p class="hint small">Dữ liệu (cài đặt, danh sách camera, vùng nhận diện, mặt bằng, phiên đỗ xe) được lưu tại: <code id="dataDirText">...</code></p>
     </section>
+
+    <!-- ===== NHẬN DIỆN: xe → biển số → ký tự ===== -->
+    <section class="panel">
+        <h2>🧠 Nhận diện</h2>
+
+        <div class="settings-block">
+            <h3>🚗 Nhận diện xe</h3>
+            <div class="settings-grid">
+                <div class="prop-field"><label>Độ tin cậy tối thiểu nhận diện xe (0.05 - 0.95)</label><input id="setConf" type="number" min="0.05" max="0.95" step="0.05" /></div>
+                <div class="prop-field"><label>Nhận diện xe ô tô (car)</label>
+                    <select id="setDetectCar"><option value="1">Có</option><option value="0">Không</option></select></div>
+                <div class="prop-field"><label>Nhận diện xe buýt (bus)</label>
+                    <select id="setDetectBus"><option value="1">Có</option><option value="0">Không</option></select></div>
+                <div class="prop-field"><label>Nhận diện xe tải (truck)</label>
+                    <select id="setDetectTruck"><option value="1">Có</option><option value="0">Không</option></select></div>
+                <div class="prop-field"><label>Nhận diện xe máy (motorcycle)</label>
+                    <select id="setDetectMotorcycle"><option value="1">Có</option><option value="0">Không</option></select></div>
+                <div class="prop-field"><label>Xác nhận xe đã rời sau (số lần xử lý liên tiếp không thấy xe)</label><input id="setVacancy" type="number" min="1" max="20" step="1" /></div>
+                <div class="prop-field"><label>Cạnh dài tối đa ảnh đưa vào dò xe/biển (px, 0 = ảnh gốc)</label><input id="setProcessMaxSide" type="number" min="0" max="4096" step="64" /></div>
+            </div>
+        </div>
+
+        <div class="settings-block">
+            <h3>🔖 Nhận diện biển số</h3>
+            <div class="settings-grid">
+                <div class="prop-field"><label>Bộ dò khung biển</label>
+                    <select id="setPlateDetector">
+                        <option value="0">Tự động (gộp YOLO11n đã train và Darknet)</option>
+                        <option value="1">Chỉ YOLO11n đã train (chưa có model thì dùng Darknet)</option>
+                        <option value="2">Chỉ Darknet YOLOv3-tiny</option>
+                    </select></div>
+                <div class="prop-field"><label>Độ tin cậy tối thiểu khung biển số (0.05 - 0.95)</label><input id="setPlateBoxConf" type="number" min="0.05" max="0.95" step="0.05" /></div>
+                <div class="prop-field"><label>Biển phải nằm trong khung xe tối thiểu (0 - 1, 0 = tắt)</label><input id="setPlateOverlap" type="number" min="0" max="1" step="0.05" /></div>
+                <div class="prop-field"><label>Xe không có khung biển</label>
+                    <select id="setPlateFullSearch">
+                        <option value="0">Bỏ qua (nhanh)</option>
+                        <option value="1">Vẫn tìm biển đầy đủ (chậm, tới vài giây/xe)</option>
+                    </select></div>
+                <div class="prop-field"><label>Kích thước khung biển số hiển thị</label>
+                    <select id="setPlateBoxMode">
+                        <option value="0">Giữ nguyên khung theo nhận diện biển số (ôm sát như tab Train + offset)</option>
+                        <option value="1">Theo kích thước ký tự (nhận diện ký tự)</option>
+                    </select></div>
+                <div class="prop-field"><label>Offset khung biển số (% mỗi phía, chỉ áp dụng khi chọn "theo nhận diện biển số"; 0 - 30)</label><input id="setPlateBoxOffset" type="number" min="0" max="30" step="0.5" /></div>
+            </div>
+        </div>
+
+        <div class="settings-block">
+            <h3>🔤 Nhận diện ký tự</h3>
+            <div class="settings-grid">
+                <div class="prop-field"><label>Kết hợp Tesseract kiểm chứng khi YOLO chưa chắc</label>
+                    <select id="setCharCombine">
+                        <option value="0">Tắt (chỉ YOLO; Tesseract chỉ dự phòng khi YOLO không đọc được)</option>
+                        <option value="1">Bật (Tesseract kiểm chứng khi YOLO chưa chắc)</option>
+                    </select></div>
+                <div class="prop-field"><label>Độ tin cậy tối thiểu ký tự biển số (0 - 0.95)</label><input id="setCharConf" type="number" min="0" max="0.95" step="0.05" /></div>
+                <div class="prop-field"><label>Chiều cao ảnh biển khi đọc ký tự (px, 40 - 300)</label><input id="setPlateReadHeight" type="number" min="40" max="300" step="10" /></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Nút lưu: sáng khi có thay đổi chưa lưu, tối khi đã lưu hết -->
+    <div class="settings-savebar">
+        <button id="saveSettingsBtn" class="btn primary save-idle">💾 Lưu cài đặt</button>
+        <span id="settingsStatus" class="hint small"></span>
+    </div>
+    <p class="hint small">Dữ liệu (cài đặt, danh sách camera, vùng nhận diện, mặt bằng, phiên đỗ xe) được lưu tại: <code id="dataDirText">...</code></p>
 
     <section class="panel">
         <h2>Hàng đợi nhận diện AI &amp; trạng thái camera chạy nền</h2>
@@ -740,11 +788,11 @@
 </div>
 
 @section Scripts {
-    <script src="~/js/systemCameras.js"></script>
-    <script src="~/js/parkingZones.js"></script>
-    <script src="~/js/systemSettings.js"></script>
-    <script src="~/js/cameraData.js"></script>
-    <script src="~/js/cameraHistory.js"></script>
+    <script src="~/js/systemCameras.js" asp-append-version="true"></script>
+    <script src="~/js/parkingZones.js" asp-append-version="true"></script>
+    <script src="~/js/systemSettings.js" asp-append-version="true"></script>
+    <script src="~/js/cameraData.js" asp-append-version="true"></script>
+    <script src="~/js/cameraHistory.js" asp-append-version="true"></script>
     <script src="~/js/cameraSimulation.js" asp-append-version="true"></script>
     <script src="~/js/simInspector.js" asp-append-version="true"></script>
     <script src="~/js/trainHub.js" asp-append-version="true"></script>
@@ -754,5 +802,5 @@
     <script src="~/js/plateTrain.js" asp-append-version="true"></script>
     <script src="~/js/ocrTrain.js" asp-append-version="true"></script>
     <script src="~/js/trainTransfer.js" asp-append-version="true"></script>
-    <script src="~/js/panelCollapse.js"></script>
+    <script src="~/js/panelCollapse.js" asp-append-version="true"></script>
 }

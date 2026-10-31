@@ -31,7 +31,10 @@ body {
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    min-height: 100vh;
+    /* Khối tài khoản luôn ghim sát đáy phần NHÌN THẤY của màn hình: chiều cao theo dvh (không tính thanh trình duyệt che),
+       chỉ danh sách menu (.sidebar-nav) cuộn khi thiếu chỗ, còn thương hiệu và tài khoản không bao giờ bị đẩy ra khỏi màn hình */
+    min-height: 0; overflow: hidden;
+    position: sticky; top: 0; height: 100vh; height: 100dvh; align-self: flex-start;
 }
 
 .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; }
@@ -43,21 +46,46 @@ body {
 .brand-title { font-weight: 700; font-size: 15px; }
 .brand-sub { font-size: 12px; color: var(--text-muted); }
 
-.sidebar-nav { flex: 1; }
+.sidebar-nav { flex: 1; min-height: 0; overflow-y: auto; }
 
+.nav-group + .nav-group { margin-top: 14px; }
 .nav-group-title {
-    font-size: 11px; color: var(--text-muted); margin: 18px 0 8px;
-    letter-spacing: .05em; text-transform: uppercase;
+    display: flex; align-items: center; justify-content: space-between; width: 100%;
+    margin: 0 0 6px; padding: 4px 6px 4px 12px; border: 0; border-radius: 6px; background: transparent;
+    font: inherit; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--text); cursor: pointer; text-align: left;
 }
-.nav-group-title:first-child { margin-top: 0; }
+.nav-group-title:hover { background: var(--panel-light); }
+.nav-group-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.nav-chevron { font-size: 12px; transition: transform .15s; }
+.nav-group.collapsed .nav-chevron { transform: rotate(-90deg); }
+.nav-group.collapsed .nav-group-body { display: none; }
 
-.nav-subgroup-title {
-    font-size: 10px; color: var(--text-muted); margin: 10px 0 4px 10px; opacity: .7;
+.nav-link.nav-sublink { padding-left: 30px; font-size: 13px; }
+
+/* "Giám sát" + nút xổ + danh sách mặt bằng (mục con) */
+.nav-row { display: flex; align-items: flex-start; gap: 2px; }
+.nav-row .nav-link { flex: 1; min-width: 0; }
+.nav-expander {
+    flex: none; width: 30px; height: 40px; margin-bottom: 4px; padding: 0; border: 0; border-radius: 8px;
+    background: transparent; color: var(--text-muted); cursor: pointer;
 }
-.nav-link.nav-sublink { padding-left: 22px; font-size: 13px; }
+.nav-expander:hover { background: var(--panel-light); color: var(--text); }
+.nav-expander:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.nav-item.sub-collapsed .nav-expander .nav-chevron { transform: rotate(-90deg); }
+.nav-item.sub-collapsed .nav-sub { display: none; }
+.nav-sub { display: flex; flex-direction: column; margin: -2px 0 4px; }
+.nav-sub:empty { display: none; }
+.nav-link.nav-floor { padding: 7px 12px 7px 34px; margin-bottom: 2px; font-size: 13px; }
+.nav-link.nav-floor .nav-ico { width: 16px; font-size: 12px; color: var(--text-muted); }
+.nav-link.nav-floor .nav-floor-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-link.nav-floor.active { background: var(--panel-light); color: var(--accent); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+.nav-link.nav-floor.active .nav-ico { color: var(--accent); }
 
+/* Icon nằm trong cột rộng cố định để chữ của mọi mục luôn thẳng hàng (emoji mỗi loại rộng khác nhau) */
+.nav-ico { width: 22px; flex-shrink: 0; text-align: center; }
 .nav-link {
-    display: block; padding: 10px 12px; margin-bottom: 4px;
+    display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin-bottom: 4px;
     border-radius: 8px; color: var(--text); text-decoration: none; font-size: 14px;
 }
 .nav-link:hover { background: var(--panel-light); }
@@ -71,33 +99,56 @@ body {
 }
 
 /* Khối tài khoản dưới cùng sidebar */
+.brand { flex: none; }
 .sidebar-footer {
+    flex: none; background: var(--panel);
     border-top: 1px solid var(--border);
     padding-top: 14px;
     margin-top: 14px;
 }
-.profile-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.avatar {
-    width: 32px; height: 32px; border-radius: 50%;
-    background: var(--accent); color: #fff; font-size: 12px; font-weight: 700;
-    display: flex; align-items: center; justify-content: center;
+/* Hộp thoại "tính năng đang được phát triển" */
+.soon-dialog {
+    border: 1px solid var(--border); border-radius: 12px; padding: 24px 32px; text-align: center;
+    background: var(--panel); color: var(--text); min-width: 300px;
 }
-.profile-icons { display: flex; gap: 8px; font-size: 13px; opacity: .8; }
-.profile-name { font-size: 13px; font-weight: 600; }
-.profile-role { font-size: 11px; color: var(--text-muted); }
+.soon-dialog::backdrop { background: rgba(0,0,0,.55); }
+.soon-icon { font-size: 34px; margin-bottom: 8px; }
+.soon-msg { margin: 0 0 18px; font-size: 16px; font-weight: 600; }
+.soon-dialog form { margin: 0; }
+.soon-ok {
+    padding: 8px 28px; border-radius: 8px; border: 0; cursor: pointer;
+    background: var(--accent); color: #fff; font: inherit; font-weight: 600;
+}
+.soon-ok:hover { filter: brightness(1.12); }
+
+/* Tài khoản + nút đăng xuất (dưới cùng sidebar) */
+.account-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.account-avatar {
+    width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; line-height: 1; background: #64748b;
+}
+.account-avatar.lvl-0 { background: #8b5cf6; }   /* DEV */
+.account-avatar.lvl-1 { background: #f59e0b; }   /* Lic */
+.account-avatar.lvl-2 { background: #14b8a6; }   /* Megatech (admin) */
+.account-avatar.lvl-3 { background: #64748b; }   /* User */
+.account-info { min-width: 0; }
+.account-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-role { font-size: 11px; color: var(--text-muted); }
+.account-logout-form { margin: 0; }
+.account-logout-btn {
+    width: 100%; padding: 8px 10px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); background: transparent; color: var(--text);
+    font: inherit; font-size: 13px;
+}
+.account-logout-btn:hover { background: var(--panel-light); border-color: var(--accent); }
+.account-logout-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Content */
 .content { flex: 1; padding: 28px 32px; }
 
 .page-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
 .page-header h1 { margin: 0; font-size: 22px; }
-.badge-live { color: var(--green); font-size: 13px; }
-.badge-live.off { color: var(--amber); }
-/* Realtime: co dinh o goc tren phai man hinh */
-.badge-live-corner {
-    position: fixed; top: 10px; right: 16px; z-index: 650; padding: 3px 10px; font-weight: 600;
-    background: var(--panel); border: 1px solid var(--border); border-radius: 999px;
-}
 .hist-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
 .hist-toolbar select { background: var(--panel-light); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 8px 10px; font-size: 13px; min-width: 220px; }
 .hist-table tbody tr:hover { cursor: default; }
@@ -107,21 +158,6 @@ body {
 .pref-browser select { background: var(--panel-light); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 8px 10px; font-size: 13px; min-width: 220px; }
 .pref-browser .btn { flex: none; width: auto; padding: 8px 14px; font-size: 13px; }
 
-.floor-bar {
-    display: flex; align-items: center; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;
-}
-.floor-bar label { font-size: 13px; color: var(--text-muted); }
-.floor-bar select {
-    background: var(--panel-light); border: 1px solid var(--border); color: var(--text);
-    border-radius: 6px; padding: 8px 10px; font-size: 13px; min-width: 200px;
-}
-/* Thanh mat bang: can doi, nut gon (khong gian deu ra het be ngang) */
-.floor-bar {
-    padding: 10px 12px; background: var(--panel-light); border: 1px solid var(--border); border-radius: 10px;
-    width: fit-content; max-width: 100%;
-}
-.floor-bar .fb-btn { flex: none; width: auto; padding: 8px 14px; font-size: 13px; white-space: nowrap; background: var(--panel); }
-.floor-bar .fb-btn:hover { border-color: var(--accent); }
 
 .panel {
     background: var(--panel);
@@ -190,9 +226,6 @@ body {
 
 /* Layout Editor */
 .layout-panel { margin-top: 0; }
-/* Tieu de + Zoom cung 1 hang de nhuong chieu cao cho vung thiet ke */
-.layout-header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
-.layout-header h2 { margin: 0; font-size: 16px; color: var(--text); }
 .hint.small { font-size: 11px; margin-top: 10px; }
 
 .layout-toolbar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
@@ -205,12 +238,39 @@ body {
 /* Thanh cong cu Layout Editor dang RIBBON (giong thanh Graphics cua phan mem SCADA/HMI): tab o tren,
    cac nhom cong cu co ten o duoi, nut lon (icon tren, chu duoi) va nut nho xep cot 3 hang. */
 .ribbon.layout-toolbar { display: block; margin-bottom: 10px; padding: 0; }
-.ribbon-tabs { display: flex; gap: 2px; padding-left: 8px; }
+.ribbon-tabs { display: flex; align-items: flex-end; gap: 2px; padding-left: 8px; }
 .ribbon-tab {
-    padding: 4px 16px; font-size: 12px; font-weight: 600; color: var(--text-muted);
+    padding: 4px 16px; font-size: 12px; font-weight: 600; font-family: inherit; color: var(--text-muted);
+    background: transparent; cursor: pointer;
     border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0;
 }
+.ribbon-tab:hover { color: var(--text); }
 .ribbon-tab.active { color: var(--text); background: var(--panel-light); border-color: var(--border); }
+/* Nút Chạy dạng icon nằm ngay trong dải tab (không có chữ); thoát chế độ Chạy bằng ESC */
+.ribbon-run {
+    display: inline-flex; align-items: center; justify-content: center; margin-left: 4px; padding: 3px 12px;
+    background: var(--panel-light); color: var(--accent); cursor: pointer;
+    border: 1px solid var(--border); border-bottom: none; border-radius: 6px 6px 0 0;
+}
+.ribbon-run svg { width: 16px; height: 16px; display: block; }
+.ribbon-run:hover { background: var(--accent); color: #fff; }
+.ribbon-run:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ribbon-title { margin-left: auto; align-self: center; padding-right: 8px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.ribbon-body[hidden] { display: none; }
+.ribbon-body { min-height: 92px; }
+/* O chon / nhan trong cac tab Mat bang va Zoom */
+.rb-items.rb-center { align-items: center; }
+.rb-field { display: flex; align-items: center; gap: 8px; padding: 0 6px; }
+.rb-field label { font-size: 12px; font-weight: 600; color: var(--text); }
+.rb-select {
+    background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 6px 8px; font-size: 13px; font-family: inherit; min-width: 96px;
+}
+.rb-select.wide { min-width: 240px; }
+.rb-check { display: flex; align-items: center; gap: 8px; padding: 0 8px; font-size: 12px; font-weight: 600; color: var(--text); cursor: pointer; }
+.rb-check input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.rb-check input:disabled { cursor: default; }
+.rb-hint { max-width: 260px; padding: 0 8px; font-size: 12px; line-height: 1.4; color: var(--text-muted); }
 .ribbon-body {
     display: flex; align-items: stretch; gap: 0; flex-wrap: wrap;
     padding: 6px 8px 0; background: var(--panel-light);
@@ -263,17 +323,6 @@ body {
 }
 .layout-viewport > .layout-canvas { flex: none; margin: auto; }
 
-/* Hop Zoom nam o hang tieu de */
-.zoom-box {
-    display: flex; align-items: center; gap: 6px; padding: 8px 10px;
-    background: var(--panel-light); border: 1px solid var(--border); border-radius: 10px;
-}
-.zoom-box label { font-size: 13px; font-weight: 600; color: var(--text); }
-.zoom-box select {
-    flex: 1; min-width: 0; background: var(--panel); border: 1px solid var(--border); color: var(--text);
-    border-radius: 6px; padding: 6px 8px; font-size: 13px;
-}
-.zoom-box .zoom-btn { flex: none; width: 34px; padding: 5px 0; font-size: 16px; font-weight: 700; line-height: 1; }
 
 .layout-canvas {
     /* TY LE + THANG DO DONG NHAT giua Build va Chay:
@@ -300,6 +349,26 @@ body {
     text-align: center; padding: calc(4 * var(--px));
 }
 .layout-el:active { cursor: grabbing; }
+
+/* Khung co gian doi tuong dang chon (Build): 8 tay nam co kich thuoc co dinh theo pixel man hinh, khong doi theo Zoom */
+.layout-resize-frame { position: absolute; pointer-events: none; z-index: 2147483000; }
+.layout-resize-frame[hidden] { display: none; }
+.resize-handle {
+    position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; box-sizing: border-box;
+    background: #fff; border: 2px solid var(--accent); border-radius: 3px; pointer-events: auto;
+}
+.resize-handle[hidden] { display: none; }
+.resize-handle:hover { background: var(--accent); }
+.rh-nw { left: 0; top: 0; cursor: nwse-resize; }
+.rh-n  { left: 50%; top: 0; cursor: ns-resize; }
+.rh-ne { left: 100%; top: 0; cursor: nesw-resize; }
+.rh-e  { left: 100%; top: 50%; cursor: ew-resize; }
+.rh-se { left: 100%; top: 100%; cursor: nwse-resize; }
+.rh-s  { left: 50%; top: 100%; cursor: ns-resize; }
+.rh-sw { left: 0; top: 100%; cursor: nesw-resize; }
+.rh-w  { left: 0; top: 50%; cursor: ew-resize; }
+body.is-resizing, body.is-resizing * { user-select: none; }
+body.layout-run-mode .layout-resize-frame { display: none; }
 .layout-el.selected { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .layout-el.as-button {
@@ -317,6 +386,8 @@ body {
 .layout-el.as-slot.empty { background: #14321f; border-color: var(--green); color: var(--green); }
 .layout-el.as-slot.occupied { background: #3a1414; border-color: var(--red); color: #fca5a5; }
 .layout-el.as-slot.error { background: #3a2f14; border-color: var(--amber); color: #fde68a; }
+.layout-el.as-slot.wrong { background: #3b1438; border-color: #e879f9; color: #f5d0fe; }   /* do sai bien chi dinh */
+.zone-plate-input { width: 100%; margin: 6px 0 2px; padding: 5px 8px; box-sizing: border-box; border-radius: 8px; text-transform: uppercase; }
 .layout-el.as-slot.neutral { background: var(--panel-light); border-color: var(--border); color: var(--text); }
 .layout-el.as-slot { padding: calc(2 * var(--px)); line-height: 1.25; }
 .layout-el .slot-id { font-size: calc(13 * var(--px)); }
@@ -401,6 +472,20 @@ body {
 .slot-live-status.occupied { background: #3a1414; color: #fca5a5; }
 .slot-live-status.error { background: #3a2f14; color: #fde68a; }
 
+/* Trang Giam sat: bo bot le/tieu de, khung thiet ke chiem toan bo phan con lai cua man hinh
+   (chi o che do Build; che do Chay co quy tac rieng ben duoi). */
+body:not(.layout-run-mode) .content.content-fill {
+    min-width: 0; padding: 8px 10px; height: 100vh; min-height: 560px;
+    display: flex; flex-direction: column;
+}
+body:not(.layout-run-mode) .content-fill .main-split { flex: 1; min-height: 0; display: flex; align-items: stretch; }
+body:not(.layout-run-mode) .content-fill .layout-panel {
+    flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 8px 10px;
+}
+body:not(.layout-run-mode) .content-fill .ribbon.layout-toolbar { flex: none; margin-bottom: 8px; }
+body:not(.layout-run-mode) .content-fill .layout-body { flex: 1; min-height: 0; height: auto; display: flex; }
+body:not(.layout-run-mode) .content-fill .layout-viewport { flex: 1; min-width: 0; height: auto; }
+
 /* Che do "Chay": an cong cu xay dung nhung GIU menu ben trai; ban do phong to vua phan con lai.
    Giu NGUYEN ty le --ar nhu Build; vi tri tinh theo %, chu/vien tinh theo --px (1/1000 chieu rong khung)
    nen moi doi tuong chi phong to dong dang, khong lech vi tri tuong doi. */
@@ -408,15 +493,13 @@ body.layout-run-mode { --sidebar-w: 220px; }
 /* Khi an menu trai (nut ☰): bo phan chua cho menu de ban do phong to ra het man hinh, van giu ty le --ar */
 html.sidebar-hidden body.layout-run-mode { --sidebar-w: 0px; }
 body.layout-run-mode .page-header,
-body.layout-run-mode .floor-bar,
 body.layout-run-mode .dashboard-grid,
 body.layout-run-mode .events-panel,
 body.layout-run-mode .events-toggle,
-body.layout-run-mode .layout-header,
 body.layout-run-mode .layout-toolbar {
     display: none !important;
 }
-body.layout-run-mode .sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 700; overflow-y: auto; }
+body.layout-run-mode .sidebar { position: fixed; left: 0; top: 0; bottom: 0; height: auto; align-self: auto; min-height: 0; z-index: 700; overflow: hidden; }
 body.layout-run-mode .content { padding: 0; margin-left: var(--sidebar-w); }
 body.layout-run-mode .main-split { display: block; }
 body.layout-run-mode .layout-panel {
@@ -941,10 +1024,6 @@ button, input, select, textarea { font-family: inherit; }
 /* ---- An / hien thanh menu trai + toan man hinh ---- */
 .sidebar-hidden .sidebar { display: none; }
 .sidebar-hidden .content, .sidebar-hidden body.layout-run-mode .content { margin-left: 0; }
-.view-fab { position: fixed; left: 8px; bottom: 8px; z-index: 900; display: flex; gap: 6px; opacity: .55; transition: opacity .15s; }
-.view-fab:hover { opacity: 1; }
-.view-fab button { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; font-size: 16px; line-height: 1; }
-.view-fab button:hover { border-color: var(--accent); }
 
 /* ---- Khu thiết kế: thanh zoom % nằm góc trái-trên, khung rộng sang phải + thanh trượt ---- */
 .hd-stage { position: relative; width: 100%; }
@@ -968,10 +1047,6 @@ button, input, select, textarea { font-family: inherit; }
 .hd-stage .hd-led { margin: 0; }              /* bám góc trái-trên, phóng to thì mở rộng sang phải/xuống dưới */
 .hd-main .hd-right { min-width: 0; }
 
-/* ---- Nút ☰ ⛶ dễ nhìn hơn ---- */
-.view-fab { opacity: 1; gap: 8px; left: 12px; bottom: 12px; }
-.view-fab button { width: 44px; height: 44px; font-size: 22px; font-weight: 700; border: 2px solid #fff; background: var(--accent); color: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.45); }
-.view-fab button:hover { filter: brightness(1.15); border-color: #fff; }
 
 /* Hop thoai thuoc tinh vung LED (dung chung kieu .props-dialog cua Layout Editor): bo cuc ngang, rong hon */
 .led-props-dialog { width: min(1100px, calc(100vw - 16px)); }
@@ -1298,3 +1373,35 @@ kbd { display: inline-block; padding: 0 5px; border: 1px solid var(--border); bo
 .tt-result.good .tt-msg { color: var(--green); font-weight: 600; }
 .tt-result.bad .tt-msg, .tt-msg.bad { color: var(--red); font-weight: 600; }
 .tt-foot { display: flex; gap: 10px; margin-top: 14px; }
+
+/* ---- Tab Cấu hình chung: nhóm Camera / Nhận diện (xe, biển số, ký tự) ---- */
+.settings-block { margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.settings-block:first-of-type { margin-top: 4px; padding-top: 0; border-top: 0; }
+.settings-block > h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--text); }
+.settings-grid select { width: 100%; }
+
+/* Nút Lưu cài đặt: thanh dính dưới màn hình; SÁNG khi có thay đổi chưa lưu, TỐI khi đã lưu hết */
+.settings-savebar { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 14px;
+    padding: 10px 0; margin-top: 4px; background: var(--bg); }
+.settings-savebar .btn { flex: 0 0 auto; min-width: 240px; padding: 10px 18px; font-size: 14px;
+    transition: filter .2s, box-shadow .2s, opacity .2s; }
+.btn.primary.save-idle, .btn.primary.save-idle:disabled { filter: grayscale(1) brightness(.55); opacity: .75; box-shadow: none; cursor: default; }
+.btn.primary.save-dirty { filter: brightness(1.12) saturate(1.15); opacity: 1;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, .22), 0 0 18px 3px var(--accent); }
+
+
+/* ===== Giấy phép (/System/License) ===== */
+.lc-banner { padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); margin-bottom: 4px; font-size: 14px; }
+.lc-banner.ok { border-color: var(--green); }
+.lc-banner.bad { border-color: var(--red); }
+.lc-text { width: 100%; box-sizing: border-box; font-family: Consolas, "Courier New", monospace; font-size: 13px; letter-spacing: .5px; resize: vertical; }
+.lc-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.lc-sub { font-size: 14px; margin: 18px 0 6px; color: var(--text-muted); }
+.lc-line { margin: 6px 0; font-size: 14px; }
+.lc-table tbody tr:hover { background: transparent; cursor: default; }
+.lc-serial { font-family: Consolas, "Courier New", monospace; letter-spacing: .5px; }
+.lc-ok { color: var(--green); font-weight: 600; }
+.lc-bad { color: var(--red); font-weight: 600; }
+.lc-msg { margin: 8px 0; font-size: 13px; min-height: 18px; }
+.lc-msg.ok { color: var(--green); }
+.lc-msg.bad { color: var(--red); }

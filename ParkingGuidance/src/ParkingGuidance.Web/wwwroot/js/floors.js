@@ -81,13 +81,18 @@ document.getElementById('renameFloorBtn').addEventListener('click', async () => 
 
 deleteFloorBtn.addEventListener('click', async () => {
     if (!window.currentFloor) return;
-    if (window.currentFloor === 'B1') {
-        alert('Không thể xoá mặt bằng mặc định B1.');
+    // Được phép xoá mọi mặt bằng (kể cả B1). Khi xoá mặt bằng cuối cùng, server tự tạo "Mặt bằng mặc định".
+    const isLast = floorSelect.options.length <= 1;
+    const msg = isLast
+        ? `Xoá mặt bằng "${window.currentFloor}"? Đây là mặt bằng cuối cùng nên hệ thống sẽ tự tạo lại "Mặt bằng mặc định".`
+        : `Xoá mặt bằng "${window.currentFloor}" khỏi danh sách chọn?`;
+    if (!confirm(msg)) return;
+
+    const res = await fetch(`/api/floors/${encodeURIComponent(window.currentFloor)}`, { method: 'DELETE' });
+    if (!res.ok) {
+        alert('Không xoá được mặt bằng.');
         return;
     }
-    if (!confirm(`Xoá mặt bằng "${window.currentFloor}" khỏi danh sách chọn?`)) return;
-
-    await fetch(`/api/floors/${encodeURIComponent(window.currentFloor)}`, { method: 'DELETE' });
     await loadFloors();
 });
 

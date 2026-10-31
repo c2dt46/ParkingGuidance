@@ -5,6 +5,10 @@ const settingFields = {
     intervalSeconds: 'setInterval',
     defaultMotionThresholdPercent: 'setMotion',
     confidenceThreshold: 'setConf',
+    detectCar: 'setDetectCar',
+    detectBus: 'setDetectBus',
+    detectTruck: 'setDetectTruck',
+    detectMotorcycle: 'setDetectMotorcycle',
     openTimeoutSeconds: 'setOpenTimeout',
     frameReadTimeoutSeconds: 'setReadTimeout',
     maxRetryBackoffSeconds: 'setBackoff',
@@ -23,6 +27,35 @@ const settingFields = {
 };
 let queueTimer = null;
 
+// ---- Nut Luu: sang khi co thay doi chua luu, toi (vo hieu) khi khong con thay doi nao ----
+let settingsBaseline = null;   // gia tri cua tung o ngay sau khi tai / luu thanh cong
+let userTouched = false;       // nguoi dung da doi o nao do (dung khi chua co gia tri goc de so sanh)
+let savedText = '';            // dong trang thai hien khi khong co thay doi (vd "Da luu luc ...")
+
+function settingsSnapshot() {
+    const snap = {};
+    for (const id of Object.values(settingFields)) snap[id] = document.getElementById(id).value;
+    return snap;
+}
+
+function updateSaveState() {
+    const btn = document.getElementById('saveSettingsBtn');
+    const status = document.getElementById('settingsStatus');
+    const cur = settingsSnapshot();
+    // Co gia tri goc: so tung o voi gia tri da luu (doi roi doi lai nhu cu = khong con thay doi). Chua co gia tri goc: coi la co thay doi khi nguoi dung da sua.
+    const dirty = settingsBaseline !== null ? Object.keys(cur).some(id => cur[id] !== settingsBaseline[id]) : userTouched;
+    btn.disabled = !dirty;
+    btn.classList.toggle('save-dirty', dirty);
+    btn.classList.toggle('save-idle', !dirty);
+    status.textContent = dirty ? '● Có thay đổi chưa lưu' : savedText;
+}
+
+function markSettingsClean() {
+    settingsBaseline = settingsSnapshot();
+    userTouched = false;
+    updateSaveState();
+}
+
 function esc(v) {
     return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -34,6 +67,7 @@ async function loadSettings() {
         for (const [key, id] of Object.entries(settingFields))
             document.getElementById(id).value = data.settings[key];
         document.getElementById('dataDirText').textContent = data.dataDirectory;
+        markSettingsClean();
     } catch (err) {
         document.getElementById('settingsStatus').textContent = '⚠️ Không tải được cài đặt: ' + err.message;
     }
@@ -55,11 +89,22 @@ document.getElementById('saveSettingsBtn').addEventListener('click', async () =>
         const data = await res.json();
         for (const [key, id] of Object.entries(settingFields))
             document.getElementById(id).value = data.settings[key]; // hien lai gia tri da duoc chuan hoa
-        status.textContent = '✅ Đã lưu lúc ' + new Date().toLocaleTimeString('vi-VN');
+        savedText = '✅ Đã lưu lúc ' + new Date().toLocaleTimeString('vi-VN');
+        markSettingsClean();                       // nut Luu toi lai: khong con thay doi nao chua luu
     } catch (err) {
         status.textContent = '⚠️ Lưu thất bại: ' + err.message;
     }
 });
+
+// Moi lan nguoi dung doi gia tri mot o → so voi gia tri da luu de bat / tat nut Luu
+for (const id of Object.values(settingFields)) {
+    const el = document.getElementById(id);
+    const onEdit = () => { userTouched = true; updateSaveState(); };
+    el.addEventListener('input', onEdit);
+    el.addEventListener('change', onEdit);
+}
+
+updateSaveState();   // trang thai ban dau: toi
 
 async function refreshQueue() {
     try {

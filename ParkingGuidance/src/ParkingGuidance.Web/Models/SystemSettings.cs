@@ -15,6 +15,23 @@ public class SystemSettings
     /// <summary>Độ tin cậy tối thiểu của YOLO để tính là có xe (0-1).</summary>
     public float ConfidenceThreshold { get; set; } = 0.25f;
 
+    /// <summary>Loại xe được nhận diện (1 = có, 0 = bỏ qua) cho Mô phỏng, Thử nhận diện và camera thật. null = chưa đặt (mặc định: ô tô, xe buýt, xe tải = 1;
+    /// xe máy lấy theo Detection:IncludeMotorcycle trong appsettings.json). Tab Train xe luôn gợi ý đủ cả 4 loại để gán nhãn.</summary>
+    public int? DetectCar { get; set; }
+    public int? DetectBus { get; set; }
+    public int? DetectTruck { get; set; }
+    public int? DetectMotorcycle { get; set; }
+
+    /// <summary>Loại xe này có được nhận diện theo cài đặt hiện tại không.</summary>
+    public bool AllowsVehicle(VehicleType type) => type switch
+    {
+        VehicleType.Car => (DetectCar ?? 1) != 0,
+        VehicleType.Bus => (DetectBus ?? 1) != 0,
+        VehicleType.Truck => (DetectTruck ?? 1) != 0,
+        VehicleType.Motorcycle => (DetectMotorcycle ?? 0) != 0,
+        _ => false
+    };
+
     /// <summary>Thời gian tối đa chờ mở kết nối 1 camera (giây).</summary>
     public double OpenTimeoutSeconds { get; set; } = 8;
 
@@ -36,7 +53,7 @@ public class SystemSettings
     /// <summary>Độ tin cậy tối thiểu của bộ dò KHUNG BIỂN SỐ (0.05–0.95, mặc định 0.4). Thấp = dò được nhiều biển hơn nhưng dễ có khung rác.</summary>
     public float? PlateBoxConfidence { get; set; }
 
-    /// <summary>Bộ dò khung biển số: 0 = tự động (gộp khung của YOLO11n đã train và Darknet YOLOv3-tiny), 1 = chỉ YOLO11n đã train (nếu chưa có model thì dùng Darknet),
+    /// <summary>Bộ dò khung biển số: 0 = tự động (gộp khung của YOLO11n đã train và Darknet YOLOv3-tiny), 1 = chỉ YOLO11n đã train (nếu chưa có model thì dùng Darknet; MẶC ĐỊNH),
     /// 2 = chỉ Darknet YOLOv3-tiny. Dùng để so sánh độ chính xác của khung biển giữa hai bộ dò.</summary>
     public int? PlateDetector { get; set; }
 
@@ -86,6 +103,10 @@ public class SystemSettings
         IntervalSeconds = Math.Clamp(IntervalSeconds, 0.5, 3600),
         DefaultMotionThresholdPercent = Math.Clamp(DefaultMotionThresholdPercent, 0, 100),
         ConfidenceThreshold = Math.Clamp(ConfidenceThreshold, 0.05f, 0.95f),
+        DetectCar = (DetectCar ?? 1) != 0 ? 1 : 0,
+        DetectBus = (DetectBus ?? 1) != 0 ? 1 : 0,
+        DetectTruck = (DetectTruck ?? 1) != 0 ? 1 : 0,
+        DetectMotorcycle = (DetectMotorcycle ?? 0) != 0 ? 1 : 0,
         OpenTimeoutSeconds = Math.Clamp(OpenTimeoutSeconds, 1, 120),
         FrameReadTimeoutSeconds = Math.Clamp(FrameReadTimeoutSeconds, 1, 120),
         MaxRetryBackoffSeconds = Math.Clamp(MaxRetryBackoffSeconds, 1, 3600),
@@ -93,7 +114,7 @@ public class SystemSettings
         VacancyConfirmFrames = Math.Clamp(VacancyConfirmFrames, 1, 20),
         PlateBoxConfidence = Math.Clamp(PlateBoxConfidence ?? 0.4f, 0.05f, 0.95f),
         CharConfidence = Math.Clamp(CharConfidence ?? 0.5f, 0f, 0.95f),
-        PlateDetector = Math.Clamp(PlateDetector ?? 0, 0, 2),
+        PlateDetector = Math.Clamp(PlateDetector ?? 1, 0, 2),
         CharCombine = (CharCombine ?? 1) != 0 ? 1 : 0,
         PlateMinOverlap = Math.Clamp(PlateMinOverlap ?? 0.1f, 0f, 1f),
         ProcessMaxSide = (ProcessMaxSide ?? 0) <= 0 ? 0 : Math.Clamp(ProcessMaxSide!.Value, 320, 4096),

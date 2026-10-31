@@ -1,20 +1,28 @@
 @addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+@using ParkingGuidance.Web.Services.Licensing
 @if (User.Identity?.IsAuthenticated == true)
 {
-    <form method="post" asp-page="/Login" asp-page-handler="Logout" class="pgs-logout">
-        <span class="pgs-logout-name">@User.Identity.Name</span>
-        <button type="submit" class="pgs-logout-btn">Đăng xuất</button>
-    </form>
+    // 4 loại tài khoản (AccessLevel): 0 = DEV, 1 = Lic, 2 = Megatech (admin), 3 = User
+    var level = AccessLevel.Of(User);
+    var (icon, roleKey, roleVi) = level switch
+    {
+        AccessLevel.Dev   => ("💻", "acc.dev",   "Nhà phát triển"),
+        AccessLevel.Lic   => ("🎫", "acc.lic",   "Cấp giấy phép"),
+        AccessLevel.Admin => ("🛡️", "acc.admin", "Quản trị viên"),
+        _                 => ("👤", "acc.user",  "Người dùng")
+    };
+    <div class="sidebar-footer">
+        <div class="account-row">
+            <div class="account-avatar lvl-@level" aria-hidden="true">@icon</div>
+            <div class="account-info">
+                <div class="account-name">@User.Identity.Name</div>
+                <div class="account-role" data-i18n="@roleKey">@roleVi</div>
+            </div>
+        </div>
+        <form method="post" asp-page="/Login" asp-page-handler="Logout" class="account-logout-form">
+            <button type="submit" class="account-logout-btn">
+                <span aria-hidden="true">↪️</span> <span data-i18n="acc.logout">Đăng xuất</span>
+            </button>
+        </form>
+    </div>
 }
-
-<style>
-    .pgs-logout { display: inline-flex; align-items: center; gap: 10px; margin: 0; }
-    .pgs-logout-name { opacity: .75; font-size: 14px; }
-    .pgs-logout-btn {
-        padding: 6px 14px; border-radius: 4px; cursor: pointer;
-        border: 1px solid currentColor; background: transparent; color: inherit;
-        font: inherit; font-size: 14px;
-    }
-    .pgs-logout-btn:hover { background: rgba(127,127,127,.18); }
-    .pgs-logout-btn:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
-</style>

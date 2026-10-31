@@ -7,6 +7,7 @@ using ParkingGuidance.Web.Services.CameraRegistry;
 using ParkingGuidance.Web.Services.Detection;
 using ParkingGuidance.Web.Services.Floor;
 using ParkingGuidance.Web.Services.Layout;
+using ParkingGuidance.Web.Services.Licensing;
 using ParkingGuidance.Web.Services.Modbus;
 using ParkingGuidance.Web.Services.Led;
 using ParkingGuidance.Web.Services.Parking;
@@ -213,6 +214,14 @@ builder.Services.AddSingleton<ISystemTagService>(sp => sp.GetRequiredService<Sys
 builder.Services.AddHostedService<SystemTagWorker>();
 builder.Services.AddSingleton<IProjectTagService, ProjectTagService>();
 
+// Giấy phép (CÀI ĐẶT & HỆ THỐNG > Giấy phép). Chương trình chạy ngầm RIÊNG chỉ cộng thời gian sử dụng trong bộ nhớ và ghi file
+// mỗi ~60 giây; đọc phần cứng (WMI) ~30 phút/lần trên luồng nền. Request web chỉ đọc 1 biến bool (LicenseGateMiddleware).
+// Đăng nhập cấp 0/1 (DEV, Lic) mặc định đã có bản quyền và không bao giờ bị kiểm tra.
+builder.Services.AddSingleton<IHardwareIdProvider, HardwareIdProvider>();
+builder.Services.AddSingleton<LicenseService>();
+builder.Services.AddSingleton<ILicenseService>(sp => sp.GetRequiredService<LicenseService>());
+builder.Services.AddHostedService<LicenseWorker>();
+
 var app = builder.Build();
 
 app.UseHttpsRedirection();
@@ -220,6 +229,7 @@ app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<LicenseGateMiddleware>();
 app.MapRazorPages();
 app.MapControllers();
 app.MapHub<MonitoringHub>("/hubs/monitoring");

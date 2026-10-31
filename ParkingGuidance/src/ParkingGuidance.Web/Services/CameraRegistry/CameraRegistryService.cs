@@ -185,6 +185,25 @@ public class CameraRegistryService : ICameraRegistryService
         return camera;
     }
 
+    public int ClearFloor(string floor)
+    {
+        var norm = SlotKey.NormalizeFloor(floor);
+        int n = 0;
+        lock (_lock)
+        {
+            foreach (var cam in _cameras.Values.Where(c => SlotKey.NormalizeFloor(c.Floor) == norm))
+            {
+                cam.Zones = new List<DetectionZone>();
+                cam.Floor = null;
+                cam.Zone = null;
+                n++;
+            }
+            if (n > 0) SaveState();
+        }
+        if (n > 0) RaiseChanged();
+        return n;
+    }
+
     public bool Delete(string id)
     {
         var ok = _cameras.TryRemove(id, out _);

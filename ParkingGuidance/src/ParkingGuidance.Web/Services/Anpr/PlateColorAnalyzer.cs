@@ -50,6 +50,41 @@ public static class PlateColorAnalyzer
         }
     }
 
+    /// <summary>
+    /// Tỉ lệ điểm ảnh BÃO HOÀ MÀU (S ≥ 90, V ≥ 70) trong khung (x1,y1)-(x2,y2) của <paramref name="image"/> (BGR); <paramref name="redOnly"/> = chỉ tính màu đỏ.
+    /// Dùng để nhận ra khung "ký tự" thực ra là hình dán màu (cờ đỏ sao vàng ở mép biển...) chứ không phải mực in đen trên nền trắng.
+    /// </summary>
+    public static double SaturatedFraction(Mat image, float x1, float y1, float x2, float y2, bool redOnly)
+    {
+        try
+        {
+            if (image.Empty() || image.Channels() != 3) return 0;
+            int ax = Math.Clamp((int)Math.Floor(x1), 0, image.Width - 1);
+            int ay = Math.Clamp((int)Math.Floor(y1), 0, image.Height - 1);
+            int bx = Math.Clamp((int)Math.Ceiling(x2), ax + 1, image.Width);
+            int by = Math.Clamp((int)Math.Ceiling(y2), ay + 1, image.Height);
+            using var roi = new Mat(image, new OpenCvSharp.Rect(ax, ay, bx - ax, by - ay));
+            using var hsv = new Mat();
+            Cv2.CvtColor(roi, hsv, ColorConversionCodes.BGR2HSV);
+            var buf = new byte[checked((int)(hsv.Total() * 3))];
+            Marshal.Copy(hsv.Data, buf, 0, buf.Length);
+
+            int hit = 0, total = buf.Length / 3;
+            for (int i = 0; i + 2 < buf.Length; i += 3)
+            {
+                int h = buf[i], sat = buf[i + 1], v = buf[i + 2];
+                if (sat < 90 || v < 70) continue;
+                if (redOnly && !(h <= 8 || h >= 170)) continue;
+                hit++;
+            }
+            return total == 0 ? 0 : hit / (double)total;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     /// <summary>Màu của ảnh biển (BGR, 3 kênh).</summary>
     public static Result Detect(Mat plateBgr)
     {

@@ -38,9 +38,4 @@
         isFullscreen: isFull,
         toggleFullscreen: toggleFull
     };
-    document.addEventListener('DOMContentLoaded', () => {
-        const a = document.getElementById('fabSidebar'), b = document.getElementById('fabFull');
-        if (a) a.addEventListener('click', () => window.PGView.toggleSidebar());
-        if (b) b.addEventListener('click', toggleFull);
-    });
 })();

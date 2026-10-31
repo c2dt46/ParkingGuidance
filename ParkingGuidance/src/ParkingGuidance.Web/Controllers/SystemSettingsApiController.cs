@@ -43,6 +43,10 @@ public class SystemSettingsApiController : ControllerBase
         // Tương tự: trang này không gửi giao diện dùng chung -> giữ nguyên
         dto.Ui ??= _settings.Current.Ui;
         // Các thông số biển số: gửi thiếu thì giữ giá trị đang lưu
+        dto.DetectCar ??= _settings.Current.DetectCar;
+        dto.DetectBus ??= _settings.Current.DetectBus;
+        dto.DetectTruck ??= _settings.Current.DetectTruck;
+        dto.DetectMotorcycle ??= _settings.Current.DetectMotorcycle;
         dto.PlateBoxConfidence ??= _settings.Current.PlateBoxConfidence;
         dto.CharConfidence ??= _settings.Current.CharConfidence;
         dto.PlateDetector ??= _settings.Current.PlateDetector;

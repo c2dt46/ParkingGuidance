@@ -253,6 +253,12 @@ public class SystemCamerasApiController : ControllerBase
 
             z.SlotId = number;          // dang chuan (bo so 0 dung dau)
             z.Name = $"Ô {number}";
+
+            // Bien so duoc chi dinh (tuy chon): chi giu chu + so, viet hoa; de trong = xe nao do cung duoc
+            var assigned = new string((z.AssignedPlate ?? "").Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+            if (assigned.Length > 15)
+                return BadRequest(new { message = $"Bien so chi dinh cua vi tri {number} qua dai (toi da 15 ky tu chu/so)." });
+            z.AssignedPlate = assigned.Length == 0 ? null : assigned;
         }
 
         // 1) Trong cung 1 camera: khong duoc trung so thu tu
@@ -274,7 +280,11 @@ public class SystemCamerasApiController : ControllerBase
 
         // Dam bao o do da khai bao trong ParkingService truoc khi camera co the "bao cao" xe vao o nay
         foreach (var z in dto.Zones)
-            _parking.EnsureSlot(SlotKey.Make(floor, cameraZone, z.SlotId!), floor, cameraZone);
+        {
+            var slotKey = SlotKey.Make(floor, cameraZone, z.SlotId!);
+            _parking.EnsureSlot(slotKey, floor, cameraZone);
+            _parking.SetAssignedPlate(slotKey, z.AssignedPlate);   // doi chieu lai ngay voi xe dang do (neu co)
+        }
 
         // O mat vung (xoa vung / doi so thu tu) va khong con vung nao khac dung: dua ve "Con trong", dong phien dang mo
         var newKeys = SlotKeysIn(floor, cameraZone, dto.Zones).ToHashSet(StringComparer.Ordinal);
@@ -443,7 +453,7 @@ public class SystemCamerasApiController : ControllerBase
         }
 
         var zones = camera.Zones.ToList();
-        var regItems = new List<(string Key, DetectionResult Det)>(); // xe da gan vung (de ghi nhan vao bai do neu bat 'register')
+        var regItems = new List<(string Key, DetectionResult Det, string? Assigned)>(); // xe da gan vung (de ghi nhan vao bai do neu bat 'register')
         var (vehicles, results) = await _scheduler.RunInteractiveAsync($"Chay thu nhan dien ({camera.IpAddress})", qct =>
         {
         // Cung luong voi nen: do xe, roi do khung bien trong vung tung xe; bien khong thuoc xe nao bi bo
@@ -475,12 +485,14 @@ public class SystemCamerasApiController : ControllerBase
 
             string? plate = null;
             float plateConf = 0;
+            BoundingBox? plateOut = null;   // khung bien (de ve len anh thu nhan dien)
             if (hasMatch) // chi doc bien so cho xe DA DUOC GAN vao 1 vung (tiet kiem chi phi OCR)
             {
                 if (plateAssign.TryGetValue(i, out var plateBox))
                 {
-                    var (p, c, _) = _anpr.ReadPlateAt(mat, plateBox);
+                    var (p, c, pb) = _anpr.ReadPlateAt(mat, plateBox);
                     plate = p; plateConf = c;
+                    plateOut = pb ?? plateBox;
                 }
                 else if ((st.PlateFullSearch ?? 0) != 0)   // tuy chon (mac dinh tat): tim bien day du tren anh xe — cham
                 {
@@ -498,7 +510,7 @@ public class SystemCamerasApiController : ControllerBase
                 {
                     v.PlateNumber = plate;
                     v.PlateConfidence = plateConf;
-                    regItems.Add((key, v));
+                    regItems.Add((key, v, assigned.Zone.AssignedPlate));
                 }
             }
 
@@ -513,7 +525,10 @@ public class SystemCamerasApiController : ControllerBase
                 Coverage = hasMatch ? assigned.Coverage : reasonCoverage,
                 Reason = reason,
                 PlateNumber = plate,
-                PlateConfidence = plateConf
+                PlateConfidence = plateConf,
+                PlateBox = plateOut,
+                AssignedPlate = hasMatch ? assigned.Zone.AssignedPlate : null,
+                PlateCheck = hasMatch ? PlateMatch.Check(assigned.Zone.AssignedPlate, plate) : null
             });
         }
         rows = rows.OrderBy(r => r.Box.X1).ToList();
@@ -528,9 +543,10 @@ public class SystemCamerasApiController : ControllerBase
         int registered = 0, vacated = 0;
         if (register)
         {
-            foreach (var (key, det) in regItems)
+            foreach (var (key, det, assignedPlate) in regItems)
             {
                 _parking.EnsureSlot(key, camera.Floor ?? "B1", camera.Zone);
+                _parking.SetAssignedPlate(key, assignedPlate);
                 var evt = _parking.RegisterDetection(camera.Id, key, det, immediate: true);
                 registered++;
                 await _hub.Clients.All.SendAsync("ParkingEvent", new
@@ -580,5 +596,13 @@ public class SystemCamerasApiController : ControllerBase
         public string? Reason { get; set; }
         public string? PlateNumber { get; set; }
         public float PlateConfidence { get; set; }
+
+        /// <summary>Khung biển số (toạ độ pixel ảnh gốc) để vẽ lên ảnh; null nếu xe không có khung biển.</summary>
+        public BoundingBox? PlateBox { get; set; }
+
+        /// <summary>Biển số được chỉ định cho vùng (null = xe nào cũng được) và kết quả đối chiếu với biển đọc được ở khung này:
+        /// "Valid" / "Invalid" / "Pending" / null (không có chỉ định).</summary>
+        public string? AssignedPlate { get; set; }
+        public string? PlateCheck { get; set; }
     }
 }

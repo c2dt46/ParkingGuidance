@@ -357,7 +357,9 @@ public class LayoutApiController : ControllerBase
                     slot.ParkedAt,
                     slot.ErrorMessage,
                     slot.LastExitPlate,
-                    slot.LastExitTime
+                    slot.LastExitTime,
+                    slot.AssignedPlate,
+                    slot.PlateCheck
                 }
                 : null
         });
