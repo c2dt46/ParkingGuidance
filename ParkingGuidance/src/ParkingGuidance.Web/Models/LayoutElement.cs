@@ -83,6 +83,23 @@ public class LayoutElement
     public bool ShowStatOccupied { get; set; } = true;   // số chỗ có xe
     public bool ShowStatError { get; set; } = true;      // số lỗi không lấy được ảnh (camera mất kết nối)
 
+    /// <summary>SlotStats: hướng hiển thị các số liệu — "Vertical" (dọc, mặc định) | "Horizontal" (ngang).</summary>
+    public string? StatsOrientation { get; set; }
+
+    /// <summary>SlotStats: cỡ chữ của nhãn (Trống / Có xe / Lỗi), theo "px thiết kế". null = mặc định. Cỡ chữ SỐ lấy từ <see cref="FontSize"/>.</summary>
+    public double? LabelFontSize { get; set; }
+
+    /// <summary>SlotStats: số liệu có cộng phần đếm từ CAMERA (các vùng nhận diện đã vẽ của tầng) hay không (mặc định có).</summary>
+    public bool StatFreeCamera { get; set; } = true;
+    public bool StatOccupiedCamera { get; set; } = true;
+    public bool StatErrorCamera { get; set; } = true;
+
+    /// <summary>SlotStats: các biến MS (cảm biến) được CỘNG vào từng số liệu. Biến nên đếm đúng trạng thái của số liệu
+    /// (Free → Còn trống, Occupied → Đã đỗ, Error → Lỗi). Số hiển thị = phần camera (nếu bật) + tổng giá trị các biến MS.</summary>
+    public List<string> StatFreeVars { get; set; } = new();
+    public List<string> StatOccupiedVars { get; set; } = new();
+    public List<string> StatErrorVars { get; set; } = new();
+
     // --- Kiểu dáng chung cho MỌI loại đối tượng (null = không tuỳ chỉnh, dùng mặc định theo loại) ---
     public string? BackgroundColor { get; set; }
     public string? BorderStyle { get; set; }   // "solid" | "dashed" | "dotted" | "none"

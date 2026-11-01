@@ -605,6 +605,32 @@ Trạng thái do máy chủ tính sẵn rồi giao diện hỏi mỗi 1 giây: `
 Đèn dùng nguồn Cảm biến / Camera luôn ở chế độ chỉ hiển thị (không có tag ghi). Trường mới của `LayoutElement`: `BitSource`, `SensorDevice`, `SensorIndex`, `LampZone`, `LampPosition`,
 `StateImage{Parked,Free,Error,Unused}`, `StateText{Parked,Free,Error,Unused}`.
 
+### 13b. Chọn nhiều đối tượng và căn chỉnh trên Layout Editor (chế độ Build)
+- **Chọn nhiều**: *quét chuột* — nhấn giữ chuột trái trên vùng trống rồi kéo khung chọn (đối tượng chạm khung đều được chọn); hoặc **Ctrl (Shift / Cmd) + nhấp** từng đối tượng để thêm / bỏ.
+  Giữ Ctrl/Shift khi quét để cộng thêm vào vùng chọn hiện có. Nhấp vào vùng trống để bỏ chọn. Chọn nhiều thì khung co giãn ẩn, mỗi đối tượng được tô viền.
+- **Kéo cả nhóm**: kéo 1 đối tượng trong nhóm đang chọn thì cả nhóm di chuyển (giữ nguyên khoảng cách, không ra khỏi khung bản đồ). Nút **Xoá đối tượng** xoá toàn bộ nhóm đang chọn.
+- **Nhấp chuột phải** vào bản đồ để mở menu:
+  - **Căn chỉnh (Align)** — cần ≥ 2 đối tượng: Căn trái / giữa (ngang) / phải / trên / giữa (dọc) / dưới, theo *khung bao của cả nhóm* (tính theo khung nhìn thấy, kể cả đối tượng đang xoay).
+  - **Phân bố (Distribute)** — cần ≥ 3 đối tượng: chia đều khoảng cách ngang / dọc (2 đối tượng ngoài cùng giữ nguyên).
+  - **Xoay (Rotate)**: xoay phải 90°, xoay trái 90°, về góc 0° — mỗi đối tượng xoay quanh tâm của nó.
+  - **Kích thước (Resize)** — cần ≥ 2 đối tượng: cùng chiều rộng / chiều cao / kích thước, theo *đối tượng chọn sau cùng*.
+- Mọi thay đổi được lưu ngay (`PUT api/layout/{id}`), không cần thay đổi phía máy chủ.
+- **Xoá bằng phím Delete**: chỉ cần trỏ chuột vào đối tượng (không cần chọn) rồi nhấn **Delete**. Trỏ vào đối tượng nằm trong nhóm đang chọn thì xoá cả nhóm; trỏ vào đối tượng khác thì chỉ xoá đối tượng đó; không trỏ vào đâu thì xoá các đối tượng đang chọn. Vẫn hỏi xác nhận trước khi xoá; không tác dụng khi đang gõ trong ô nhập.
+- **Sao chép / Dán** 1 hoặc nhiều đối tượng đang chọn: **Ctrl+C / Ctrl+V** (Cmd trên Mac) hoặc chuột phải → *Sao chép (Copy)* / *Dán (Paste)*.
+  Ctrl+V dán lệch nhẹ so với bản gốc (dán liên tiếp thì lệch dần); menu chuột phải *Dán* đặt nhóm với góc trên-trái tại vị trí con trỏ (nhấp phải vào vùng trống cũng dán được).
+  Bộ nhớ tạm nằm trong trang nên đổi sang tầng khác rồi dán vẫn được. Đối tượng dán ra là bản sao độc lập (giữ nguyên mọi thuộc tính, tag, ảnh) và được chọn sẵn.
+  **Vùng nhận diện (ô đỗ) không sao chép được** vì mỗi vị trí chỉ đặt 1 lần trên bản đồ của tầng — chúng bị bỏ qua khi sao chép. Khi đang gõ trong ô nhập (hộp thuộc tính) thì Ctrl+C/V hoạt động như thường.
+
+### 13c. Thống kê chỗ: hướng hiển thị, cỡ chữ và cộng cảm biến (biến MS)
+Đối tượng **Thống kê chỗ** (Layout Editor) có thêm:
+- **Hướng sắp xếp**: Dọc (mặc định, như cũ) hoặc Ngang.
+- **Cỡ chữ số** và **Cỡ chữ nhãn** (px thiết kế, để trống = mặc định 30 / 12).
+- **Cộng cảm biến**: với từng số liệu (Trống / Có xe / Lỗi) có ô *Tính từ camera* (bật mặc định) và danh sách **biến MS** cộng thêm — bấm *＋ Thêm* để thêm nhiều biến, ✕ để bỏ.
+  Số hiển thị = phần camera (nếu bật) + **tổng giá trị** các biến MS đã thêm. Ô chọn chỉ liệt kê biến MS đếm đúng trạng thái (Có chỗ đỗ → Trống, Không có chỗ đỗ → Có xe, Lỗi → Lỗi);
+  biến không còn tồn tại / đếm trạng thái khác được viền đỏ (không tồn tại tính 0). Tắt *Tính từ camera* nếu chỉ muốn dùng cảm biến. Khi số Lỗi có cộng cảm biến thì nhãn đổi từ "Lỗi ảnh" thành "Lỗi".
+- Số liệu do máy chủ tính (`GET api/layout` → `stats`: `free/occupied/error`, kèm `camera*` và `sensor*`), làm mới mỗi 5 giây và khi có sự kiện bãi đỗ.
+Trường mới của `LayoutElement`: `StatsOrientation`, `LabelFontSize` (cỡ chữ số dùng `FontSize`), `Stat{Free,Occupied,Error}Camera`, `Stat{Free,Occupied,Error}Vars`.
+
 ### 14. Quy trình nhận diện biển số chính xác hơn (bỏ phiếu theo thời gian + model ONNX tuỳ chọn)
 Lỗi gốc (xem phân tích): mỗi khung hình được đọc độc lập bằng Tesseract (hay sai 1–2 ký tự hoặc rơi 2 ký tự cuối với biển 1 dòng), khung ĐẦU TIÊN (xe còn đang chạy vào ô)
 lại quyết định biển của cả phiên, và 1 lần đọc lệch ≥ 2 ký tự làm sinh "xe ra/xe vào" ảo. Đã sửa:

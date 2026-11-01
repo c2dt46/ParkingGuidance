@@ -378,6 +378,27 @@ body.is-resizing, body.is-resizing * { user-select: none; }
 body.layout-run-mode .layout-resize-frame { display: none; }
 .layout-el.selected { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* Chon nhieu: khung quet chuot + menu chuot phai Can chinh */
+.layout-marquee { position: absolute; z-index: 2147483001; pointer-events: none; box-sizing: border-box;
+    border: 1px dashed var(--accent); background: rgba(59, 130, 246, .15); }
+.pg-ctxmenu { position: fixed; z-index: 2147483600; min-width: 190px; padding: 4px; box-sizing: border-box;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+    font-size: 13px; color: var(--text); user-select: none; }
+.pg-ctx-item { position: relative; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.pg-ctx-item:hover { background: var(--panel-light); }
+.pg-ctx-item.disabled { opacity: .4; pointer-events: none; }
+.pg-ctx-ico { width: 18px; text-align: center; flex: none; display: inline-flex; justify-content: center; align-items: center; }
+.pg-ctx-lbl { flex: 1; }
+.pg-ctx-arrow { color: var(--text-muted); font-size: 11px; }
+.pg-ctx-sep { height: 1px; margin: 4px 2px; background: var(--border); }
+.pg-ctxmenu .pg-ctx-sub { display: none; position: absolute; left: 100%; top: -5px; }
+.pg-ctxmenu .pg-ctx-sub.flip { left: auto; right: 100%; }
+.pg-ctx-item.has-sub:hover > .pg-ctx-sub { display: block; }
+.pg-ctx-hint { color: var(--text-muted); font-size: 11px; margin-left: 16px; }
+.layout-toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 2147483700; max-width: 80vw;
+    background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: 6px;
+    font-size: 13px; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); pointer-events: none; }
+
 .layout-el.as-button {
     background: var(--accent); color: #fff; font-weight: 600; border-radius: calc(10 * var(--px));
 }
@@ -723,9 +744,11 @@ body.layout-run-mode .layout-el.has-action:hover { filter: brightness(1.15); }
     background: var(--panel-light); border: max(1px, calc(1 * var(--px))) solid var(--border); border-radius: calc(10 * var(--px)); cursor: move;
 }
 .layout-el.as-stats .stat-item { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; text-align: center; }
-.layout-el.as-stats .stat-num { font-size: calc(30 * var(--px)); font-weight: 700; line-height: 1.1; }
-.layout-el.as-stats .stat-label { font-size: calc(12 * var(--px)); color: var(--text-muted); white-space: nowrap; }
-.layout-el.as-stats .stat-sub { font-size: calc(10 * var(--px)); color: var(--text-muted); opacity: .8; white-space: nowrap; }
+.layout-el.as-stats.stats-v { flex-direction: column; }
+.layout-el.as-stats.stats-h { flex-direction: row; }
+.layout-el.as-stats .stat-num { font-size: calc(var(--stat-num-n, 30) * var(--px)); font-weight: 700; line-height: 1.1; }
+.layout-el.as-stats .stat-label { font-size: calc(var(--stat-label-n, 12) * var(--px)); color: var(--text-muted); white-space: nowrap; }
+.layout-el.as-stats .stat-sub { font-size: calc(var(--stat-label-n, 12) * .83 * var(--px)); color: var(--text-muted); opacity: .8; white-space: nowrap; }
 .layout-el.as-stats .stat-free .stat-num { color: var(--green); }
 .layout-el.as-stats .stat-occupied .stat-num { color: var(--red, #ef4444); }
 .layout-el.as-stats .stat-error .stat-num { color: var(--amber, #f59e0b); }
@@ -1497,3 +1520,13 @@ body.layout-run-mode .project-box { display: none; }
 .layout-el.as-number.num-readonly .num-field { opacity: .7; cursor: not-allowed; }
 .layout-el.as-number.val-missing, .layout-el.as-text.val-missing { opacity: .65; }
 body.layout-run-mode .layout-el.as-number.num-input { cursor: text; }
+
+/* Thong ke cho: cau hinh bien MS cong them vao tung so lieu (panel thuoc tinh) */
+.stat-cfg { margin-bottom: 10px; break-inside: avoid; }
+.stat-sub-opt { margin-left: 22px; }
+.stat-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+.stat-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; font-size: 12px;
+    background: var(--panel-light); border: 1px solid var(--border); border-radius: 999px; }
+.stat-chip.bad { border-color: var(--red, #ef4444); }
+.stat-chip button { background: none; border: 0; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 11px; }
+.stat-chip button:hover { color: var(--red, #ef4444); }

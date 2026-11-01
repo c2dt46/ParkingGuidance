@@ -10,7 +10,8 @@ let propsOpen = false;       // hop thoai thuoc tinh dang hien
 let floorZoneCount = 0;      // so Zone cua tang dang xem: chi hien nhan Zone tren ban do khi > 1
 
 let elements = [];   // Dữ liệu các đối tượng layout (đã merge trạng thái ô đỗ sống)
-let selectedId = null;
+let selectedId = null;       // doi tuong CHINH (chon sau cung) - dung cho panel thuoc tinh / khung co gian
+let selectedIds = new Set(); // moi doi tuong dang chon (chon nhieu: quet chuot hoac Ctrl/Shift + nhap); luon chua selectedId
 
 // Xem truoc truc tiep thuoc tinh (chua bam Luu):
 //  live    = ngu canh cua panel thuoc tinh dang mo {el, applyForm, timer}
@@ -28,7 +29,7 @@ const SLOT_STATUS_CLASS = { Empty: 'empty', Occupied: 'occupied', Error: 'error'
 window.addEventListener('floorchange', (e) => {
     CURRENT_FLOOR = e.detail;
     applyFloorBackground(window.currentFloorData);
-    selectedId = null;
+    selectedId = null; selectedIds.clear(); closeCtxMenu();
     if (live) { clearTimeout(live.timer); live = null; }
     flushPending();
     propsPanel.innerHTML = EMPTY_PROPS_HTML;
@@ -151,7 +152,7 @@ async function loadLayout() {
     refreshLampStates();
     syncDisplayBar();
     if (selectedId && elements.some(x => x.id === selectedId)) selectElement(selectedId);
-    else if (propsOpen) { selectedId = null; propsPanel.innerHTML = EMPTY_PROPS_HTML; }
+    else { selectedId = null; selectedIds.clear(); if (propsOpen) propsPanel.innerHTML = EMPTY_PROPS_HTML; }
 }
 
 // So Zone khac nhau cua tang dang xem (tu cac vi tri nhan dien da ve cho camera): tang chi co 1 Zone thi khong can hien Zone
@@ -165,7 +166,11 @@ async function refreshZoneCount() {
 
 function renderLayout() {
     canvas.innerHTML = '';
-    elements.forEach(el => canvas.appendChild(buildElementNode(el)));
+    elements.forEach(el => {
+        const n = buildElementNode(el);
+        if (selectedIds.has(el.id)) n.classList.add('selected');
+        canvas.appendChild(n);
+    });
     updateResizeFrame();
 }
 
@@ -311,21 +316,30 @@ function renderSlotNode(div, el) {
 function renderStatsNode(div, el) {
     const st = el.stats || { free: 0, occupied: 0, error: 0, camerasError: 0 };
     const wasSelected = div.classList.contains('selected');
-    div.className = 'layout-el layout-el-slotstats as-stats';
+    const horiz = el.statsOrientation === 'Horizontal';
+    div.className = 'layout-el layout-el-slotstats as-stats ' + (horiz ? 'stats-h' : 'stats-v');
     if (wasSelected) div.classList.add('selected');
+
+    // Co chu so (fontSize) va co chu nhan (labelFontSize): theo "px thiet ke" (--px) nhu cac doi tuong khac
+    if (el.fontSize) div.style.setProperty('--stat-num-n', String(Number(el.fontSize))); else div.style.removeProperty('--stat-num-n');
+    if (el.labelFontSize) div.style.setProperty('--stat-label-n', String(Number(el.labelFontSize))); else div.style.removeProperty('--stat-label-n');
 
     const item = (cls, num, label, sub) =>
         `<div class="stat-item ${cls}"><span class="stat-num">${num}</span><span class="stat-label">${label}</span>${sub ? `<span class="stat-sub">${sub}</span>` : ''}</div>`;
 
+    // "Loi anh" = camera mat ket noi; neu da cong bien MS (cam bien) vao so loi thi goi chung la "Loi"
+    const errLabel = (el.statErrorVars || []).length ? 'Lỗi' : 'Lỗi ảnh';
+    const errSub = st.camerasError && el.statErrorCamera !== false ? `${st.camerasError} camera` : '';
+
     let html = '';
     if (el.showStatFree !== false) html += item('stat-free', st.free, 'Trống');
     if (el.showStatOccupied !== false) html += item('stat-occupied', st.occupied, 'Có xe');
-    if (el.showStatError !== false)
-        html += item('stat-error', st.error, 'Lỗi ảnh', st.camerasError ? `${st.camerasError} camera` : '');
+    if (el.showStatError !== false) html += item('stat-error', st.error, errLabel, errSub);
 
     div.innerHTML = html || '<span class="layout-el-placeholder">Chưa chọn số liệu</span>';
     div.title = 'Thống kê chỗ đỗ của tầng ' + CURRENT_FLOOR +
-        (st.error ? ` — ${st.error} ô đang lỗi do ${st.camerasError} camera không lấy được ảnh` : '');
+        ` — trống ${st.free}${st.sensorFree ? ` (cảm biến ${st.sensorFree})` : ''}, có xe ${st.occupied}${st.sensorOccupied ? ` (cảm biến ${st.sensorOccupied})` : ''}, lỗi ${st.error}${st.sensorError ? ` (cảm biến ${st.sensorError})` : ''}` +
+        (st.camerasError ? ` — ${st.camerasError} camera không lấy được ảnh` : '');
     applyCommonStyle(div, el);
 }
 
@@ -1230,6 +1244,30 @@ function onElementMouseDown(e) {
     }
 
     const canvasRect = canvas.getBoundingClientRect();
+    const pid = div.dataset.id;
+
+    // Chuot phai: chi chon doi tuong (neu chua nam trong vung chon) de menu Can chinh hien dung; khong keo
+    if (e.button === 2) { if (!selectedIds.has(pid)) selectElement(pid); return; }
+    if (e.button !== 0) return;
+    const ae = document.activeElement;
+    if (ae && ae !== document.body && ae.matches?.('input, textarea, select')) ae.blur();
+
+    // Ctrl / Shift (hoac Cmd) + nhap: them / bo doi tuong khoi vung chon
+    if (e.ctrlKey || e.metaKey || e.shiftKey) { e.preventDefault(); toggleSelection(pid); return; }
+
+    // Dang chon nhieu doi tuong va bam vao 1 doi tuong trong do: keo CA NHOM
+    if (selectedIds.size > 1 && selectedIds.has(pid)) {
+        const items = [...selectedIds].map(i => {
+            const n = canvas.querySelector(`.layout-el[data-id="${i}"]`);
+            return n && { id: i, node: n, left: parseFloat(n.style.left), top: parseFloat(n.style.top),
+                          w: parseFloat(n.style.width), h: parseFloat(n.style.height) };
+        }).filter(Boolean);
+        drag = { group: true, id: pid, items, startX: e.clientX, startY: e.clientY, moved: false, canvasRect };
+        document.addEventListener('mousemove', onDragMove);
+        document.addEventListener('mouseup', onDragEnd);
+        e.preventDefault();
+        return;
+    }
 
     drag = {
         id: div.dataset.id,
@@ -1257,6 +1295,16 @@ function onDragMove(e) {
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
     if (!drag.moved) return;
 
+    if (drag.group) {      // keo nhom: giu nguyen khoang cach giua cac doi tuong, khong cho doi tuong nao ra khoi khung
+        let gx = (dx / drag.canvasRect.width) * 100, gy = (dy / drag.canvasRect.height) * 100;
+        const loX = Math.max(...drag.items.map(i => -i.left)), hiX = Math.min(...drag.items.map(i => 100 - i.left - i.w));
+        const loY = Math.max(...drag.items.map(i => -i.top)), hiY = Math.min(...drag.items.map(i => 100 - i.top - i.h));
+        gx = loX <= hiX ? Math.max(loX, Math.min(hiX, gx)) : 0;
+        gy = loY <= hiY ? Math.max(loY, Math.min(hiY, gy)) : 0;
+        drag.items.forEach(i => { i.node.style.left = `${i.left + gx}%`; i.node.style.top = `${i.top + gy}%`; });
+        return;
+    }
+
     const dxPct = (dx / drag.canvasRect.width) * 100;
     const dyPct = (dy / drag.canvasRect.height) * 100;
 
@@ -1276,6 +1324,19 @@ async function onDragEnd() {
     document.removeEventListener('mouseup', onDragEnd);
     if (!drag) return;
 
+    if (drag.group) {
+        const g = drag;
+        drag = null;
+        if (!g.moved) { selectElement(g.id); return; }     // chi nhap (khong keo): thu ve chon 1 doi tuong
+        const changed = [];
+        g.items.forEach(i => {
+            const el = elements.find(x => x.id === i.id);
+            if (el) { el.x = parseFloat(i.node.style.left); el.y = parseFloat(i.node.style.top); changed.push(el); }
+        });
+        await Promise.all(changed.map(el => persistElement(el).catch(() => { /* loi mang: bo qua */ })));
+        return;
+    }
+
     const el = elements.find(x => x.id === drag.id);
     if (drag.moved && el) {
         el.x = parseFloat(drag.el.style.left);
@@ -1286,6 +1347,401 @@ async function onDragEnd() {
     selectElement(drag.id);
     drag = null;
 }
+
+// ---------------------------------------------------------------------------
+// Chon NHIEU doi tuong (che do Build): quet chuot (keo khung chon tren vung trong) hoac Ctrl / Shift + nhap chuot trai.
+// Chuot phai -> menu Can chinh (Align / Distribute / Rotate / Resize).
+// selectedId = doi tuong CHINH (chon sau cung); Resize "cung kich thuoc" lay theo doi tuong chinh.
+// ---------------------------------------------------------------------------
+function clearSelection() {
+    if (live) { clearTimeout(live.timer); live = null; }
+    flushPending();
+    selectedId = null;
+    selectedIds.clear();
+    document.querySelectorAll('.layout-el.selected').forEach(n => n.classList.remove('selected'));
+    updateResizeFrame();
+    if (propsOpen) {
+        propsPanel.innerHTML = EMPTY_PROPS_HTML;
+        const t = document.getElementById('propsDialogTitleText');
+        if (t) t.textContent = 'Thuộc tính đối tượng';
+    }
+}
+
+// ids: mang id doi tuong; primary: doi tuong chinh (mac dinh la phan tu cuoi)
+function setSelection(ids, primary) {
+    ids = [...new Set(ids)].filter(id => elements.some(x => x.id === id));
+    if (ids.length === 0) { clearSelection(); return; }
+    if (ids.length === 1) { selectElement(ids[0]); return; }
+
+    if (live) { clearTimeout(live.timer); live = null; }
+    flushPending();                                   // doi tuong dang sua do dang chua luu -> luu truoc
+    selectedIds = new Set(ids);
+    selectedId = ids.includes(primary) ? primary : ids[ids.length - 1];
+    document.querySelectorAll('.layout-el').forEach(n => n.classList.toggle('selected', selectedIds.has(n.dataset.id)));
+    updateResizeFrame();                              // chon nhieu: an khung co gian, chi to vien tung doi tuong
+
+    if (propsOpen) {
+        const t = document.getElementById('propsDialogTitleText');
+        if (t) t.textContent = 'Thuộc tính — nhiều đối tượng';
+        propsPanel.innerHTML = `<p class="no-result">Đã chọn <b>${ids.length}</b> đối tượng.<br>` +
+            'Nhấp chuột phải để căn chỉnh (Align / Distribute / Rotate / Resize), hoặc kéo để di chuyển cả nhóm. ' +
+            'Nhấp vào 1 đối tượng (không giữ Ctrl) để xem thuộc tính của nó.</p>';
+    }
+}
+
+function toggleSelection(id) {
+    const ids = new Set(selectedIds);
+    if (ids.has(id)) ids.delete(id); else ids.add(id);
+    setSelection([...ids], ids.has(id) ? id : undefined);
+}
+
+async function deleteSelected() {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    if (!confirm(`Xoá ${ids.length} đối tượng đã chọn khỏi bản đồ?`)) return;
+    await Promise.all(ids.map(id => fetch(`/api/layout/${id}`, { method: 'DELETE' }).catch(() => { /* bo qua */ })));
+    selectedId = null; selectedIds.clear();
+    if (live) { clearTimeout(live.timer); live = null; }
+    pending = null;
+    propsPanel.innerHTML = EMPTY_PROPS_HTML;
+    await loadLayout();
+}
+
+// ---- Quet chuot: keo 1 khung tren vung trong cua ban do ----
+canvas.addEventListener('mousedown', (e) => {
+    if (!editMode || e.button !== 0) return;
+    if (e.target.closest('.layout-el, .layout-resize-frame')) return;   // bam vao doi tuong / tay nam: da co xu ly rieng
+    e.preventDefault();
+    closeCtxMenu();
+    document.activeElement?.blur?.();      // preventDefault giu nguyen o nhap dang focus -> bo focus de thay doi o panel duoc ghi nhan
+
+    const additive = e.ctrlKey || e.metaKey || e.shiftKey;     // giu Ctrl/Shift: cong them vao vung chon hien co
+    const base = additive ? [...selectedIds] : [];
+    const x0 = e.clientX, y0 = e.clientY;
+    let box = null, moved = false;
+
+    const rectOf = (ev) => ({ l: Math.min(x0, ev.clientX), t: Math.min(y0, ev.clientY), r: Math.max(x0, ev.clientX), b: Math.max(y0, ev.clientY) });
+    const hitsOf = (q) => [...canvas.querySelectorAll('.layout-el')].filter(n => {
+        const r = n.getBoundingClientRect();
+        return r.right >= q.l && r.left <= q.r && r.bottom >= q.t && r.top <= q.b;
+    }).map(n => n.dataset.id);
+
+    const move = (ev) => {
+        if (!moved && Math.abs(ev.clientX - x0) < 4 && Math.abs(ev.clientY - y0) < 4) return;
+        if (!moved) { moved = true; box = document.createElement('div'); box.className = 'layout-marquee'; canvas.appendChild(box); }
+        const q = rectOf(ev), cr = canvas.getBoundingClientRect();
+        Object.assign(box.style, { left: `${q.l - cr.left}px`, top: `${q.t - cr.top}px`, width: `${q.r - q.l}px`, height: `${q.b - q.t}px` });
+    };
+    const up = (ev) => {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        box?.remove();
+        if (!moved) { if (!additive) clearSelection(); return; }   // nhap vao vung trong: bo chon
+        setSelection([...base, ...hitsOf(rectOf(ev))]);
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+});
+
+// ---- Can chinh: tinh theo KHUNG NHIN THAY (ke ca khi doi tuong dang xoay) cua tung doi tuong, tinh bang px ----
+function visualBox(el, W, H) {
+    const w = (el.width / 100) * W, h = (el.height / 100) * H;
+    const cx = ((el.x + el.width / 2) / 100) * W, cy = ((el.y + el.height / 2) / 100) * H;
+    const th = ((Number(el.rotation) || 0) * Math.PI) / 180;
+    const c = Math.abs(Math.cos(th)), s = Math.abs(Math.sin(th));
+    const hw = (w * c + h * s) / 2, hh = (w * s + h * c) / 2;
+    return { el, cx, cy, l: cx - hw, r: cx + hw, t: cy - hh, b: cy + hh };
+}
+
+const selectedElements = () => [...selectedIds].map(id => elements.find(x => x.id === id)).filter(Boolean);
+
+// Ve lai + luu cac doi tuong da doi (giu nguyen vung chon)
+async function commitChanges(list) {
+    if (!list.length) return;
+    list.forEach(el => refreshNode(el));
+    updateResizeFrame();
+    await Promise.all(list.map(el => persistElement(el).catch(() => { /* loi mang: bo qua */ })));
+}
+
+async function alignSelected(kind) {
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    const boxes = selectedElements().map(el => visualBox(el, W, H));
+    if (boxes.length < 2) return;
+    const L = Math.min(...boxes.map(b => b.l)), R = Math.max(...boxes.map(b => b.r));
+    const T = Math.min(...boxes.map(b => b.t)), B = Math.max(...boxes.map(b => b.b));
+    const changed = [];
+    boxes.forEach(b => {
+        let dx = 0, dy = 0;
+        if (kind === 'left') dx = L - b.l;
+        else if (kind === 'center') dx = (L + R) / 2 - b.cx;
+        else if (kind === 'right') dx = R - b.r;
+        else if (kind === 'top') dy = T - b.t;
+        else if (kind === 'middle') dy = (T + B) / 2 - b.cy;
+        else if (kind === 'bottom') dy = B - b.b;
+        if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
+            b.el.x += (dx / W) * 100; b.el.y += (dy / H) * 100;
+            changed.push(b.el);
+        }
+    });
+    await commitChanges(changed);
+}
+
+// Chia deu khoang cach giua cac doi tuong (can >= 3): 2 doi tuong ngoai cung giu nguyen
+async function distributeSelected(axis) {
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    const horiz = axis === 'h';
+    const boxes = selectedElements().map(el => visualBox(el, W, H)).sort((a, b) => horiz ? a.cx - b.cx : a.cy - b.cy);
+    if (boxes.length < 3) return;
+    const lo = b => horiz ? b.l : b.t, hi = b => horiz ? b.r : b.b;
+    const span = hi(boxes[boxes.length - 1]) - lo(boxes[0]);
+    const total = boxes.reduce((n, b) => n + (hi(b) - lo(b)), 0);
+    const gap = (span - total) / (boxes.length - 1);
+    let cursor = lo(boxes[0]);
+    const changed = [];
+    boxes.forEach(b => {
+        const d = cursor - lo(b);
+        if (Math.abs(d) > 0.01) {
+            if (horiz) b.el.x += (d / W) * 100; else b.el.y += (d / H) * 100;
+            changed.push(b.el);
+        }
+        cursor += (hi(b) - lo(b)) + gap;
+    });
+    await commitChanges(changed);
+}
+
+// Xoay tung doi tuong quanh tam cua chinh no: +90 (phai) / -90 (trai) / 0 (ve goc)
+async function rotateSelected(deg) {
+    const changed = [];
+    selectedElements().forEach(el => {
+        let r = deg === 0 ? 0 : (((Number(el.rotation) || 0) + deg) % 360 + 360) % 360;
+        if (r > 180) r -= 360;
+        el.rotation = r === 0 ? null : r;
+        changed.push(el);
+    });
+    await commitChanges(changed);
+}
+
+// Cung chieu rong / chieu cao / kich thuoc theo doi tuong CHINH (chon sau cung); giu goc tren-trai, khong tran ra ngoai khung
+async function resizeSelected(kind) {
+    const ref = elements.find(x => x.id === selectedId);
+    if (!ref) return;
+    const changed = [];
+    selectedElements().forEach(el => {
+        if (el === ref) return;
+        const w = kind === 'height' ? el.width : Math.min(ref.width, 100 - el.x);
+        const h = kind === 'width' ? el.height : Math.min(ref.height, 100 - el.y);
+        if (Math.abs(w - el.width) > 0.001 || Math.abs(h - el.height) > 0.001) { el.width = w; el.height = h; changed.push(el); }
+    });
+    await commitChanges(changed);
+}
+
+// ---- Sao chep / Dan (Ctrl+C, Ctrl+V hoac menu chuot phai) ----
+// Bo nho tam nam trong trang (khong dung clipboard he thong) nen van dan duoc sang mat bang khac sau khi doi tang.
+// Vung nhan dien (ParkingSlot) khong sao chep duoc: moi vi tri chi duoc dat 1 lan tren ban do cua tang.
+let layoutClipboard = null;     // { items: [ban sao doi tuong], x, y, w, h (khung bao, %), seq: so lan dan lien tiep }
+let pasting = false;
+
+function showLayoutToast(msg) {
+    document.querySelectorAll('.layout-toast').forEach(n => n.remove());
+    const t = document.createElement('div');
+    t.className = 'layout-toast';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2800);
+}
+
+function copySelected() {
+    if (!editMode) return false;
+    const all = elements.filter(el => selectedIds.has(el.id));      // giu thu tu lop cua ban do
+    if (!all.length) return false;
+    const copyable = all.filter(el => el.type !== 'ParkingSlot');
+    if (!copyable.length) {
+        showLayoutToast('Vùng nhận diện (ô đỗ) không sao chép được: mỗi vị trí chỉ đặt 1 lần trên bản đồ của tầng.');
+        return false;
+    }
+    const items = copyable.map(el => { const c = cloneObj(el); delete c.id; delete c.slot; delete c.stats; return c; });
+    const x = Math.min(...items.map(i => i.x)), y = Math.min(...items.map(i => i.y));
+    const r = Math.max(...items.map(i => i.x + i.width)), b = Math.max(...items.map(i => i.y + i.height));
+    layoutClipboard = { items, x, y, w: r - x, h: b - y, seq: 0 };
+    const skipped = all.length - items.length;
+    showLayoutToast(`Đã sao chép ${items.length} đối tượng` + (skipped ? ` (bỏ qua ${skipped} vùng nhận diện)` : '') + ' — Ctrl+V để dán.');
+    return true;
+}
+
+// at = { x, y } (% so voi khung) la goc tren-trai cua nhom dan (dan tai con tro chuot); khong co = dan lech 1 chut so voi ban goc
+async function pasteClipboard(at) {
+    if (!editMode || !layoutClipboard || pasting) return;
+    pasting = true;
+    try {
+        const cb = layoutClipboard;
+        let ox, oy;
+        if (at) { ox = at.x; oy = at.y; }
+        else {
+            cb.seq++;
+            const ar = canvas.clientWidth / (canvas.clientHeight || 1);
+            ox = cb.x + 2 * cb.seq; oy = cb.y + 2 * cb.seq * ar;
+        }
+        ox = Math.max(0, Math.min(ox, 100 - cb.w));          // nhom luon nam tron trong khung
+        oy = Math.max(0, Math.min(oy, 100 - cb.h));
+        const dx = ox - cb.x, dy = oy - cb.y, r2 = (v) => Math.round(v * 100) / 100;
+
+        const created = [], failed = [];
+        for (const it of cb.items) {                          // lan luot de giu thu tu lop
+            const payload = { ...cloneObj(it), floor: CURRENT_FLOOR, x: r2(it.x + dx), y: r2(it.y + dy) };
+            try {
+                const res = await fetch('/api/layout', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                });
+                if (res.ok) created.push((await res.json()).id);
+                else failed.push((await res.json().catch(() => ({}))).message || `lỗi ${res.status}`);
+            } catch { failed.push('mất kết nối'); }
+        }
+
+        clearSelection();
+        await loadLayout();
+        if (created.length) setSelection(created);
+        if (failed.length) alert(`Không dán được ${failed.length}/${cb.items.length} đối tượng: ${[...new Set(failed)].join(' | ')}`);
+    } finally { pasting = false; }
+}
+
+document.addEventListener('keydown', (e) => {
+    if (!editMode || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k !== 'c' && k !== 'v') return;
+    if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;   // dang go chu: de trinh duyet xu ly
+    const zm = document.getElementById('zonePickModal');
+    if (zm && getComputedStyle(zm).display !== 'none') return;
+    if (k === 'c') {
+        if (String(window.getSelection?.() ?? '').trim()) return;                           // dang boi den chu thuong
+        if (copySelected()) e.preventDefault();
+    } else if (layoutClipboard) {
+        e.preventDefault();
+        pasteClipboard();
+    }
+});
+
+// ---- Xoa bang phim Delete: chi can tro chuot vao doi tuong (khong can chon) roi nhan Delete ----
+let hoverId = null;      // doi tuong dang duoc tro chuot toi
+canvas.addEventListener('mouseover', (e) => { hoverId = e.target.closest?.('.layout-el')?.dataset.id ?? null; });
+canvas.addEventListener('mouseleave', () => { hoverId = null; });
+
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Delete' || !editMode || e.ctrlKey || e.metaKey || e.altKey || e.repeat || drag || rsz) return;
+    if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;   // dang go chu: Delete xoa ky tu
+    const zm = document.getElementById('zonePickModal');
+    if (zm && getComputedStyle(zm).display !== 'none') return;
+
+    const hovered = hoverId && elements.some(x => x.id === hoverId) ? hoverId : null;
+    if (hovered) {
+        e.preventDefault();
+        // tro vao 1 doi tuong nam trong nhom dang chon -> xoa ca nhom; tro vao doi tuong khac -> chi xoa doi tuong do
+        if (selectedIds.size > 1 && selectedIds.has(hovered)) deleteSelected(); else deleteElement(hovered);
+    } else if (selectedIds.size > 0) {
+        e.preventDefault();
+        if (selectedIds.size > 1) deleteSelected(); else deleteElement(selectedId);
+    }
+});
+
+// ---- Menu chuot phai ----
+let ctxMenu = null;
+function closeCtxMenu() { if (ctxMenu) { ctxMenu.remove(); ctxMenu = null; } }
+
+function alignIcon(k) {
+    const g = {
+        left:   '<path d="M2 2v12"/><rect x="4" y="3" width="9" height="4"/><rect x="4" y="9" width="6" height="4"/>',
+        center: '<path d="M8 2v12"/><rect x="3" y="3" width="10" height="4"/><rect x="5" y="9" width="6" height="4"/>',
+        right:  '<path d="M14 2v12"/><rect x="3" y="3" width="9" height="4"/><rect x="6" y="9" width="6" height="4"/>',
+        top:    '<path d="M2 2h12"/><rect x="3" y="4" width="4" height="9"/><rect x="9" y="4" width="4" height="6"/>',
+        middle: '<path d="M2 8h12"/><rect x="3" y="3" width="4" height="10"/><rect x="9" y="5" width="4" height="6"/>',
+        bottom: '<path d="M2 14h12"/><rect x="3" y="3" width="4" height="9"/><rect x="9" y="6" width="4" height="6"/>'
+    }[k];
+    return g ? `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true">${g}</svg>` : '';
+}
+
+const CTX_MENU = [
+    { label: 'Sao chép (Copy)', hint: 'Ctrl+C', icon: '⧉', enabled: () => selectedIds.size > 0, run: () => copySelected() },
+    { label: 'Dán (Paste)', hint: 'Ctrl+V', icon: '📋', enabled: () => !!layoutClipboard, run: (at) => pasteClipboard(at) },
+    { sep: true },
+    { label: 'Căn chỉnh (Align)', min: 2, items: [
+        { label: 'Căn trái', icon: alignIcon('left'), run: () => alignSelected('left') },
+        { label: 'Căn giữa (ngang)', icon: alignIcon('center'), run: () => alignSelected('center') },
+        { label: 'Căn phải', icon: alignIcon('right'), run: () => alignSelected('right') },
+        { sep: true },
+        { label: 'Căn trên', icon: alignIcon('top'), run: () => alignSelected('top') },
+        { label: 'Căn giữa (dọc)', icon: alignIcon('middle'), run: () => alignSelected('middle') },
+        { label: 'Căn dưới', icon: alignIcon('bottom'), run: () => alignSelected('bottom') }] },
+    { label: 'Phân bố (Distribute)', min: 3, items: [
+        { label: 'Đều khoảng cách ngang', icon: '↔', run: () => distributeSelected('h') },
+        { label: 'Đều khoảng cách dọc', icon: '↕', run: () => distributeSelected('v') }] },
+    { label: 'Xoay (Rotate)', min: 1, items: [
+        { label: 'Xoay phải 90°', icon: '⟳', run: () => rotateSelected(90) },
+        { label: 'Xoay trái 90°', icon: '⟲', run: () => rotateSelected(-90) },
+        { label: 'Về góc 0°', icon: '⊘', run: () => rotateSelected(0) }] },
+    { label: 'Kích thước (Resize)', min: 2, items: [
+        { label: 'Cùng chiều rộng', icon: '↔', run: () => resizeSelected('width') },
+        { label: 'Cùng chiều cao', icon: '↕', run: () => resizeSelected('height') },
+        { label: 'Cùng kích thước', icon: '⤢', run: () => resizeSelected('both') }] }
+];
+
+function showCtxMenu(x, y, at) {
+    closeCtxMenu();
+    const n = selectedIds.size;
+    const menu = document.createElement('div');
+    menu.className = 'pg-ctxmenu';
+    menu.addEventListener('contextmenu', (ev) => ev.preventDefault());
+
+    CTX_MENU.forEach(group => {
+        if (group.sep) { const hr = document.createElement('div'); hr.className = 'pg-ctx-sep'; menu.appendChild(hr); return; }
+        if (!group.items) {      // muc don (Sao chep / Dan)
+            const row = document.createElement('div');
+            row.className = 'pg-ctx-item' + (group.enabled && !group.enabled() ? ' disabled' : '');
+            row.innerHTML = `<span class="pg-ctx-ico">${group.icon || ''}</span><span class="pg-ctx-lbl">${group.label}</span><span class="pg-ctx-hint">${group.hint || ''}</span>`;
+            row.addEventListener('click', () => { closeCtxMenu(); group.run(at); });
+            menu.appendChild(row);
+            return;
+        }
+        const item = document.createElement('div');
+        item.className = 'pg-ctx-item has-sub' + (n < group.min ? ' disabled' : '');
+        item.title = n < group.min ? `Cần chọn từ ${group.min} đối tượng` : '';
+        item.innerHTML = `<span class="pg-ctx-ico"></span><span class="pg-ctx-lbl">${group.label}</span><span class="pg-ctx-arrow">▸</span>`;
+
+        const sub = document.createElement('div');
+        sub.className = 'pg-ctxmenu pg-ctx-sub';
+        group.items.forEach(it => {
+            if (it.sep) { const hr = document.createElement('div'); hr.className = 'pg-ctx-sep'; sub.appendChild(hr); return; }
+            const row = document.createElement('div');
+            row.className = 'pg-ctx-item';
+            row.innerHTML = `<span class="pg-ctx-ico">${it.icon || ''}</span><span class="pg-ctx-lbl">${it.label}</span>`;
+            row.addEventListener('click', () => { closeCtxMenu(); it.run(); });
+            sub.appendChild(row);
+        });
+        item.appendChild(sub);
+        // Mo submenu sang trai neu bi tran man hinh ben phai
+        item.addEventListener('mouseenter', () => {
+            sub.classList.remove('flip');
+            if (item.getBoundingClientRect().right + sub.offsetWidth > window.innerWidth) sub.classList.add('flip');
+        });
+        menu.appendChild(item);
+    });
+
+    document.body.appendChild(menu);
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - mw - 4))}px`;
+    menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - mh - 4))}px`;
+    ctxMenu = menu;
+}
+
+canvas.addEventListener('contextmenu', (e) => {
+    if (!editMode) return;
+    e.preventDefault();
+    if (selectedIds.size === 0 && !layoutClipboard) { closeCtxMenu(); return; }
+    const cr = canvas.getBoundingClientRect();     // vi tri con tro (% khung): "Dan" dat nhom tai day
+    showCtxMenu(e.clientX, e.clientY, { x: ((e.clientX - cr.left) / cr.width) * 100, y: ((e.clientY - cr.top) / cr.height) * 100 });
+});
+document.addEventListener('mousedown', (e) => { if (ctxMenu && !e.target.closest('.pg-ctxmenu')) closeCtxMenu(); }, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCtxMenu(); });
+window.addEventListener('blur', closeCtxMenu);
+viewport.addEventListener('scroll', closeCtxMenu);
 
 // ---------------------------------------------------------------------------
 // Co gian doi tuong bang chuot (chi o che do Build): doi tuong dang chon co khung 8 tay nam
@@ -1318,7 +1774,7 @@ function ensureResizeFrame() {
 // Dat khung theo dung vi tri / kich thuoc / goc xoay hien tai cua doi tuong dang chon (doc tu style cua node).
 function updateResizeFrame() {
     const frame = ensureResizeFrame();
-    const div = editMode && selectedId ? canvas.querySelector(`.layout-el[data-id="${selectedId}"]`) : null;
+    const div = editMode && selectedId && selectedIds.size <= 1 ? canvas.querySelector(`.layout-el[data-id="${selectedId}"]`) : null;
     if (!div) { frame.hidden = true; return; }
 
     const el = elements.find(x => x.id === selectedId);
@@ -1505,7 +1961,7 @@ document.getElementById('propsToggleBtn').addEventListener('click', () => {
 document.getElementById('deleteSelectedBtn').addEventListener('click', () => {
     if (!editMode) return;
     if (!selectedId) { alert('Chọn 1 đối tượng trên bản đồ trước.'); return; }
-    deleteElement(selectedId);
+    if (selectedIds.size > 1) deleteSelected(); else deleteElement(selectedId);
 });
 
 document.getElementById('propsDialogClose').addEventListener('click', closePropsDialog);
@@ -1548,6 +2004,7 @@ function selectElement(id) {
     if (pending && pending.id !== id) flushPending();   // chua bam Luu ma chon doi tuong khac -> tu dong luu
 
     selectedId = id;
+    selectedIds = new Set([id]);
     const el = elements.find(x => x.id === id);
     if (!el) return;
     if (!pending || pending.id !== id) pending = { id, snapshot: cloneObj(el), dirty: false };
@@ -1615,7 +2072,8 @@ function flushPending() {
     if (!p || !p.dirty) return lastFlush;
     const el = elements.find(x => x.id === p.id);
     if (!el) return lastFlush;
-    lastFlush = persistElement(el).catch(() => { /* loi mang: bo qua */ });
+    lastFlush = persistElement(el).catch(() => { /* loi mang: bo qua */ })
+        .then(() => { if (el.type === 'SlotStats') refreshLayoutSlots(); });   // so lieu thong ke do may chu tinh theo cau hinh vua luu
     return lastFlush;
 }
 
@@ -1652,6 +2110,7 @@ async function persistAndRefresh(el) {
     await persistElement(el);
     renderLayout();
     refreshLampStates();
+    refreshLayoutSlots();
     selectElement(el.id);
 }
 
@@ -1761,22 +2220,62 @@ async function saveCommonAndRefresh(el) {
 // ---------------------------------------------------------------------------
 // Panel: Thong ke cho
 // ---------------------------------------------------------------------------
-function renderStatsProps(el) {
-    const chk = (id, on, text) =>
-        `<label class="checkbox-label" style="margin-bottom:6px;"><input type="checkbox" id="${id}" ${on === false ? '' : 'checked'} /> ${text}</label>`;
+const STAT_DEFS = [
+    { key: 'Free',     show: 'showStatFree',     cam: 'statFreeCamera',     vars: 'statFreeVars',     count: 'Free',     text: 'Số chỗ trống (Còn trống)' },
+    { key: 'Occupied', show: 'showStatOccupied', cam: 'statOccupiedCamera', vars: 'statOccupiedVars', count: 'Occupied', text: 'Số chỗ có xe (Đã đỗ)' },
+    { key: 'Error',    show: 'showStatError',    cam: 'statErrorCamera',    vars: 'statErrorVars',    count: 'Error',    text: 'Số lỗi (camera mất kết nối / cảm biến lỗi)' }
+];
+
+async function renderStatsProps(el) {
+    let msVars = [];
+    try {
+        const r = await fetch('/api/system/sensors/variables', { cache: 'no-store' });
+        if (r.ok) msVars = (await r.json()).variables || [];
+    } catch { /* khong co danh sach bien MS: van sua duoc cac thuoc tinh khac */ }
+    if (selectedId !== el.id) return;   // da chon doi tuong khac trong luc cho tai danh sach bien MS
+
     const st = el.stats || { free: 0, occupied: 0, error: 0, camerasError: 0 };
+    const orient = el.statsOrientation === 'Horizontal' ? 'Horizontal' : 'Vertical';
+    const vars = {};                                           // danh sach bien MS dang sua cua tung so lieu
+    STAT_DEFS.forEach(d => { vars[d.key] = [...(el[d.vars] || [])]; });
+
+    const defBlock = (d) => `
+        <div class="stat-cfg">
+            <label class="checkbox-label"><input type="checkbox" id="propStat${d.key}" ${el[d.show] === false ? '' : 'checked'} /> <b>${d.text}</b></label>
+            <label class="checkbox-label stat-sub-opt"><input type="checkbox" id="propStat${d.key}Cam" ${el[d.cam] === false ? '' : 'checked'} /> Tính từ camera (vùng nhận diện)</label>
+            <div class="stat-sub-opt">
+                <div class="hint small" style="margin:2px 0;">Cộng thêm biến MS (cảm biến):</div>
+                <div class="stat-chips" id="propStat${d.key}Vars"></div>
+                <div class="prop-inline">
+                    <select id="propStat${d.key}Sel" style="flex:1;min-width:0;"></select>
+                    <button type="button" class="btn secondary" id="propStat${d.key}Add" style="padding:6px 10px;">＋ Thêm</button>
+                </div>
+            </div>
+        </div>`;
 
     propsPanel.innerHTML = `
         <h3>Thống kê chỗ đỗ · tầng ${escHtml(CURRENT_FLOOR)}</h3>
         <p class="hint small" style="margin-top:0;">
             Hiện: <strong>${st.free}</strong> trống · <strong>${st.occupied}</strong> có xe · <strong>${st.error}</strong> lỗi
-            (${st.camerasError} camera không lấy được ảnh). Tính trên các vùng nhận diện đã vẽ của tầng, cập nhật realtime.
+            (camera: ${st.cameraFree ?? st.free} / ${st.cameraOccupied ?? st.occupied} / ${st.cameraError ?? st.error}
+            · cảm biến: ${st.sensorFree ?? 0} / ${st.sensorOccupied ?? 0} / ${st.sensorError ?? 0};
+            ${st.camerasError} camera không lấy được ảnh). Số liệu = camera + tổng các biến MS đã thêm, cập nhật realtime.
         </p>
 
         <div class="prop-section-title">Số liệu hiển thị</div>
-        ${chk('propStatFree', el.showStatFree, 'Số chỗ trống')}
-        ${chk('propStatOcc', el.showStatOccupied, 'Số chỗ có xe')}
-        ${chk('propStatErr', el.showStatError, 'Số lỗi không lấy được ảnh (camera mất kết nối)')}
+        ${STAT_DEFS.map(defBlock).join('')}
+        <p class="hint small">Chỉ liệt kê biến MS đếm đúng trạng thái của số liệu (tạo ở Hệ thống › Cảm biến › Dữ liệu). Bỏ chọn "Tính từ camera" nếu chỉ muốn dùng cảm biến.</p>
+
+        <div class="prop-section-title">Cách hiển thị</div>
+        <div class="prop-field"><label>Hướng sắp xếp</label>
+            <select id="propStatOrient">
+                <option value="Vertical" ${orient === 'Vertical' ? 'selected' : ''}>Dọc (xếp từ trên xuống)</option>
+                <option value="Horizontal" ${orient === 'Horizontal' ? 'selected' : ''}>Ngang (xếp từ trái sang phải)</option>
+            </select></div>
+        <div class="prop-grid-2">
+            <div class="prop-field"><label>Cỡ chữ số (px)</label><input id="propStatNumSize" type="number" min="1" max="200" step="1" placeholder="mặc định 30" value="${el.fontSize ?? ''}" /></div>
+            <div class="prop-field"><label>Cỡ chữ nhãn (px)</label><input id="propStatLblSize" type="number" min="1" max="200" step="1" placeholder="mặc định 12" value="${el.labelFontSize ?? ''}" /></div>
+        </div>
 
         ${positionFieldsHtml(el)}
         ${styleFieldsHtml(el)}
@@ -1787,19 +2286,66 @@ function renderStatsProps(el) {
         </div>
     `;
 
+    const q = (id) => document.getElementById(id);
+    const lower = (n) => String(n).toLowerCase();
+
+    // Ve lai danh sach "chip" + o chon bien cho 1 so lieu
+    const renderVars = (d) => {
+        const box = q(`propStat${d.key}Vars`), sel = q(`propStat${d.key}Sel`), list = vars[d.key];
+        box.innerHTML = list.length ? list.map(n => {
+            const v = msVars.find(x => lower(x.name) === lower(n));
+            const bad = !v || v.count !== d.count;
+            const tip = !v ? 'Biến MS không còn tồn tại (tính là 0)' : bad ? 'Biến này đếm trạng thái khác với số liệu' : (v.description || '');
+            const val = v && v.value !== null && v.value !== undefined ? ` = ${v.value}` : '';
+            return `<span class="stat-chip${bad ? ' bad' : ''}" title="${escHtml(tip)}">${escHtml(n)}${val}<button type="button" data-rm="${escHtml(n)}" title="Bỏ biến này">✕</button></span>`;
+        }).join('') : '<span class="hint small">Chưa có biến MS nào.</span>';
+
+        const avail = msVars.filter(v => v.count === d.count && !list.some(n => lower(n) === lower(v.name)));
+        sel.innerHTML = avail.length
+            ? avail.map(v => `<option value="${escHtml(v.name)}">${escHtml(v.name)}${v.description ? ' — ' + escHtml(v.description) : ''}${v.value !== null && v.value !== undefined ? ` (hiện ${v.value})` : ''}</option>`).join('')
+            : '<option value="">— Không còn biến MS phù hợp —</option>';
+        q(`propStat${d.key}Add`).disabled = !avail.length;
+    };
+    const changed = (target) => target.dispatchEvent(new Event('change', { bubbles: true }));   // kich hoat xem truoc truc tiep
+
+    STAT_DEFS.forEach(d => {
+        renderVars(d);
+        q(`propStat${d.key}Add`).addEventListener('click', (e) => {
+            const name = q(`propStat${d.key}Sel`).value;
+            if (!name) return;
+            vars[d.key].push(name);
+            renderVars(d);
+            changed(e.currentTarget);
+        });
+        q(`propStat${d.key}Vars`).addEventListener('click', (e) => {
+            const b = e.target.closest('button[data-rm]');
+            if (!b) return;
+            vars[d.key] = vars[d.key].filter(n => lower(n) !== lower(b.dataset.rm));
+            renderVars(d);
+            changed(q(`propStat${d.key}Add`));
+        });
+    });
+
     const applyForm = (el) => {
-        el.showStatFree = document.getElementById('propStatFree').checked;
-        el.showStatOccupied = document.getElementById('propStatOcc').checked;
-        el.showStatError = document.getElementById('propStatErr').checked;
+        STAT_DEFS.forEach(d => {
+            el[d.show] = q(`propStat${d.key}`).checked;
+            el[d.cam] = q(`propStat${d.key}Cam`).checked;
+            el[d.vars] = [...vars[d.key]];
+        });
+        el.statsOrientation = q('propStatOrient').value;
+        const fs = parseFloat(q('propStatNumSize').value), ls = parseFloat(q('propStatLblSize').value);
+        el.fontSize = Number.isFinite(fs) && fs > 0 ? fs : null;
+        el.labelFontSize = Number.isFinite(ls) && ls > 0 ? ls : null;
         applyPositionFieldsFromForm(el);
         applyStyleFieldsFromForm(el);
     };
     bindLivePreview(el, applyForm);
-    document.getElementById('savePropsBtn').addEventListener('click', async () => {
+    q('savePropsBtn').addEventListener('click', async () => {
         applyForm(el);
         await persistAndRefresh(el);
     });
-    document.getElementById('deleteElBtn').addEventListener('click', () => deleteElement(el.id));
+    q('deleteElBtn').addEventListener('click', () => deleteElement(el.id));
+    fitPropsDialog();
 }
 
 // ---------------------------------------------------------------------------
@@ -2483,7 +3029,7 @@ async function persistElement(el) {
 async function deleteElement(id) {
     if (!confirm('Xoá đối tượng này khỏi bản đồ?')) return;
     await fetch(`/api/layout/${id}`, { method: 'DELETE' });
-    selectedId = null;
+    selectedId = null; selectedIds.clear();
     if (live) { clearTimeout(live.timer); live = null; }
     pending = null;
     propsPanel.innerHTML = EMPTY_PROPS_HTML;

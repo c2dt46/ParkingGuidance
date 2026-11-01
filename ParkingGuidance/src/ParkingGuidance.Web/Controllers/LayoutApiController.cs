@@ -19,11 +19,13 @@ public class LayoutApiController : ControllerBase
     private readonly IWebHostEnvironment _env;
     private readonly IPersistenceService _persistence;
     private readonly ISensorService _sensors;
+    private readonly ISensorVariableService _sensorVars;
 
-    public LayoutApiController(ILayoutService layout, IParkingService parking, ICameraRegistryService registry, IWebHostEnvironment env, IPersistenceService persistence, ISensorService sensors)
+    public LayoutApiController(ILayoutService layout, IParkingService parking, ICameraRegistryService registry, IWebHostEnvironment env, IPersistenceService persistence, ISensorService sensors, ISensorVariableService sensorVars)
     {
         _persistence = persistence;
         _sensors = sensors;
+        _sensorVars = sensorVars;
         _layout = layout;
         _parking = parking;
         _registry = registry;
@@ -94,6 +96,16 @@ public class LayoutApiController : ControllerBase
         public string? StateText0 { get; set; }
         public string? StateText1 { get; set; }
 
+        // Thong ke cho (SlotStats): huong hien thi, co chu nhan, cong them camera / bien MS (cam bien) vao tung so lieu
+        public string? StatsOrientation { get; set; }
+        public double? LabelFontSize { get; set; }
+        public bool StatFreeCamera { get; set; } = true;
+        public bool StatOccupiedCamera { get; set; } = true;
+        public bool StatErrorCamera { get; set; } = true;
+        public List<string>? StatFreeVars { get; set; }
+        public List<string>? StatOccupiedVars { get; set; }
+        public List<string>? StatErrorVars { get; set; }
+
         // Den (Lamp) hien thi trang thai cam bien / vi tri do tren camera
         public string? BitSource { get; set; }
         public int SensorDevice { get; set; }
@@ -135,6 +147,28 @@ public class LayoutApiController : ControllerBase
         e.FontSize = ClampOrNull(dto.FontSize, 1, 200);
         e.LineArrow = dto.LineArrow is "none" or "start" or "end" or "both" ? dto.LineArrow : null;
     }
+
+    /// <summary>Thống kê chỗ (SlotStats): hướng, cỡ chữ nhãn, có tính camera không, danh sách biến MS cộng thêm (đã kiểm tra tên). Loại khác: bỏ qua.</summary>
+    private static void ApplyStatProps(LayoutElement e, ElementDto dto)
+    {
+        if (e.Type != LayoutElementType.SlotStats) return;
+        e.StatsOrientation = dto.StatsOrientation == "Horizontal" ? "Horizontal" : "Vertical";
+        e.LabelFontSize = ClampOrNull(dto.LabelFontSize, 1, 200);
+        e.StatFreeCamera = dto.StatFreeCamera;
+        e.StatOccupiedCamera = dto.StatOccupiedCamera;
+        e.StatErrorCamera = dto.StatErrorCamera;
+        e.StatFreeVars = CleanVarList(dto.StatFreeVars);
+        e.StatOccupiedVars = CleanVarList(dto.StatOccupiedVars);
+        e.StatErrorVars = CleanVarList(dto.StatErrorVars);
+    }
+
+    private static List<string> CleanVarList(List<string>? names) =>
+        (names ?? new List<string>())
+            .Select(n => CleanTagName(n))
+            .Where(n => n is not null).Select(n => n!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(50)
+            .ToList();
 
     private static readonly Regex TagNameRx = new(@"^[A-Za-z_][A-Za-z0-9_]{0,63}$", RegexOptions.Compiled);
 
@@ -326,7 +360,9 @@ public class LayoutApiController : ControllerBase
     /// <c>free</c> = Còn trống, <c>occupied</c> = Đã đỗ, <c>error</c> = ô đang Lỗi (camera không lấy được ảnh),
     /// <c>camerasError</c> = số camera đang không lấy được ảnh.
     /// </summary>
-    private object ComputeStats(string floor)
+    private readonly record struct CameraCount(int Total, int Free, int Occupied, int Error, int CamerasError);
+
+    private CameraCount CountCameras(string floor)
     {
         var floorKey = SlotKey.NormalizeFloor(floor);
         var slotByKey = _parking.GetSlots(null)
@@ -354,8 +390,41 @@ public class LayoutApiController : ControllerBase
                 }
             }
         }
+        return new CameraCount(seen.Count, free, occupied, error, errorCameras.Count);
+    }
 
-        return new { Total = seen.Count, Free = free, Occupied = occupied, Error = error, CamerasError = errorCameras.Count };
+    /// <summary>
+    /// Thống kê chỗ đỗ của 1 tầng. Phần CAMERA tính trên các VÙNG NHẬN DIỆN đang có của camera trên tầng (ô của vùng đã xoá không được tính):
+    /// free = Còn trống, occupied = Đã đỗ, error = ô đang Lỗi (camera không lấy được ảnh), camerasError = số camera đang không lấy được ảnh.
+    /// Với 1 đối tượng Thống kê (<paramref name="el"/>): mỗi số liệu = phần camera (nếu đối tượng bật "tính từ camera") + TỔNG giá trị các biến MS
+    /// (cảm biến) đã thêm cho số liệu đó. <c>sensorFree/sensorOccupied/sensorError</c> là phần cảm biến, <c>cameraFree/…</c> là phần camera.
+    /// </summary>
+    private object ComputeStats(string floor, LayoutElement? el = null, CameraCount? cam = null)
+    {
+        var c = cam ?? CountCameras(floor);
+
+        IReadOnlyDictionary<string, long?>? ms = null;
+        if (el is not null)
+        {
+            var names = el.StatFreeVars.Concat(el.StatOccupiedVars).Concat(el.StatErrorVars).ToList();
+            if (names.Count > 0) ms = _sensorVars.GetValues(names);
+        }
+        long Sum(IEnumerable<string>? list) =>
+            ms is null || list is null ? 0 : list.Distinct(StringComparer.OrdinalIgnoreCase).Sum(n => ms.TryGetValue(n, out var v) && v is long x ? x : 0);
+
+        int sf = (int)Sum(el?.StatFreeVars), so = (int)Sum(el?.StatOccupiedVars), se = (int)Sum(el?.StatErrorVars);
+        bool cf = el?.StatFreeCamera ?? true, co = el?.StatOccupiedCamera ?? true, ce = el?.StatErrorCamera ?? true;
+
+        return new
+        {
+            Total = c.Total,
+            Free = (cf ? c.Free : 0) + sf,
+            Occupied = (co ? c.Occupied : 0) + so,
+            Error = (ce ? c.Error : 0) + se,
+            CamerasError = c.CamerasError,
+            CameraFree = c.Free, CameraOccupied = c.Occupied, CameraError = c.Error,
+            SensorFree = sf, SensorOccupied = so, SensorError = se
+        };
     }
 
     [HttpGet("stats")]
@@ -423,7 +492,7 @@ public class LayoutApiController : ControllerBase
     {
         var elements = _layout.GetElements(floor);
         var slotsById = _parking.GetSlots(floor).ToDictionary(s => s.SlotId);
-        var stats = elements.Any(e => e.Type == LayoutElementType.SlotStats) ? ComputeStats(floor) : null;
+        CameraCount? camCount = elements.Any(e => e.Type == LayoutElementType.SlotStats) ? CountCameras(floor) : null;
 
         var result = elements.Select(e => new
         {
@@ -448,6 +517,14 @@ public class LayoutApiController : ControllerBase
             e.ShowStatFree,
             e.ShowStatOccupied,
             e.ShowStatError,
+            e.StatsOrientation,
+            e.LabelFontSize,
+            e.StatFreeCamera,
+            e.StatOccupiedCamera,
+            e.StatErrorCamera,
+            e.StatFreeVars,
+            e.StatOccupiedVars,
+            e.StatErrorVars,
             e.BackgroundColor,
             e.BorderStyle,
             e.BorderColor,
@@ -493,7 +570,7 @@ public class LayoutApiController : ControllerBase
             e.Decimals,
             e.MinValue,
             e.MaxValue,
-            Stats = e.Type == LayoutElementType.SlotStats ? stats : null,
+            Stats = e.Type == LayoutElementType.SlotStats ? ComputeStats(floor, e, camCount) : null,
             Slot = e.Type == LayoutElementType.ParkingSlot && e.SlotId is not null &&
                    slotsById.TryGetValue(e.SlotId, out var slot)
                 ? new
@@ -578,6 +655,7 @@ public class LayoutApiController : ControllerBase
         ApplyExtendedProps(element, dto);
         ApplyBitProps(element, dto);
         ApplyValueProps(element, dto);
+        ApplyStatProps(element, dto);
 
         if (element.Type == LayoutElementType.ParkingSlot)
             _parking.EnsureSlot(dto.SlotId!, dto.Floor, dto.Zone);
@@ -616,6 +694,7 @@ public class LayoutApiController : ControllerBase
             ApplyExtendedProps(e, dto);
             ApplyBitProps(e, dto);
             ApplyValueProps(e, dto);
+            ApplyStatProps(e, dto);
         });
 
         return updated is null
