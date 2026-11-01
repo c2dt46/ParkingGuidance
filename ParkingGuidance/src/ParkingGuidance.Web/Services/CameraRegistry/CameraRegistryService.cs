@@ -1,3 +1,4 @@
+using ParkingGuidance.Web.Services.Project;
 using System.Collections.Concurrent;
 using ParkingGuidance.Web.Models;
 using ParkingGuidance.Web.Services.Persistence;
@@ -6,7 +7,7 @@ namespace ParkingGuidance.Web.Services.CameraRegistry;
 
 /// <summary>Lưu trữ danh sách camera vật lý đã khai báo — tự tải lại khi khởi động và tự lưu sau
 /// mỗi thay đổi qua IPersistenceService (file data/camera-registry.json).</summary>
-public class CameraRegistryService : ICameraRegistryService
+public class CameraRegistryService : ICameraRegistryService, IProjectScoped
 {
     private readonly ConcurrentDictionary<string, ManagedCamera> _cameras = new();
     private readonly IPersistenceService _persistence;
@@ -22,6 +23,12 @@ public class CameraRegistryService : ICameraRegistryService
     public CameraRegistryService(IPersistenceService persistence)
     {
         _persistence = persistence;
+        LoadFromDisk();
+    }
+
+    private void LoadFromDisk()
+    {
+        _cameras.Clear();
         var saved = _persistence.Load<List<ManagedCamera>>(StateKey);
         if (saved is not null)
         {
@@ -31,6 +38,11 @@ public class CameraRegistryService : ICameraRegistryService
             MigrateZoneNumbers();
         }
     }
+
+    // ---- IProjectScoped: lưu chung / mở dự án khác ----
+    public string ProjectPartName => "Camera";
+    public bool FlushProject() { lock (_lock) return _persistence.Commit(StateKey, _cameras.Values.ToList()); }
+    public void ReloadProject() { LoadFromDisk(); RaiseChanged(); }     // CameraIngestionService, biến MC... nghe Changed để dựng lại
 
     /// <summary>
     /// Dữ liệu cũ chưa có Zone: camera đã gán tầng được xếp vào Zone mặc định (1) — dữ liệu cũ vốn đã không trùng số trong cả tầng

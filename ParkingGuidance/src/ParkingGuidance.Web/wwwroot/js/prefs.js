@@ -9,7 +9,7 @@
 (function () {
     const KEY = 'pg.prefs';
     const API = '/api/system/ui-prefs';
-    const DEFAULTS = { theme: 'dark', lang: 'vi', font: 'segoe', size: 110, accent: '#3b82f6' };
+    const DEFAULTS = { theme: 'dark', lang: 'vi', font: 'segoe', size: 120, accent: '#3b82f6' };
     const VALUE_KEYS = Object.keys(DEFAULTS);
     const FONTS = {
         segoe:  '"Segoe UI", Roboto, sans-serif',

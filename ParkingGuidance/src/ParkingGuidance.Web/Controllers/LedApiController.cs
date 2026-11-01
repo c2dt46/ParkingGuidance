@@ -128,7 +128,7 @@ public class LedApiController : ControllerBase
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
         if (!ImageExtensions.Contains(ext)) return BadRequest(new { message = "Chỉ nhận ảnh: " + string.Join(", ", ImageExtensions) });
 
-        var dir = Path.Combine(_persistence.DataDirectory, "led-images");
+        var dir = _persistence.ProjectLedImagesDirectory;
         Directory.CreateDirectory(dir);
         var name = Guid.NewGuid().ToString("N") + ext;
         await using (var fs = System.IO.File.Create(Path.Combine(dir, name)))
@@ -140,7 +140,7 @@ public class LedApiController : ControllerBase
     public IActionResult GetImage(string name)
     {
         if (name != Path.GetFileName(name)) return BadRequest();
-        var full = Path.Combine(_persistence.DataDirectory, "led-images", name);
+        var full = Path.Combine(_persistence.ProjectLedImagesDirectory, name);
         if (!System.IO.File.Exists(full)) return NotFound();
         var type = Path.GetExtension(name).ToLowerInvariant() switch
         {

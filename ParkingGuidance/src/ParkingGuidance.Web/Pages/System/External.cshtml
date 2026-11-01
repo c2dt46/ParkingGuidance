@@ -16,12 +16,12 @@
 <section id="mbServerTab" class="panel mb-panel">
     <div class="hint small">
         <b>Chế độ Server</b>: chương trình mở các cổng TCP bên dưới; PLC / SCADA / thiết bị ngoài kết nối tới các cổng này để đọc / ghi dữ liệu.
-        Cổng mặc định của Modbus TCP là 502. Bấm <b>Lưu</b> là cổng được mở / đóng ngay. Chương trình trả lời lệnh đọc thanh ghi (03, 04) và ghi thanh ghi (06, 16)
+        Cổng mặc định của Modbus TCP là 502. Bấm <b>💾 Lưu</b> ở đầu menu trái (hoặc Ctrl+S) là cổng được mở / đóng ngay. Chương trình trả lời lệnh đọc thanh ghi (03, 04) và ghi thanh ghi (06, 16)
         trên bảng thanh ghi riêng của từng cổng (hiện toàn 0; dữ liệu cụ thể sẽ gán sau). Cần cho phép cổng trong tường lửa; Modbus không có xác thực nên chỉ dùng trong mạng tin cậy.
     </div>
     <div class="tg-toolbar">
         <button id="mbSvAdd" class="btn primary btn-sm"><span class="ico">➕</span> Thêm Server</button>
-        <button id="mbSvSave" class="btn secondary btn-sm"><span class="ico">💾</span> Lưu</button>
+        <button id="mbSvSave" hidden class="btn secondary btn-sm"><span class="ico">💾</span> Lưu</button>
         <span id="mbSvState" class="hint small" style="margin:0"></span>
     </div>
     <table class="data-table tg-table mb-table">
@@ -39,7 +39,7 @@
     </div>
     <div class="tg-toolbar">
         <button id="mbClAdd" class="btn primary btn-sm"><span class="ico">➕</span> Thêm Client</button>
-        <button id="mbClSave" class="btn secondary btn-sm"><span class="ico">💾</span> Lưu</button>
+        <button id="mbClSave" hidden class="btn secondary btn-sm"><span class="ico">💾</span> Lưu</button>
         <span id="mbClState" class="hint small" style="margin:0"></span>
     </div>
     <table class="data-table tg-table mb-table">

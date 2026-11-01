@@ -24,7 +24,13 @@ public enum LayoutElementType
     /// Đèn bit / Công tắc bit (kiểu Bit Lamp / Toggle Switch): hiển thị trạng thái 0/1 của 1 tag dạng bit
     /// (System tag hoặc Project tag kiểu Boolean) bằng hình ảnh theo trạng thái; ở chế độ Chạy, công tắc ghi giá trị về Project tag.
     /// </summary>
-    BitLampSwitch
+    BitLampSwitch,
+
+    /// <summary>
+    /// Số (Number): hiển thị hoặc NHẬP giá trị của 1 biến dạng số — System tag / Project tag (Integer, Real), biến MS, biến MC.
+    /// Số nguyên có thể "dời dấu chấm" (123 → 1.23). Chế độ nhập chỉ ghi được vào Project tag.
+    /// </summary>
+    Number
 }
 
 /// <summary>
@@ -117,7 +123,7 @@ public class LayoutElement
     /// <summary>"Lamp" = chỉ hiển thị trạng thái; "Switch" = hiển thị và bấm để ghi giá trị (chế độ Chạy).</summary>
     public string? BitMode { get; set; }
 
-    /// <summary>Tag bit dùng để HIỂN THỊ trạng thái (System tag Boolean hoặc Project tag Boolean).</summary>
+    /// <summary>Biến dùng để HIỂN THỊ. Đèn/Công tắc bit: tag Boolean (System hoặc Project). Text: biến bất kỳ (String/char/số...). Number: biến số (System/Project Integer·Real, MS, MC).</summary>
     public string? ReadTag { get; set; }
 
     /// <summary>true = ghi sang tag khác (<see cref="WriteTag"/>); false = ghi vào chính <see cref="ReadTag"/>. Tag ghi phải là Project tag (System tag chỉ đọc).</summary>
@@ -138,7 +144,59 @@ public class LayoutElement
     public string? StateImage0 { get; set; }
     public string? StateImage1 { get; set; }
 
+    // --- Đèn (Lamp) hiển thị trạng thái CẢM BIẾN / VỊ TRÍ ĐỖ CHỈ ĐỊNH TRÊN CAMERA (thay cho tag bit) ---
+
+    /// <summary>Nguồn dữ liệu của đèn: "Tag" (mặc định, tag bit 0/1) | "Sensor" (1 cảm biến MGT200/Keytop) | "CameraSlot" (1 vị trí đỗ đã vẽ trên camera).
+    /// Chỉ áp dụng cho chế độ Lamp; Sensor/CameraSlot có 4 trạng thái Đã đỗ / Còn trống / Lỗi / Chưa sử dụng.</summary>
+    public string? BitSource { get; set; }
+
+    /// <summary>Nguồn Sensor: số thứ tự thiết bị bắt đầu từ 0 (ZCU 0.. của MGT200, hoặc Keytop 0..).</summary>
+    public int SensorDevice { get; set; }
+
+    /// <summary>Nguồn Sensor: chỉ số cảm biến trong thiết bị, bắt đầu từ 0 — MGT200 = (Line−1)×32 + ID (0–159); Keytop = cảm biến−1 (0–59).</summary>
+    public int SensorIndex { get; set; }
+
+    /// <summary>Nguồn CameraSlot: Zone và số thứ tự vị trí nhận diện (cùng tầng với đối tượng). Khoá ô = "{tầng}-{zone}-{số}".</summary>
+    public string? LampZone { get; set; }
+    public string? LampPosition { get; set; }
+
+    /// <summary>Hình hiển thị theo 4 trạng thái của đèn Sensor/CameraSlot (null = vẽ chấm tròn mặc định theo màu).</summary>
+    public string? StateImageParked { get; set; }    // Đã đỗ
+    public string? StateImageFree { get; set; }      // Còn trống
+    public string? StateImageError { get; set; }     // Lỗi
+    public string? StateImageUnused { get; set; }    // Chưa sử dụng (chưa khai báo)
+
+    /// <summary>Chữ hiển thị theo 4 trạng thái (tab Label) của đèn Sensor/CameraSlot.</summary>
+    public string? StateTextParked { get; set; }
+    public string? StateTextFree { get; set; }
+    public string? StateTextError { get; set; }
+    public string? StateTextUnused { get; set; }
+
     /// <summary>Chữ hiển thị khi trạng thái = 0 / = 1 (tab Label).</summary>
     public string? StateText0 { get; set; }
     public string? StateText1 { get; set; }
+
+    // --- Text (gắn biến) / Number ---
+
+    /// <summary>Text / Number: chữ đặt TRƯỚC giá trị (vd "Tầng B1: ").</summary>
+    public string? Prefix { get; set; }
+
+    /// <summary>Text / Number: chữ đặt SAU giá trị — thường là đơn vị (vd " °C", " xe").</summary>
+    public string? Suffix { get; set; }
+
+    /// <summary>Text / Number: căn lề — "left" | "center" | "right". null = mặc định theo loại.</summary>
+    public string? TextAlign { get; set; }
+
+    /// <summary>Number: "Display" = chỉ hiển thị; "Input" = cho phép nhập (ở chế độ Chạy) và ghi về Project tag.</summary>
+    public string? ValueMode { get; set; }
+
+    /// <summary>Number (biến số nguyên): dời dấu chấm đi N lần sang trái khi hiển thị (1234 với N=2 → 12.34); khi nhập thì nhân lại 10^N. 0..9.</summary>
+    public int DecimalShift { get; set; }
+
+    /// <summary>Number: số chữ số sau dấu chấm khi hiển thị. null = tự động (số nguyên: bằng DecimalShift; số thực: giữ nguyên).</summary>
+    public int? Decimals { get; set; }
+
+    /// <summary>Number (chế độ nhập): giá trị nhỏ nhất / lớn nhất cho phép nhập, tính theo giá trị HIỂN THỊ (sau khi dời dấu chấm). null = không giới hạn.</summary>
+    public double? MinValue { get; set; }
+    public double? MaxValue { get; set; }
 }

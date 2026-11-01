@@ -1,3 +1,4 @@
+using ParkingGuidance.Web.Services.Project;
 using System.Collections.Concurrent;
 using ParkingGuidance.Web.Models;
 using ParkingGuidance.Web.Services.Persistence;
@@ -17,7 +18,7 @@ public interface IFloorService
 
 /// <summary>Lưu trữ danh sách mặt bằng — tự tải lại khi khởi động và tự lưu sau mỗi thay đổi
 /// qua IPersistenceService (file data/floors.json), không mất khi restart server.</summary>
-public class FloorService : IFloorService
+public class FloorService : IFloorService, IProjectScoped
 {
     private readonly ConcurrentDictionary<string, FloorPlan> _floors = new();
     private readonly IPersistenceService _persistence;
@@ -32,7 +33,12 @@ public class FloorService : IFloorService
     public FloorService(IPersistenceService persistence)
     {
         _persistence = persistence;
+        LoadFromDisk();
+    }
 
+    private void LoadFromDisk()
+    {
+        lock (_gate) _floors.Clear();
         var saved = _persistence.Load<List<FloorPlan>>(StateKey);
         if (saved is not null && saved.Count > 0)
         {
@@ -45,6 +51,11 @@ public class FloorService : IFloorService
         }
         lock (_gate) NormalizeStartup();
     }
+
+    // ---- IProjectScoped: lưu chung / mở dự án khác ----
+    public string ProjectPartName => "Mặt bằng";
+    public bool FlushProject() { lock (_gate) return _persistence.Commit(StateKey, _floors.Values.ToList()); }
+    public void ReloadProject() => LoadFromDisk();
 
     private void SaveState() => _persistence.Save(StateKey, _floors.Values.ToList());
 

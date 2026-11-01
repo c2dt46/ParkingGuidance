@@ -6,6 +6,7 @@
     <title>@ViewData["Title"] - Parking Guidance</title>
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
     <script src="~/js/prefs.js"></script>
+    <script src="~/js/projectBar.js" asp-append-version="true"></script>
     <script src="~/js/viewToggle.js"></script>
 </head>
 <body class="@ViewData["BodyClass"]">
@@ -22,6 +23,23 @@
                     <div class="brand-sub" data-i18n="brand.sub">Hướng dẫn đỗ xe</div>
                 </div>
             </div>
+
+            @* DỰ ÁN: nút LƯU chung (Ctrl+S) cho mọi phần cài đặt + Mở / Mới / Lưu thành. Dữ liệu dự án gom trong 1 thư mục; bản quyền, train... nằm riêng (hệ thống). *@
+            @* Ẩn với tài khoản User (cấp 3). Khi trang Giám sát ở chế độ Chạy (body.layout-run-mode) CSS cũng ẩn khối này; chế độ Build thì vẫn hiện. *@
+            @if (User.Identity?.IsAuthenticated == true && ParkingGuidance.Web.Services.Licensing.AccessLevel.Of(User) != ParkingGuidance.Web.Services.Licensing.AccessLevel.User)
+            {
+                <div class="project-box" id="pgProject">
+                    <div class="project-name" id="pgProjName">📁 …</div>
+                    <div class="project-path" id="pgProjPath"></div>
+                    <button type="button" id="pgSaveBtn" class="btn primary project-save" title="Lưu toàn bộ dự án (Ctrl+S)">💾 Lưu</button>
+                    <div class="project-actions">
+                        <button type="button" id="pgOpenBtn" class="btn secondary" title="Mở một dự án khác">📂 Mở</button>
+                        <button type="button" id="pgNewBtn" class="btn secondary" title="Tạo dự án mới (trống)">🆕 Mới</button>
+                        <button type="button" id="pgSaveAsBtn" class="btn secondary" title="Lưu dự án thành bản sao ở thư mục khác">📑 Lưu thành…</button>
+                    </div>
+                    <div class="project-state hint small" id="pgProjState"></div>
+                </div>
+            }
 
             <nav class="sidebar-nav">
                 <div class="nav-group" data-group="operate">

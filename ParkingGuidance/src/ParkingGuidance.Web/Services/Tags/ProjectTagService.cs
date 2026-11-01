@@ -1,3 +1,4 @@
+using ParkingGuidance.Web.Services.Project;
 using System.Text.RegularExpressions;
 using ParkingGuidance.Web.Models;
 using ParkingGuidance.Web.Services.Persistence;
@@ -21,7 +22,7 @@ public interface IProjectTagService
 /// Project tags do người dùng khai báo. Lưu ở data/project-tags.json.
 /// Độc lập với luồng chính: chỉ dùng IPersistenceService, mọi lỗi lưu/đọc đều bị chặn tại đây.
 /// </summary>
-public sealed class ProjectTagService : IProjectTagService
+public sealed class ProjectTagService : IProjectTagService, IProjectScoped
 {
     private const string StateKey = "project-tags";
     public const int MaxTags = 5000;
@@ -40,32 +41,47 @@ public sealed class ProjectTagService : IProjectTagService
         _persistence = persistence;
         _logger = logger;
         _tags = new List<ProjectTag>();
-        try
-        {
-            foreach (var t in _persistence.Load<List<ProjectTag>>(StateKey) ?? new())
-            {
-                if (t is null || !NameRx.IsMatch(t.Name ?? "")) continue;
-                if (SystemTagService.IsReserved(t.Name)) continue;
-                if (_tags.Any(x => x.Name.Equals(t.Name, StringComparison.OrdinalIgnoreCase))) continue;
-                TagValue.TryNormalize(t.Type, t.Value, out var v, out _);
-                _tags.Add(new ProjectTag
-                {
-                    Name = t.Name, Type = t.Type, Value = v,
-                    Description = (t.Description ?? "").Trim(),
-                    Scope = NormalizeScope(t.Scope)
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Không đọc được Project tags; dùng danh sách trống.");
-        }
+        LoadFromDisk();
     }
 
     public IReadOnlyList<ProjectTag> GetAll()
     {
         lock (_lock) return _tags.Select(t => t.Clone()).ToList();
     }
+
+    private void LoadFromDisk()
+    {
+        lock (_lock)
+        {
+            _tags.Clear();
+            try
+            {
+                foreach (var t in _persistence.Load<List<ProjectTag>>(StateKey) ?? new())
+                {
+                    if (t is null || !NameRx.IsMatch(t.Name ?? "")) continue;
+                    if (SystemTagService.IsReserved(t.Name)) continue;
+                    if (_tags.Any(x => x.Name.Equals(t.Name, StringComparison.OrdinalIgnoreCase))) continue;
+                    TagValue.TryNormalize(t.Type, t.Value, out var v, out _);
+                    _tags.Add(new ProjectTag
+                    {
+                        Name = t.Name, Type = t.Type, Value = v,
+                        Description = (t.Description ?? "").Trim(),
+                        Scope = NormalizeScope(t.Scope)
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Không đọc được Project tags; dùng danh sách trống.");
+            }
+
+        }
+    }
+
+    // ---- IProjectScoped: lưu chung / mở dự án khác ----
+    public string ProjectPartName => "Project tags";
+    public bool FlushProject() { lock (_lock) return _persistence.Commit(StateKey, _tags); }
+    public void ReloadProject() { LoadFromDisk(); }
 
     public ProjectTag? Get(string name)
     {

@@ -1,3 +1,4 @@
+using ParkingGuidance.Web.Services.Project;
 using System.Collections.Concurrent;
 using ParkingGuidance.Web.Models;
 using ParkingGuidance.Web.Services.Persistence;
@@ -18,7 +19,7 @@ public interface ILayoutService
 
 /// <summary>Lưu trữ các đối tượng layout — tự tải lại khi khởi động và tự lưu sau mỗi thay đổi
 /// qua IPersistenceService (file data/layout-elements.json), không mất khi restart server.</summary>
-public class LayoutService : ILayoutService
+public class LayoutService : ILayoutService, IProjectScoped
 {
     private readonly ConcurrentDictionary<string, LayoutElement> _elements = new();
     private readonly IPersistenceService _persistence;
@@ -27,7 +28,12 @@ public class LayoutService : ILayoutService
     public LayoutService(IPersistenceService persistence)
     {
         _persistence = persistence;
+        LoadFromDisk();
+    }
 
+    private void LoadFromDisk()
+    {
+        _elements.Clear();
         var saved = _persistence.Load<List<LayoutElement>>(StateKey);
         if (saved is not null)
         {
@@ -36,6 +42,11 @@ public class LayoutService : ILayoutService
             MigrateSlotKeys();
         }
     }
+
+    // ---- IProjectScoped: lưu chung / mở dự án khác ----
+    public string ProjectPartName => "Layout";
+    public bool FlushProject() => _persistence.Commit(StateKey, _elements.Values.ToList());
+    public void ReloadProject() => LoadFromDisk();
 
     /// <summary>Đối tượng vùng nhận diện cũ trỏ tới khoá ô kiểu cũ ("1", "B1-001", "B1-1"...) → khoá mới "{tầng}-{zone}-{số}" với Zone mặc định
     /// (cùng quy tắc với ParkingService). Khoá đã ở dạng mới được giữ nguyên.</summary>
@@ -89,7 +100,8 @@ public class LayoutService : ILayoutService
                 if (_elements.TryRemove(el.Id, out var removed))
                 {
                     changed = true;
-                    foreach (var u in new[] { removed.ImageUrl, removed.StateImage0, removed.StateImage1 })
+                    foreach (var u in new[] { removed.ImageUrl, removed.StateImage0, removed.StateImage1,
+                                              removed.StateImageParked, removed.StateImageFree, removed.StateImageError, removed.StateImageUnused })
                         if (!string.IsNullOrWhiteSpace(u)) urls.Add(u!);
                 }
             }
@@ -105,7 +117,8 @@ public class LayoutService : ILayoutService
 
         // Chi tra ve anh KHONG con doi tuong nao (o mat bang khac) dung chung, de khong xoa nham file dang duoc dung
         var stillUsed = _elements.Values
-            .SelectMany(e => new[] { e.ImageUrl, e.StateImage0, e.StateImage1 })
+            .SelectMany(e => new[] { e.ImageUrl, e.StateImage0, e.StateImage1,
+                             e.StateImageParked, e.StateImageFree, e.StateImageError, e.StateImageUnused })
             .Where(u => !string.IsNullOrWhiteSpace(u))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         return urls.Where(u => !stillUsed.Contains(u)).Distinct().ToList();

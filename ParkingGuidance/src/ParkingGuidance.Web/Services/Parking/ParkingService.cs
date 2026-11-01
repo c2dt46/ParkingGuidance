@@ -1,3 +1,4 @@
+using ParkingGuidance.Web.Services.Project;
 using System.Collections.Concurrent;
 using ParkingGuidance.Web.Models;
 using ParkingGuidance.Web.Services.Persistence;
@@ -8,7 +9,7 @@ namespace ParkingGuidance.Web.Services.Parking;
 /// Lưu trữ trạng thái bãi xe trong bộ nhớ (in-memory). Phù hợp cho demo/khởi đầu;
 /// khi triển khai thật nên thay bằng EF Core + cơ sở dữ liệu (SQL Server/PostgreSQL...).
 /// </summary>
-public class ParkingService : IParkingService
+public class ParkingService : IParkingService, IProjectScoped
 {
     private readonly ConcurrentDictionary<string, ParkingSlot> _slots = new();
     private readonly ConcurrentDictionary<string, CameraDevice> _cameras = new();
@@ -46,6 +47,45 @@ public class ParkingService : IParkingService
         foreach (var session in snapshot.ActiveSessions) _activeSessions[session.SlotId] = session;
         _history.AddRange(snapshot.History);
         foreach (var evt in snapshot.Events) _events.Enqueue(evt);
+    }
+
+    // ---- IProjectScoped: lưu chung / mở dự án khác ----
+    public string ProjectPartName => "Bãi xe";
+
+    public bool FlushProject()
+    {
+        lock (_lock)
+        {
+            return _persistence.Commit(StateKey, new ParkingStateSnapshot
+            {
+                Slots = _slots.Values.ToList(),
+                Cameras = _cameras.Values.ToList(),
+                Leds = _leds.Values.ToList(),
+                ActiveSessions = _activeSessions.Values.ToList(),
+                History = _history.ToList(),
+                Events = _events.ToList()
+            });
+        }
+    }
+
+    public void ReloadProject()
+    {
+        lock (_lock)
+        {
+            _slots.Clear(); _cameras.Clear(); _leds.Clear(); _activeSessions.Clear(); _history.Clear();
+            while (_events.TryDequeue(out _)) { }
+            _trackers.Clear();
+            _vacancyMisses.Clear();
+
+            var saved = _persistence.Load<ParkingStateSnapshot>(StateKey);
+            if (saved is not null)
+            {
+                Restore(saved);
+                PurgeLegacyDemoData();
+                MigrateSlotKeys();
+            }
+        }
+        try { StateChanged?.Invoke(); } catch { /* trình nghe lỗi không được làm hỏng việc mở dự án */ }
     }
 
     public event Action? StateChanged;

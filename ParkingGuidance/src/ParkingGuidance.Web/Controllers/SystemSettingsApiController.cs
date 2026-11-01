@@ -30,7 +30,7 @@ public class SystemSettingsApiController : ControllerBase
 
     /// <summary>Cài đặt chung đang áp dụng + thư mục lưu dữ liệu.</summary>
     [HttpGet("settings")]
-    public IActionResult GetSettings() => Ok(new { settings = _settings.Current, dataDirectory = _persistence.DataDirectory });
+    public IActionResult GetSettings() => Ok(new { settings = _settings.Current, dataDirectory = _persistence.DataDirectory, projectDirectory = _persistence.ProjectDirectory });
 
     /// <summary>Lưu cài đặt chung xuống đĩa; có hiệu lực ngay (các vòng lặp nền đọc lại ở lần kế tiếp).</summary>
     [HttpPut("settings")]
@@ -57,7 +57,7 @@ public class SystemSettingsApiController : ControllerBase
         dto.PlateFullSearch ??= _settings.Current.PlateFullSearch;
         dto.PlateBoxMode ??= _settings.Current.PlateBoxMode;
         dto.PlateBoxOffsetPercent ??= _settings.Current.PlateBoxOffsetPercent;
-        return Ok(new { settings = _settings.Update(dto), dataDirectory = _persistence.DataDirectory });
+        return Ok(new { settings = _settings.Update(dto), dataDirectory = _persistence.DataDirectory, projectDirectory = _persistence.ProjectDirectory });
     }
 
     /// <summary>Giao diện dùng chung cho mọi máy (các máy ở chế độ "Mọi máy" tự lấy giá trị này mỗi khi mở trang).</summary>

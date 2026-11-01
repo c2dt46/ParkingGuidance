@@ -148,6 +148,7 @@ async function loadLayout() {
     if (live) { clearTimeout(live.timer); live = null; }
     pending = null;
     renderLayout();
+    refreshLampStates();
     syncDisplayBar();
     if (selectedId && elements.some(x => x.id === selectedId)) selectElement(selectedId);
     else if (propsOpen) { selectedId = null; propsPanel.innerHTML = EMPTY_PROPS_HTML; }
@@ -193,8 +194,8 @@ function buildElementNode(el) {
             break;
 
         case 'Text':
-            div.classList.add('as-text');
-            div.textContent = el.content || 'Text';
+        case 'Number':
+            renderValueNode(div, el);      // Text (co the gan bien) / Number: gia tri bien cap nhat gan realtime
             break;
 
         case 'Rectangle':
@@ -343,6 +344,27 @@ const bitModeOf = (el) => el.bitMode === 'Lamp' ? 'Lamp' : 'Switch';
 const bitStyleOf = (el) => ['SetOn', 'SetOff', 'Toggle', 'Momentary'].includes(el.switchStyle) ? el.switchStyle : 'Toggle';
 const bitWriteTagOf = (el) => el.separateWriteTag ? el.writeTag : el.readTag;
 
+// ---- Den (Lamp) nguon CAM BIEN / VI TRI DO CHI DINH TREN CAMERA: 4 trang thai Da do / Con trong / Loi / Chua su dung ----
+const LAMP_STATES = ['Parked', 'Free', 'Error', 'Unused'];
+const LAMP_LABEL = { Parked: 'Đã đỗ', Free: 'Còn trống', Error: 'Lỗi', Unused: 'Chưa sử dụng' };
+const LAMP_POLL_MS = 1000;
+let lampStates = {};           // id doi tuong -> 'Parked' | 'Free' | 'Error' | 'Unused' (may chu tinh); thieu = chua co du lieu
+let sensorMeta = null;         // { type: 'Pm200'|'Keytop', deviceCount, sensorsPerDevice, devices[] } - tu /api/system/sensors/status (nap khi mo panel)
+
+const bitSourceOf = (el) => bitModeOf(el) === 'Lamp' && (el.bitSource === 'Sensor' || el.bitSource === 'CameraSlot') ? el.bitSource : 'Tag';
+const lampStateOf = (el) => LAMP_STATES.includes(lampStates[el.id]) ? lampStates[el.id] : null;
+const bitSigOf = (el) => bitSourceOf(el) === 'Tag' ? String(bitLogical(el)) : 'L:' + (lampStateOf(el) ?? 'null');
+
+// Mo ta nguon cua den (hien o tooltip): "ZCU 0 · CN2 · ID 5" / "Vị trí 5 (Zone 2)"
+function lampSourceText(el) {
+    if (bitSourceOf(el) === 'Sensor') {
+        const d = el.sensorDevice ?? 0, i = el.sensorIndex ?? 0;
+        if (sensorMeta?.type === 'Keytop') return `Keytop ${d} · cảm biến ${i + 1}`;
+        return `ZCU ${d} · CN${Math.floor(i / 32) + 1} · ID ${i % 32}`;
+    }
+    return el.lampPosition ? `Vị trí ${el.lampPosition}${el.lampZone ? ` (Zone ${el.lampZone})` : ''}` : 'Chưa chọn vị trí';
+}
+
 // Trang thai hien thi (da tinh "Dao tin hieu"): 1 / 0; null = chua chon tag hoac khong doc duoc
 function bitLogical(el) {
     if (!el.readTag) return null;
@@ -351,7 +373,29 @@ function bitLogical(el) {
     return (raw ? 1 : 0) ^ (el.invertSignal ? 1 : 0);
 }
 
+function renderLampStateNode(div, el) {
+    const st = lampStateOf(el);                       // null = chua co du lieu (lan doc dau chua ve)
+    const img = st ? el['stateImage' + st] : null;
+    const text = st ? el['stateText' + st] : null;
+    const face = img
+        ? `<img class="bit-img" src="${escHtml(img)}" alt="" draggable="false" />`
+        : '<span class="bit-lamp-dot"></span>';
+
+    div.classList.add('as-bit', 'bit-lamp', 'bit-state-lamp');
+    div.classList.remove('bit-switch', 'has-action', 'bit-on', 'bit-off');
+    div.classList.toggle('bit-unknown', st === null);
+    LAMP_STATES.forEach(k => div.classList.toggle('bit-s-' + k.toLowerCase(), st === k));
+    div.innerHTML = `<div class="bit-face">${face}</div>${text ? `<div class="bit-text">${escHtml(text)}</div>` : ''}`;
+    div.dataset.bitSig = bitSigOf(el);
+
+    const what = bitSourceOf(el) === 'Sensor' ? 'Cảm biến' : 'Vị trí đỗ (camera)';
+    div.title = (el.comment ? el.comment + ' — ' : '') + `${what} ${lampSourceText(el)}: ${st ? LAMP_LABEL[st] : 'chưa có dữ liệu'}`;
+    applyCommonStyle(div, el);
+}
+
 function renderBitNode(div, el) {
+    if (bitSourceOf(el) !== 'Tag') { renderLampStateNode(div, el); return; }
+    div.classList.remove('bit-state-lamp', ...LAMP_STATES.map(k => 'bit-s-' + k.toLowerCase()));
     const st = bitLogical(el);
     const mode = bitModeOf(el);
     const img = st === 1 ? el.stateImage1 : el.stateImage0;
@@ -370,7 +414,7 @@ function renderBitNode(div, el) {
     div.classList.toggle('bit-unknown', st === null);
     div.classList.toggle('has-action', mode === 'Switch');
     div.innerHTML = `<div class="bit-face">${face}</div>${text ? `<div class="bit-text">${escHtml(text)}</div>` : ''}`;
-    div.dataset.bitSig = String(st);
+    div.dataset.bitSig = bitSigOf(el);
 
     const tagInfo = !el.readTag ? 'Chưa chọn tag'
         : st === null ? `Tag "${el.readTag}" không tồn tại hoặc không phải Boolean`
@@ -384,7 +428,7 @@ function updateBitNodes() {
     elements.forEach(el => {
         if (el.type !== 'BitLampSwitch') return;
         const node = canvas.querySelector(`.layout-el[data-id="${el.id}"]`);
-        if (!node || node.dataset.bitSig === String(bitLogical(el))) return;
+        if (!node || node.dataset.bitSig === bitSigOf(el)) return;
         renderBitNode(node, el);
     });
 }
@@ -392,7 +436,7 @@ function updateBitNodes() {
 async function pollBits() {
     try {
         if (!document.hidden) {
-            const names = [...new Set(elements.filter(e => e.type === 'BitLampSwitch' && e.readTag).map(e => e.readTag))];
+            const names = [...new Set(elements.filter(e => e.type === 'BitLampSwitch' && bitSourceOf(e) === 'Tag' && e.readTag).map(e => e.readTag))];
             if (names.length) {
                 const next = {};
                 for (let i = 0; i < names.length; i += 64) {     // may chu nhan toi da 64 ten moi lan
@@ -411,6 +455,21 @@ async function pollBits() {
         }
     } catch { /* mat ket noi tam thoi: giu trang thai cu, lan sau thu lai */ }
     setTimeout(pollBits, BIT_POLL_MS);
+}
+
+// Trang thai den nguon Cam bien / Vi tri do tren camera: may chu tinh san (cam bien that + o do theo camera)
+async function refreshLampStates() {
+    if (!elements.some(e => e.type === 'BitLampSwitch' && bitSourceOf(e) !== 'Tag')) return;
+    try {
+        const r = await fetch(`/api/layout/lamp-states?floor=${encodeURIComponent(CURRENT_FLOOR)}`, { cache: 'no-store' });
+        if (!r.ok) throw new Error('lamp-states ' + r.status);
+        lampStates = await r.json();
+        updateBitNodes();
+    } catch { /* mat ket noi tam thoi: giu trang thai cu, lan sau thu lai */ }
+}
+async function pollLampStates() {
+    if (!document.hidden) await refreshLampStates();
+    setTimeout(pollLampStates, LAMP_POLL_MS);
 }
 
 function sendBit(tag, raw) {
@@ -512,6 +571,401 @@ window.addEventListener('pagehide', () => {
 });
 
 // Cap nhat TAI CHO du lieu trang thai cac vung (khong ve lai ca ban do, khong lam mat lua chon/keo-tha dang dien ra)
+// ---------------------------------------------------------------------------
+// Text gan bien + Number (hien thi / nhap): System tag, Project tag, bien MS, bien MC
+// ---------------------------------------------------------------------------
+let valStates = {};            // ten (chu thuong) -> { v: 'chuoi', t: 'Integer'|'Real'|'Boolean'|'String' }; thieu = chua doc duoc / khong ton tai
+let varCatalog = [];           // danh muc bien chon duoc: { name, source, type, writable, description }
+const valLocal = {};           // ten -> { st, until }: gia tri vua nhap, giu tam de tranh nhap nhay
+const VAL_POLL_MS = 300;
+const valKey = (n) => String(n || '').toLowerCase();
+const numModeOf = (el) => el.valueMode === 'Input' ? 'Input' : 'Display';
+const numWriteTagOf = (el) => el.separateWriteTag ? el.writeTag : el.readTag;
+const varInfo = (name) => varCatalog.find(v => valKey(v.name) === valKey(name));
+
+async function loadVarCatalog() {
+    try {
+        const r = await fetch('/api/tasks/tags/variables', { cache: 'no-store' });
+        if (r.ok) varCatalog = await r.json();
+    } catch { /* giu danh muc cu */ }
+}
+
+// 1234 voi shift 2 -> "12.34" (xu ly bang chuoi de khong sai so voi so nguyen lon)
+function shiftIntString(raw, shift) {
+    const m = /^(-?)(\d+)$/.exec(raw);
+    if (!m) return raw;
+    let digits = m[2].replace(/^0+(?=\d)/, '');
+    if (digits.length <= shift) digits = '0'.repeat(shift - digits.length + 1) + digits;
+    return m[1] + digits.slice(0, digits.length - shift) + '.' + digits.slice(digits.length - shift);
+}
+
+// Gia tri da dinh dang (chua kem tien to / hau to) cua bien so; null = chua co gia tri
+function formatNumberBody(el, st) {
+    if (!st) return null;
+    const raw = String(st.v ?? '').trim();
+    const dec = el.decimals;
+    const hasDec = dec !== null && dec !== undefined;
+    if (st.t === 'Integer') {
+        const shift = Math.max(0, Math.min(9, el.decimalShift || 0));
+        if (!hasDec) return shift > 0 ? shiftIntString(raw, shift) : raw;
+        const n = Number(raw) / Math.pow(10, shift);
+        return Number.isFinite(n) ? n.toFixed(Math.max(0, Math.min(9, dec))) : raw;
+    }
+    if (st.t === 'Real') {
+        const n = Number(raw);
+        if (!Number.isFinite(n)) return raw;
+        return hasDec ? n.toFixed(Math.max(0, Math.min(9, dec))) : String(n);
+    }
+    return raw;
+}
+
+function valueBodyText(el) {
+    const st = el.readTag ? valStates[valKey(el.readTag)] : undefined;
+    if (el.type === 'Number') return formatNumberBody(el, st);          // null = chua co
+    if (!el.readTag) return el.content || 'Text';                        // Text khong gan bien: chu co dinh nhu truoc
+    return st ? String(st.v ?? '') : null;
+}
+
+function valueFullText(el) {
+    const body = valueBodyText(el);
+    if (el.type === 'Text' && !el.readTag) return body;
+    return (el.prefix || '') + (body === null ? '—' : body) + (el.suffix || '');
+}
+
+function numCanWrite(el) {
+    const tag = numWriteTagOf(el);
+    if (!tag) return false;
+    const info = varInfo(tag);
+    return info ? !!info.writable : true;       // chua tai duoc danh muc: de may chu tu choi neu sai
+}
+
+function renderValueNode(div, el) {
+    const isNum = el.type === 'Number';
+    const inputMode = isNum && numModeOf(el) === 'Input';
+    const asField = inputMode && !editMode;                  // o nhap that chi o che do Chay (che do Build de keo-tha)
+    div.classList.add(isNum ? 'as-number' : 'as-text');
+    div.classList.toggle('num-input', inputMode);
+    div.classList.toggle('num-readonly', asField && !numCanWrite(el));
+    div.classList.toggle('val-missing', !!el.readTag && valueBodyText(el) === null);
+    const jc = { left: 'flex-start', right: 'flex-end', center: 'center' }[el.textAlign];
+    // .layout-el là flex dạng cột: Text căn ngang bằng align-items; Number (hàng) bằng justify-content
+    if (isNum) { div.style.justifyContent = jc || 'center'; div.style.alignItems = 'center'; }
+    else { div.style.alignItems = jc || ''; }
+    div.style.textAlign = el.textAlign || '';
+
+    const full = valueFullText(el);
+    div.dataset.valSig = full + '|' + (asField ? 'i' : 'd');
+
+    if (asField) {
+        const body = valueBodyText(el);
+        const ro = !numCanWrite(el);
+        div.innerHTML = `${el.prefix ? `<span class="num-affix">${escHtml(el.prefix)}</span>` : ''}` +
+            `<input class="num-field" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" ${ro ? 'readonly' : ''} value="${escHtml(body ?? '')}" />` +
+            `${el.suffix ? `<span class="num-affix">${escHtml(el.suffix)}</span>` : ''}`;
+        const inp = div.querySelector('input');
+        // Phim / chuot / cham trong o nhap KHONG duoc lan ra ngoai: phim ESC o ngoai se thoat che do Chay, chuot ngoai la keo-tha doi tuong...
+        ['keydown', 'keyup', 'keypress', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'pointerdown']
+            .forEach(ev => inp.addEventListener(ev, (e) => e.stopPropagation()));
+        inp.addEventListener('beforeinput', (e) => { if (e.data && /[^0-9.,\-]/.test(e.data)) e.preventDefault(); });   // chi so, dau am, dau cham/phay
+        inp.addEventListener('focus', () => inp.select());
+        inp.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+            else if (e.key === 'Escape') { inp.value = valueBodyText(el) ?? ''; inp.blur(); }
+        });
+        inp.addEventListener('change', () => commitNumberInput(el, div, inp));
+        if (ro) inp.title = 'Biến này chỉ đọc (System tag / biến MS / biến MC) nên không nhập được. Hãy chọn Project tag.';
+    } else {
+        div.textContent = full;
+    }
+
+    const info = !el.readTag ? (isNum ? 'Chưa chọn biến' : 'Text cố định')
+        : valueBodyText(el) === null ? `Biến "${el.readTag}" không tồn tại hoặc chưa có giá trị`
+        : `${el.readTag} = ${valStates[valKey(el.readTag)]?.v}`;
+    div.title = (el.comment ? el.comment + ' — ' : '') + info;
+}
+
+// Nhap so -> doi nguoc "doi dau cham" -> ghi ve Project tag
+async function commitNumberInput(el, div, inp) {
+    const revert = () => { inp.value = valueBodyText(el) ?? ''; };
+    const tag = numWriteTagOf(el);
+    if (!tag) { bitFlashError(el.id, 'Chưa chọn biến để ghi'); revert(); return; }
+    const txt = inp.value.trim().replace(',', '.');
+    if (txt === '') { revert(); return; }
+    let v = Number(txt);
+    if (!Number.isFinite(v)) { bitFlashError(el.id, 'Giá trị không phải là số'); revert(); return; }
+    if (el.minValue !== null && el.minValue !== undefined && v < el.minValue) v = el.minValue;
+    if (el.maxValue !== null && el.maxValue !== undefined && v > el.maxValue) v = el.maxValue;
+
+    const type = (varInfo(tag)?.type) || valStates[valKey(tag)]?.t || 'Real';
+    let raw;
+    if (type === 'Integer') raw = String(Math.round(v * Math.pow(10, Math.max(0, Math.min(9, el.decimalShift || 0)))));
+    else if (type === 'Boolean') raw = v ? '1' : '0';
+    else raw = String(v);
+
+    const k = valKey(tag);
+    const st = { v: raw, t: type };
+    valStates[k] = st;                                       // hien ngay, khong cho vong doc ke tiep
+    valLocal[k] = { st, until: Date.now() + 800 };
+    try {
+        const r = await sendBit(tag, raw);
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            delete valLocal[k];
+            bitFlashError(el.id, err.message || `Không ghi được ${tag}`);
+            revert();
+            return;
+        }
+        valLocal[k] = { st, until: Date.now() + 300 };
+    } catch {
+        delete valLocal[k];
+        bitFlashError(el.id, `Không ghi được ${tag} (mất kết nối)`);
+        revert();
+        return;
+    }
+    updateValueNodes(true);
+}
+
+function isValueEl(e) { return e.type === 'Number' || (e.type === 'Text' && e.readTag); }
+
+// Chi ve lai doi tuong nao doi gia tri (khong thay node; khong dong vao o nhap dang go)
+function updateValueNodes(force) {
+    elements.forEach(el => {
+        if (!isValueEl(el)) return;
+        const node = canvas.querySelector(`.layout-el[data-id="${el.id}"]`);
+        if (!node) return;
+        if (node.contains(document.activeElement) && !force) return;
+        const asField = el.type === 'Number' && numModeOf(el) === 'Input' && !editMode;
+        if (node.dataset.valSig === valueFullText(el) + '|' + (asField ? 'i' : 'd')) return;
+        renderValueNode(node, el);
+    });
+}
+
+async function pollValues() {
+    try {
+        if (!document.hidden) {
+            const names = [...new Set(elements.filter(isValueEl).filter(e => e.readTag).map(e => e.readTag))];
+            if (names.length) {
+                const next = {};
+                for (let i = 0; i < names.length; i += 64) {
+                    const r = await fetch(`/api/tasks/tags/variable-values?names=${encodeURIComponent(names.slice(i, i + 64).join(','))}`, { cache: 'no-store' });
+                    if (!r.ok) throw new Error('variable-values ' + r.status);
+                    const data = await r.json();
+                    Object.entries(data.values || {}).forEach(([k, o]) => { next[valKey(k)] = { v: o.v, t: o.t }; });
+                }
+                const now = Date.now();
+                Object.entries(valLocal).forEach(([k, l]) => { if (l.until > now) next[k] = l.st; else delete valLocal[k]; });
+                valStates = next;
+                updateValueNodes();
+            }
+        }
+    } catch { /* mat ket noi tam thoi: giu gia tri cu, lan sau thu lai */ }
+    setTimeout(pollValues, VAL_POLL_MS);
+}
+
+// ---- Panel thuoc tinh: chon bien ----
+function varSelectHtml(id, selected, filter, noneLabel) {
+    const groups = { System: [], Project: [], MS: [], MC: [] };
+    varCatalog.filter(filter).forEach(v => (groups[v.source] || (groups[v.source] = [])).push(v));
+    const labels = { System: 'System tags', Project: 'Project tags', MS: 'Biến MS (cảm biến)', MC: 'Biến MC (camera)' };
+    let html = `<option value="">${noneLabel}</option>`;
+    let known = !selected;
+    Object.keys(groups).forEach(g => {
+        if (!groups[g].length) return;
+        html += `<optgroup label="${labels[g] || g}">` + groups[g].map(v => {
+            const sel = valKey(v.name) === valKey(selected);
+            if (sel) known = true;
+            return `<option value="${escHtml(v.name)}" ${sel ? 'selected' : ''}>${escHtml(v.name)} · ${v.type}${v.description ? ' — ' + escHtml(v.description) : ''}</option>`;
+        }).join('') + '</optgroup>';
+    });
+    if (!known) html += `<option value="${escHtml(selected)}" selected>${escHtml(selected)} (không còn tồn tại / không phù hợp)</option>`;
+    return `<select id="${id}">${html}</select>`;
+}
+
+const isNumericVar = (v) => v.type === 'Integer' || v.type === 'Real';
+
+function alignSelectHtml(el, def) {
+    const cur = el.textAlign || def;
+    const o = (v, text) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${text}</option>`;
+    return `<select id="propAlign">${o('left', 'Trái')}${o('center', 'Giữa')}${o('right', 'Phải')}</select>`;
+}
+
+function fontFieldsHtml(el) {
+    return `
+        <div class="prop-grid-2">
+            <div class="prop-field"><label>Màu chữ</label>
+                <input id="propTextColor" type="color" value="${escHtml(el.textColor || '#e6ebf5')}" /></div>
+            <div class="prop-field"><label>Cỡ chữ (px)</label>
+                <input id="propFontSize" type="number" min="1" max="200" step="1" placeholder="mặc định" value="${el.fontSize ?? ''}" /></div>
+        </div>`;
+}
+
+function applyFontFromForm(el) {
+    const tc = document.getElementById('propTextColor').value;
+    el.textColor = (tc.toLowerCase() !== '#e6ebf5' || el.textColor) ? tc : null;
+    const fs = parseFloat(document.getElementById('propFontSize').value);
+    el.fontSize = Number.isFinite(fs) && fs > 0 ? fs : null;
+}
+
+const clampInt = (v, lo, hi) => Math.max(lo, Math.min(hi, parseInt(v, 10) || 0));
+const numOrNull = (id) => { const x = parseFloat(document.getElementById(id).value); return Number.isFinite(x) ? x : null; };
+
+async function renderTextProps(el) {
+    await loadVarCatalog();
+    if (selectedId !== el.id) return;
+    propsPanel.innerHTML = `
+        <h3>${typeLabel(el.type)}</h3>
+        <div class="prop-section-title">Biến hiển thị (tuỳ chọn)</div>
+        <div class="prop-field"><label>Biến — String / char / số… (System, Project, MS, MC)</label>
+            ${varSelectHtml('propReadTag', el.readTag, () => true, '— không gắn biến (chữ cố định) —')}</div>
+        <p class="hint small">Gắn biến thì Text hiển thị giá trị hiện tại của biến (cập nhật liên tục). Biến dạng String/char hiển thị nguyên văn; biến số hiển thị dạng chữ. "Nội dung" bên dưới chỉ dùng khi không gắn biến.</p>
+        <div class="prop-field"><label>Nội dung (khi không gắn biến)</label>
+            <textarea id="propContent" rows="2">${escHtml(el.content)}</textarea></div>
+        <div class="prop-grid-2">
+            <div class="prop-field"><label>Chữ đứng trước giá trị</label>
+                <input id="propPrefix" type="text" maxlength="32" value="${escHtml(el.prefix)}" /></div>
+            <div class="prop-field"><label>Chữ đứng sau giá trị</label>
+                <input id="propSuffix" type="text" maxlength="32" value="${escHtml(el.suffix)}" /></div>
+        </div>
+        <div class="prop-field"><label>Căn lề</label>${alignSelectHtml(el, 'center')}</div>
+        ${fontFieldsHtml(el)}
+        <div class="prop-field"><label>Ghi chú (chỉ để nhận biết, không hiển thị)</label>
+            <input id="propComment" type="text" maxlength="200" value="${escHtml(el.comment)}" /></div>
+        ${positionFieldsHtml(el)}
+        ${styleFieldsHtml(el)}
+        ${effectsFieldsHtml(el)}
+        ${DIRTY_NOTE_HTML}
+        <div class="prop-actions">
+            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
+            <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
+        </div>
+    `;
+    bindEffectsButtons();
+
+    const applyForm = (el) => {
+        el.readTag = document.getElementById('propReadTag').value || null;
+        el.content = document.getElementById('propContent').value;
+        el.prefix = document.getElementById('propPrefix').value || null;
+        el.suffix = document.getElementById('propSuffix').value || null;
+        el.textAlign = document.getElementById('propAlign').value || null;
+        el.comment = document.getElementById('propComment').value || null;
+        applyFontFromForm(el);
+        applyPositionFieldsFromForm(el);
+        applyStyleFieldsFromForm(el);
+        applyEffectsFromForm(el);
+    };
+    bindLivePreview(el, applyForm);
+    document.getElementById('savePropsBtn').addEventListener('click', async () => { applyForm(el); await persistAndRefresh(el); });
+    document.getElementById('deleteElBtn').addEventListener('click', () => deleteElement(el.id));
+    fitPropsDialog();
+}
+
+async function renderNumberProps(el) {
+    await loadVarCatalog();
+    if (selectedId !== el.id) return;
+    const mode = numModeOf(el);
+    propsPanel.innerHTML = `
+        <h3>${typeLabel(el.type)}</h3>
+        <div class="prop-section-title">Biến</div>
+        <div class="prop-field"><label>Biến số (Integer / Real — System, Project, MS, MC)</label>
+            ${varSelectHtml('propReadTag', el.readTag, isNumericVar, '— chọn biến —')}</div>
+        <div class="prop-field"><label>Chế độ</label>
+            <select id="propValueMode">
+                <option value="Display" ${mode === 'Display' ? 'selected' : ''}>Chỉ hiển thị</option>
+                <option value="Input" ${mode === 'Input' ? 'selected' : ''}>Cho phép nhập (ở chế độ Chạy)</option>
+            </select></div>
+        <div id="numInputBox" ${mode === 'Input' ? '' : 'hidden'}>
+            <label class="checkbox-label" style="margin:2px 0 8px;">
+                <input type="checkbox" id="propSepWrite" ${el.separateWriteTag ? 'checked' : ''} />
+                Ghi vào biến khác (không ghi vào chính biến hiển thị)
+            </label>
+            <div class="prop-field" id="numWriteBox" ${el.separateWriteTag ? '' : 'hidden'}><label>Biến để ghi (chỉ Project tag)</label>
+                ${varSelectHtml('propWriteTag', el.writeTag, v => v.writable && isNumericVar(v), '— chọn biến —')}</div>
+            <div class="prop-grid-2">
+                <div class="prop-field"><label>Nhỏ nhất cho phép</label>
+                    <input id="propMin" type="number" step="any" placeholder="không giới hạn" value="${el.minValue ?? ''}" /></div>
+                <div class="prop-field"><label>Lớn nhất cho phép</label>
+                    <input id="propMax" type="number" step="any" placeholder="không giới hạn" value="${el.maxValue ?? ''}" /></div>
+            </div>
+            <p class="hint small" id="numWriteHint">Chỉ Project tag mới ghi được; System tag, biến MS, MC chỉ đọc. Giới hạn tính theo giá trị đang HIỂN THỊ (sau khi dời dấu chấm).</p>
+        </div>
+
+        <div class="prop-section-title">Định dạng số</div>
+        <div class="prop-grid-2">
+            <div class="prop-field"><label>Dời dấu chấm (lần)</label>
+                <input id="propShift" type="number" min="0" max="9" step="1" value="${el.decimalShift ?? 0}" /></div>
+            <div class="prop-field"><label>Số chữ số sau dấu chấm</label>
+                <input id="propDecimals" type="number" min="0" max="9" step="1" placeholder="tự động" value="${el.decimals ?? ''}" /></div>
+        </div>
+        <p class="hint small" id="numShiftHint"></p>
+        <div class="prop-grid-2">
+            <div class="prop-field"><label>Chữ đứng trước</label>
+                <input id="propPrefix" type="text" maxlength="32" value="${escHtml(el.prefix)}" /></div>
+            <div class="prop-field"><label>Đơn vị / chữ đứng sau</label>
+                <input id="propSuffix" type="text" maxlength="32" placeholder="vd  °C" value="${escHtml(el.suffix)}" /></div>
+        </div>
+        <div class="prop-field"><label>Căn lề</label>${alignSelectHtml(el, 'center')}</div>
+        ${fontFieldsHtml(el)}
+        <div class="prop-field"><label>Ghi chú (chỉ để nhận biết, không hiển thị)</label>
+            <input id="propComment" type="text" maxlength="200" value="${escHtml(el.comment)}" /></div>
+        ${positionFieldsHtml(el)}
+        ${styleFieldsHtml(el)}
+        ${effectsFieldsHtml(el)}
+        ${DIRTY_NOTE_HTML}
+        <div class="prop-actions">
+            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
+            <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
+        </div>
+    `;
+    bindEffectsButtons();
+
+    const $p = (id) => document.getElementById(id);
+    const syncUi = () => {
+        const input = $p('propValueMode').value === 'Input';
+        $p('numInputBox').hidden = !input;
+        $p('numWriteBox').hidden = !$p('propSepWrite').checked;
+        const info = varInfo($p('propReadTag').value);
+        const isInt = !info || info.type === 'Integer';
+        $p('propShift').disabled = !isInt;
+        const shift = clampInt($p('propShift').value, 0, 9);
+        $p('numShiftHint').textContent = !isInt
+            ? 'Biến số thực: không dời dấu chấm (chỉ chỉnh "số chữ số sau dấu chấm").'
+            : (shift > 0 ? `Số nguyên 12345 hiển thị là ${shiftIntString('12345', shift)}; khi nhập thì tự nhân lại 10^${shift}.` : 'Dời dấu chấm 0 = hiển thị đúng giá trị số nguyên. Ví dụ dời 2 lần: 12345 → 123.45.');
+        if (input) {
+            const w = varInfo($p('propSepWrite').checked ? $p('propWriteTag').value : $p('propReadTag').value);
+            $p('numWriteHint').textContent = w && !w.writable
+                ? `⚠️ "${w.name}" là ${w.source === 'Project' ? 'biến' : w.source + ' (chỉ đọc)'} — không ghi được. Hãy chọn Project tag.`
+                : 'Chỉ Project tag mới ghi được; System tag, biến MS, MC chỉ đọc. Giới hạn tính theo giá trị đang HIỂN THỊ (sau khi dời dấu chấm).';
+        }
+    };
+    ['propReadTag', 'propValueMode', 'propSepWrite', 'propWriteTag', 'propShift'].forEach(id => { const n = $p(id); if (n) n.addEventListener('change', syncUi); });
+    $p('propShift').addEventListener('input', syncUi);
+    syncUi();
+
+    const applyForm = (el) => {
+        el.readTag = $p('propReadTag').value || null;
+        el.valueMode = $p('propValueMode').value === 'Input' ? 'Input' : 'Display';
+        el.separateWriteTag = el.valueMode === 'Input' && $p('propSepWrite').checked;
+        el.writeTag = el.separateWriteTag ? ($p('propWriteTag').value || null) : null;
+        el.minValue = numOrNull('propMin');
+        el.maxValue = numOrNull('propMax');
+        el.decimalShift = $p('propShift').disabled ? 0 : clampInt($p('propShift').value, 0, 9);
+        const d = $p('propDecimals').value;
+        el.decimals = d === '' ? null : clampInt(d, 0, 9);
+        el.prefix = $p('propPrefix').value || null;
+        el.suffix = $p('propSuffix').value || null;
+        el.textAlign = $p('propAlign').value || null;
+        el.comment = $p('propComment').value || null;
+        applyFontFromForm(el);
+        applyPositionFieldsFromForm(el);
+        applyStyleFieldsFromForm(el);
+        applyEffectsFromForm(el);
+    };
+    bindLivePreview(el, applyForm);
+    $p('savePropsBtn').addEventListener('click', async () => { applyForm(el); await persistAndRefresh(el); });
+    $p('deleteElBtn').addEventListener('click', () => deleteElement(el.id));
+    fitPropsDialog();
+}
+
 async function refreshLayoutSlots() {
     if (drag) return;
     try {
@@ -650,6 +1104,13 @@ async function addElement(type) {
         Object.assign(payload, {
             width: 6, height: Math.min(100, Math.round(6 * ar * 10) / 10),   // o vuong theo ty le khung
             bitMode: 'Switch', switchStyle: 'Toggle', stateText0: 'OFF', stateText1: 'ON'
+        });
+    }
+
+    if (type === 'Number') {
+        Object.assign(payload, {
+            width: 10, height: 6, valueMode: 'Display', decimalShift: 0, textAlign: 'center', fontSize: 16,
+            backgroundColor: '#1a2540', borderColor: '#3b82f6', borderStyle: 'solid', borderWidth: 1
         });
     }
 
@@ -1111,6 +1572,10 @@ function selectElement(id) {
         renderShapeProps(el);
     } else if (el.type === 'Line') {
         renderLineProps(el);
+    } else if (el.type === 'Number') {
+        renderNumberProps(el);
+    } else if (el.type === 'Text') {
+        renderTextProps(el);
     } else {
         renderGenericProps(el);
     }
@@ -1186,6 +1651,7 @@ const DIRTY_NOTE_HTML = '<p id="propDirtyNote" class="prop-dirty-note" hidden>�
 async function persistAndRefresh(el) {
     await persistElement(el);
     renderLayout();
+    refreshLampStates();
     selectElement(el.id);
 }
 
@@ -1316,7 +1782,7 @@ function renderStatsProps(el) {
         ${styleFieldsHtml(el)}
         ${DIRTY_NOTE_HTML}
         <div class="prop-actions">
-            <button id="savePropsBtn" class="btn primary">💾 Lưu</button>
+            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
             <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
         </div>
     `;
@@ -1354,7 +1820,7 @@ function renderGenericProps(el) {
         ${styleFieldsHtml(el)}
         ${DIRTY_NOTE_HTML}
         <div class="prop-actions">
-            <button id="savePropsBtn" class="btn primary">💾 Lưu</button>
+            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
             <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
         </div>
     `;
@@ -1461,7 +1927,7 @@ function renderShapeProps(el) {
 
         ${DIRTY_NOTE_HTML}
         <div class="prop-actions">
-            <button id="savePropsBtn" class="btn primary">💾 Lưu</button>
+            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
             <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
         </div>
     `;
@@ -1545,7 +2011,7 @@ function renderLineProps(el) {
 
         ${DIRTY_NOTE_HTML}
         <div class="prop-actions">
-            <button id="savePropsBtn" class="btn primary">💾 Lưu</button>
+            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
             <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
         </div>
     `;
@@ -1600,7 +2066,7 @@ async function renderButtonProps(el) {
         ${styleFieldsHtml(el)}
         ${DIRTY_NOTE_HTML}
         <div class="prop-actions">
-            <button id="savePropsBtn" class="btn primary">💾 Lưu</button>
+            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
             <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
         </div>
     `;
@@ -1670,7 +2136,7 @@ function renderSlotProps(el) {
 
         ${DIRTY_NOTE_HTML}
         <div class="prop-actions">
-            <button id="saveSlotBtn" class="btn primary">💾 Lưu</button>
+            <button id="saveSlotBtn" class="btn primary">✓ Áp dụng</button>
             <button id="deleteElBtn" class="btn secondary">🗑️ Gỡ khỏi bản đồ</button>
         </div>
         <p class="hint small">
@@ -1731,11 +2197,19 @@ function renderSlotProps(el) {
 // Panel: Den bit / Cong tac bit (General / Shape / Label / Vi tri)
 // ---------------------------------------------------------------------------
 async function renderBitProps(el) {
-    let bits = [];
+    let bits = [], camZones = [];
     try {
         const r = await fetch('/api/tasks/tags/bits');
         if (r.ok) bits = await r.json();
     } catch { /* van cho sua cac thuoc tinh khac */ }
+    try {
+        const r = await fetch('/api/system/sensors/status', { cache: 'no-store' });
+        if (r.ok) sensorMeta = await r.json();
+    } catch { /* khong co thong tin cam bien: dung mac dinh MGT200 */ }
+    try {
+        const r = await fetch(`/api/layout/zones?floor=${encodeURIComponent(CURRENT_FLOOR)}`);
+        if (r.ok) camZones = await r.json();
+    } catch { /* khong co danh sach vi tri */ }
     if (selectedId !== el.id) return;   // da chon doi tuong khac trong luc cho tai danh sach tag
 
     const q = (id) => document.getElementById(id);
@@ -1755,19 +2229,39 @@ async function renderBitProps(el) {
     };
 
     const mode = bitModeOf(el), style = bitStyleOf(el);
-    const imgBlock = (i) => `
-        <div class="prop-section-title">Trạng thái ${i} (${i ? 'ON' : 'OFF'})</div>
+    // key: '0' | '1' (tag bit) hoac 'Parked' | 'Free' | 'Error' | 'Unused' (den cam bien / vi tri do camera)
+    const imgBlock = (key, title, grp) => `
+        <div class="bit-img-block" data-grp="${grp}">
+        <div class="prop-section-title">${title}</div>
         <div class="bit-shape-row">
-            <div class="bit-shape-preview" id="propBitPrev${i}"></div>
+            <div class="bit-shape-preview" id="propBitPrev${key}"></div>
             <div class="bit-shape-ctrl">
-                <input id="propBitImg${i}" type="text" placeholder="URL ảnh hoặc tải lên…" value="${escHtml(i ? el.stateImage1 : el.stateImage0)}" />
+                <input id="propBitImg${key}" type="text" placeholder="URL ảnh hoặc tải lên…" value="${escHtml(el['stateImage' + key])}" />
                 <div class="prop-inline">
-                    <button type="button" class="btn secondary" id="propBitUp${i}" style="padding:6px;">📁 Tải ảnh lên</button>
-                    <button type="button" class="btn secondary" id="propBitClr${i}" style="padding:6px;">✕ Bỏ ảnh</button>
+                    <button type="button" class="btn secondary" id="propBitUp${key}" style="padding:6px;">📁 Tải ảnh lên</button>
+                    <button type="button" class="btn secondary" id="propBitClr${key}" style="padding:6px;">✕ Bỏ ảnh</button>
                 </div>
-                <input type="file" id="propBitFile${i}" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp" hidden />
+                <input type="file" id="propBitFile${key}" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp" hidden />
             </div>
+        </div>
         </div>`;
+    const LAMP_DOT_HINT = { Parked: '🔴', Free: '🟢', Error: '🟡', Unused: '⚪' };
+    const sensorKeytop = sensorMeta?.type === 'Keytop';
+    const sensorDevCount = Math.max(sensorMeta?.deviceCount || 32, (el.sensorDevice || 0) + 1);
+    const sensorPer = sensorMeta?.sensorsPerDevice || (sensorKeytop ? 60 : 160);
+    const sIdx = Math.max(0, el.sensorIndex || 0);
+    const devOpt = (d) => {
+        const info = sensorMeta?.devices?.[d];
+        return `<option value="${d}" ${d === (el.sensorDevice || 0) ? 'selected' : ''}>${sensorKeytop ? 'Keytop' : 'ZCU'} ${d}${info && !info.enabled ? ' (không kích hoạt)' : ''}</option>`;
+    };
+    const rangeOpts = (from, to, sel, fmt) => Array.from({ length: to - from + 1 }, (_, k) => from + k)
+        .map(v => `<option value="${v}" ${v === sel ? 'selected' : ''}>${fmt(v)}</option>`).join('');
+    const camSel = el.lampPosition ? `${el.lampZone || '1'}|${el.lampPosition}` : '';
+    const camKnown = camZones.some(z => `${z.zone}|${z.number}` === camSel);
+    const camOptions = `<option value="">— Chọn vị trí đỗ —</option>`
+        + (camSel && !camKnown ? `<option value="${escHtml(camSel)}" selected>⚠ Zone ${escHtml(el.lampZone || '1')} · vị trí ${escHtml(el.lampPosition)} (chưa khai báo trên camera)</option>` : '')
+        + camZones.map(z => `<option value="${escHtml(z.zone)}|${escHtml(z.number)}" ${`${z.zone}|${z.number}` === camSel ? 'selected' : ''}>Zone ${escHtml(z.zone)} · vị trí ${escHtml(z.number)}${z.cameraIp ? ' — camera ' + escHtml(z.cameraIp) : ''}</option>`).join('');
+    const curSrc = bitSourceOf(el);
 
     propsPanel.innerHTML = `
         <h3>Đèn bit / Công tắc bit</h3>
@@ -1785,6 +2279,40 @@ async function renderBitProps(el) {
                 <label class="checkbox-label"><input type="radio" name="propBitMode" value="Lamp" ${mode === 'Lamp' ? 'checked' : ''} /> Bit Lamp (chỉ hiển thị)</label>
                 <label class="checkbox-label"><input type="radio" name="propBitMode" value="Switch" ${mode === 'Switch' ? 'checked' : ''} /> Toggle Switch (bấm để ghi, ở chế độ Chạy)</label>
             </div>
+            <div class="prop-field" id="propBitSourceRow">
+                <label>Nguồn dữ liệu của đèn</label>
+                <select id="propBitSource">
+                    <option value="Tag" ${curSrc === 'Tag' ? 'selected' : ''}>Tag bit (0 / 1)</option>
+                    <option value="Sensor" ${curSrc === 'Sensor' ? 'selected' : ''}>Cảm biến (Đã đỗ / Còn trống / Lỗi / Chưa sử dụng)</option>
+                    <option value="CameraSlot" ${curSrc === 'CameraSlot' ? 'selected' : ''}>Vị trí đỗ chỉ định trên camera (4 trạng thái)</option>
+                </select>
+            </div>
+
+            <div id="propBitSensorGroup">
+                <div class="prop-section-title">Cảm biến</div>
+                <div class="prop-field"><label>Thiết bị</label>
+                    <select id="propSnDevice">${Array.from({ length: sensorDevCount }, (_, d) => devOpt(d)).join('')}</select></div>
+                <div class="prop-grid-2" id="propSnPmRow">
+                    <div class="prop-field"><label>Line (CN)</label>
+                        <select id="propSnLine">${rangeOpts(1, 5, Math.floor(sIdx / 32) + 1, v => 'CN ' + v)}</select></div>
+                    <div class="prop-field"><label>ID cảm biến</label>
+                        <select id="propSnId">${rangeOpts(0, 31, sIdx % 32, v => 'ID ' + v)}</select></div>
+                </div>
+                <div class="prop-field" id="propSnKtRow"><label>Cảm biến số</label>
+                    <select id="propSnNum">${rangeOpts(1, sensorPer, sIdx + 1, v => 'Cảm biến ' + v)}</select></div>
+                <p class="hint small">Có xe → <b>Đã đỗ</b> · Trống → <b>Còn trống</b> · Lỗi hoặc thiết bị mất kết nối → <b>Lỗi</b> ·
+                    Thiết bị không kích hoạt / ngoài số thiết bị đang dùng / cảm biến chưa báo trạng thái → <b>Chưa sử dụng</b>.</p>
+            </div>
+
+            <div id="propBitCamGroup">
+                <div class="prop-section-title">Vị trí đỗ chỉ định trên camera</div>
+                <div class="prop-field"><label>Vị trí nhận diện (tầng ${escHtml(CURRENT_FLOOR)})</label>
+                    <select id="propCamPos">${camOptions}</select></div>
+                <p class="hint small">Lấy từ các vị trí đã vẽ ở Hệ thống › Camera › Vị trí đỗ. Xe trong vùng → <b>Đã đỗ</b> · không có xe → <b>Còn trống</b> ·
+                    camera mất kết nối → <b>Lỗi</b> · vị trí chưa khai báo (đã bị xoá khỏi camera) → <b>Chưa sử dụng</b>.</p>
+            </div>
+
+            <div id="propBitTagGroup">
             <div class="prop-section-title">Đọc / Ghi</div>
             <label class="checkbox-label" style="margin-bottom:8px;"><input type="checkbox" id="propBitSep" ${el.separateWriteTag ? 'checked' : ''} /> Đọc và ghi dùng tag khác nhau</label>
             <div class="prop-field"><label id="propBitReadLbl">Tag</label><select id="propBitReadTag"></select></div>
@@ -1800,17 +2328,20 @@ async function renderBitProps(el) {
                     <option value="Momentary" ${style === 'Momentary' ? 'selected' : ''}>Momentary — giữ = ON, nhả = OFF</option>
                 </select></div>
             <p class="hint small">System tags chỉ để đọc (đèn). Muốn bấm để ghi, tag ghi phải là Project tag kiểu Boolean (TASKS › Tags).</p>
+            </div>
         </div>
 
         <div class="bit-pane" data-pane="shape" hidden>
-            ${imgBlock(0)}
-            ${imgBlock(1)}
-            <p class="hint small">Không chọn ảnh = vẽ hình mặc định (đèn tròn / công tắc). Ảnh PNG/JPG/GIF/WEBP/BMP, tối đa 5 MB.</p>
+            ${imgBlock('0', 'Trạng thái 0 (OFF)', 'tag')}
+            ${imgBlock('1', 'Trạng thái 1 (ON)', 'tag')}
+            ${LAMP_STATES.map(k => imgBlock(k, `${LAMP_DOT_HINT[k]} ${LAMP_LABEL[k]}`, 'lamp')).join('')}
+            <p class="hint small">Không chọn ảnh = vẽ hình mặc định (đèn tròn / công tắc; đèn 4 trạng thái: đỏ = Đã đỗ, xanh = Còn trống, vàng = Lỗi, xám = Chưa sử dụng). Ảnh PNG/JPG/GIF/WEBP/BMP, tối đa 5 MB.</p>
         </div>
 
         <div class="bit-pane" data-pane="label" hidden>
-            <div class="prop-field"><label>Chữ khi trạng thái 0 (OFF)</label><input id="propBitText0" type="text" maxlength="64" value="${escHtml(el.stateText0)}" /></div>
-            <div class="prop-field"><label>Chữ khi trạng thái 1 (ON)</label><input id="propBitText1" type="text" maxlength="64" value="${escHtml(el.stateText1)}" /></div>
+            <div class="prop-field" data-grp="tag"><label>Chữ khi trạng thái 0 (OFF)</label><input id="propBitText0" type="text" maxlength="64" value="${escHtml(el.stateText0)}" /></div>
+            <div class="prop-field" data-grp="tag"><label>Chữ khi trạng thái 1 (ON)</label><input id="propBitText1" type="text" maxlength="64" value="${escHtml(el.stateText1)}" /></div>
+            ${LAMP_STATES.map(k => `<div class="prop-field" data-grp="lamp"><label>Chữ khi ${LAMP_LABEL[k].toLowerCase()}</label><input id="propBitText${k}" type="text" maxlength="64" value="${escHtml(el['stateText' + k])}" /></div>`).join('')}
             <div class="prop-grid-2">
                 <div class="prop-field"><label>Màu chữ</label><input id="propBitTextColor" type="color" value="${escHtml(el.textColor || '#e6ebf5')}" /></div>
                 <div class="prop-field"><label>Cỡ chữ (px)</label><input id="propBitFont" type="number" min="1" max="200" step="1" placeholder="mặc định" value="${el.fontSize ?? ''}" /></div>
@@ -1825,7 +2356,7 @@ async function renderBitProps(el) {
 
         ${DIRTY_NOTE_HTML}
         <div class="prop-actions">
-            <button id="savePropsBtn" class="btn primary">💾 Lưu</button>
+            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
             <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
         </div>
     `;
@@ -1843,7 +2374,16 @@ async function renderBitProps(el) {
     q('propBitReadTag').innerHTML = tagOptions(el.readTag, mode === 'Switch' && !el.separateWriteTag);
     q('propBitWriteTag').innerHTML = tagOptions(el.writeTag, true);
 
+    const curSource = () => curMode() === 'Lamp' ? (q('propBitSource').value || 'Tag') : 'Tag';
     const syncForm = () => {
+        const src = curSource();
+        q('propBitSourceRow').style.display = curMode() === 'Lamp' ? '' : 'none';
+        q('propBitTagGroup').style.display = src === 'Tag' ? '' : 'none';
+        q('propBitSensorGroup').style.display = src === 'Sensor' ? '' : 'none';
+        q('propBitCamGroup').style.display = src === 'CameraSlot' ? '' : 'none';
+        q('propSnPmRow').style.display = sensorKeytop ? 'none' : '';
+        q('propSnKtRow').style.display = sensorKeytop ? '' : 'none';
+        propsPanel.querySelectorAll('[data-grp]').forEach(n => { n.hidden = (n.dataset.grp === 'lamp') !== (src !== 'Tag'); });
         const sw = curMode() === 'Switch', sep = q('propBitSep').checked, mom = q('propBitStyle').value === 'Momentary';
         q('propBitSep').disabled = !sw;
         q('propBitStyle').disabled = !sw;
@@ -1858,11 +2398,12 @@ async function renderBitProps(el) {
     };
     propsPanel.querySelectorAll('input[name="propBitMode"]').forEach(r => r.addEventListener('change', syncForm));
     q('propBitSep').addEventListener('change', syncForm);
+    q('propBitSource').addEventListener('change', () => { syncForm(); fitPropsDialog(); });
     q('propBitStyle').addEventListener('change', syncForm);
     syncForm();
 
     // --- hinh anh theo trang thai ---
-    [0, 1].forEach(i => {
+    ['0', '1', ...LAMP_STATES].forEach(i => {
         const inp = q(`propBitImg${i}`), prev = q(`propBitPrev${i}`), file = q(`propBitFile${i}`);
         const showPrev = () => { prev.innerHTML = inp.value.trim() ? `<img src="${escHtml(inp.value.trim())}" alt="" />` : '<span>Mặc định</span>'; };
         showPrev();
@@ -1898,6 +2439,21 @@ async function renderBitProps(el) {
         el.stateImage1 = q('propBitImg1').value.trim() || null;
         el.stateText0 = q('propBitText0').value || null;
         el.stateText1 = q('propBitText1').value || null;
+
+        // Nguon Cam bien / Vi tri do tren camera (chi o che do Lamp)
+        const src = curSource();
+        el.bitSource = src === 'Tag' ? null : src;
+        el.sensorDevice = parseInt(q('propSnDevice').value, 10) || 0;
+        el.sensorIndex = sensorKeytop
+            ? Math.max(0, (parseInt(q('propSnNum').value, 10) || 1) - 1)
+            : ((parseInt(q('propSnLine').value, 10) || 1) - 1) * 32 + (parseInt(q('propSnId').value, 10) || 0);
+        const camVal = q('propCamPos').value;
+        el.lampZone = camVal ? camVal.split('|')[0] : null;
+        el.lampPosition = camVal ? camVal.split('|')[1] : null;
+        LAMP_STATES.forEach(k => {
+            el['stateImage' + k] = q('propBitImg' + k).value.trim() || null;
+            el['stateText' + k] = q('propBitText' + k).value || null;
+        });
         const tc = q('propBitTextColor').value;
         el.textColor = (tc.toLowerCase() !== '#e6ebf5' || el.textColor) ? tc : null;
         const fs = parseFloat(q('propBitFont').value);
@@ -1935,7 +2491,7 @@ async function deleteElement(id) {
 }
 
 function typeLabel(type) {
-    return { Button: 'Nút ấn', Image: 'Hình ảnh', Text: 'Text', ParkingSlot: 'Vùng nhận diện', SlotStats: 'Thống kê chỗ', BitLampSwitch: 'Đèn / Công tắc bit',
+    return { Button: 'Nút ấn', Image: 'Hình ảnh', Text: 'Text', ParkingSlot: 'Vùng nhận diện', SlotStats: 'Thống kê chỗ', BitLampSwitch: 'Đèn / Công tắc bit', Number: 'Số (Number)',
         Rectangle: 'Hình chữ nhật', Circle: 'Hình tròn', Line: 'Đường thẳng' }[type] || type;
 }
 
@@ -2043,6 +2599,7 @@ function enterRunMode() {
     flushPending();
     editMode = false;
     updateResizeFrame();
+    updateValueNodes(true);          // Number cho nhap: doi sang o nhap that
     document.body.classList.add('layout-run-mode');
     showRunExitButton();
 }
@@ -2053,6 +2610,7 @@ function exitRunMode() {
     releaseAllMomentary();
     editMode = true;
     updateResizeFrame();
+    updateValueNodes(true);
     document.body.classList.remove('layout-run-mode');
     hideRunExitButton();
 }
@@ -2084,7 +2642,10 @@ applyFloorBackground(window.currentFloorData);
 // User: luon Chay. Tai khoan khac: giu che do da dung lan truoc (Chay cho toi khi tu thoat bang ESC / nut Build)
 if (window.PG_FORCE_RUN || savedLayoutMode() === 'run') enterRunMode();
 loadLayout();
+loadVarCatalog();
 pollBits();
+pollLampStates();
+pollValues();
 
 // Dong tab / tai lai trang khi con thay doi chua luu -> gui di bang keepalive de khong mat
 window.addEventListener('pagehide', () => {

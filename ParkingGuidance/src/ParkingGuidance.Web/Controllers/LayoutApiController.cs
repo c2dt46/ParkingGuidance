@@ -4,6 +4,8 @@ using ParkingGuidance.Web.Models;
 using ParkingGuidance.Web.Services.CameraRegistry;
 using ParkingGuidance.Web.Services.Layout;
 using ParkingGuidance.Web.Services.Parking;
+using ParkingGuidance.Web.Services.Persistence;
+using ParkingGuidance.Web.Services.Sensor;
 
 namespace ParkingGuidance.Web.Controllers;
 
@@ -15,9 +17,13 @@ public class LayoutApiController : ControllerBase
     private readonly IParkingService _parking;
     private readonly ICameraRegistryService _registry;
     private readonly IWebHostEnvironment _env;
+    private readonly IPersistenceService _persistence;
+    private readonly ISensorService _sensors;
 
-    public LayoutApiController(ILayoutService layout, IParkingService parking, ICameraRegistryService registry, IWebHostEnvironment env)
+    public LayoutApiController(ILayoutService layout, IParkingService parking, ICameraRegistryService registry, IWebHostEnvironment env, IPersistenceService persistence, ISensorService sensors)
     {
+        _persistence = persistence;
+        _sensors = sensors;
         _layout = layout;
         _parking = parking;
         _registry = registry;
@@ -87,6 +93,31 @@ public class LayoutApiController : ControllerBase
         public string? StateImage1 { get; set; }
         public string? StateText0 { get; set; }
         public string? StateText1 { get; set; }
+
+        // Den (Lamp) hien thi trang thai cam bien / vi tri do tren camera
+        public string? BitSource { get; set; }
+        public int SensorDevice { get; set; }
+        public int SensorIndex { get; set; }
+        public string? LampZone { get; set; }
+        public string? LampPosition { get; set; }
+        public string? StateImageParked { get; set; }
+        public string? StateImageFree { get; set; }
+        public string? StateImageError { get; set; }
+        public string? StateImageUnused { get; set; }
+        public string? StateTextParked { get; set; }
+        public string? StateTextFree { get; set; }
+        public string? StateTextError { get; set; }
+        public string? StateTextUnused { get; set; }
+
+        // Text (gan bien) / Number
+        public string? Prefix { get; set; }
+        public string? Suffix { get; set; }
+        public string? TextAlign { get; set; }
+        public string? ValueMode { get; set; }
+        public int DecimalShift { get; set; }
+        public int? Decimals { get; set; }
+        public double? MinValue { get; set; }
+        public double? MaxValue { get; set; }
     }
 
     private static double? ClampOrNull(double? v, double min, double max) =>
@@ -142,11 +173,53 @@ public class LayoutApiController : ControllerBase
         e.StateImage1 = CleanImageUrl(dto.StateImage1);
         e.StateText0 = CleanText(dto.StateText0, 64);
         e.StateText1 = CleanText(dto.StateText1, 64);
+
+        // Nguon Cam bien / Vi tri do tren camera: chi hien thi (Lamp), khong co tag ghi
+        e.BitSource = dto.BitSource is "Sensor" or "CameraSlot" ? dto.BitSource : null;
+        if (e.BitSource is not null)
+        {
+            e.BitMode = "Lamp";
+            e.SeparateWriteTag = false;
+            e.WriteTag = null;
+            e.WriteOnRelease = false;
+        }
+        e.SensorDevice = Math.Clamp(dto.SensorDevice, 0, SensorSettings.KeytopMax - 1);
+        e.SensorIndex = Math.Clamp(dto.SensorIndex, 0, SensorSettings.Pm200SensorsPerZcu - 1);
+        e.LampZone = SlotKey.TryNormalizeNumber(dto.LampZone, out var lz) ? lz : null;
+        e.LampPosition = SlotKey.TryNormalizeNumber(dto.LampPosition, out var lp) ? lp : null;
+        e.StateImageParked = CleanImageUrl(dto.StateImageParked);
+        e.StateImageFree = CleanImageUrl(dto.StateImageFree);
+        e.StateImageError = CleanImageUrl(dto.StateImageError);
+        e.StateImageUnused = CleanImageUrl(dto.StateImageUnused);
+        e.StateTextParked = CleanText(dto.StateTextParked, 64);
+        e.StateTextFree = CleanText(dto.StateTextFree, 64);
+        e.StateTextError = CleanText(dto.StateTextError, 64);
+        e.StateTextUnused = CleanText(dto.StateTextUnused, 64);
+    }
+
+    /// <summary>Text (gắn biến) và Number: biến hiển thị/ghi, định dạng số (đã kiểm tra). Loại khác: bỏ qua.</summary>
+    private static void ApplyValueProps(LayoutElement e, ElementDto dto)
+    {
+        if (e.Type is not (LayoutElementType.Text or LayoutElementType.Number)) return;
+        e.Comment = CleanText(dto.Comment, 200);
+        e.ReadTag = CleanTagName(dto.ReadTag);
+        e.Prefix = string.IsNullOrEmpty(dto.Prefix) ? null : (dto.Prefix.Length > 32 ? dto.Prefix[..32] : dto.Prefix);
+        e.Suffix = string.IsNullOrEmpty(dto.Suffix) ? null : (dto.Suffix.Length > 32 ? dto.Suffix[..32] : dto.Suffix);
+        e.TextAlign = dto.TextAlign is "left" or "center" or "right" ? dto.TextAlign : null;
+        if (e.Type != LayoutElementType.Number) return;
+
+        e.ValueMode = dto.ValueMode == "Input" ? "Input" : "Display";
+        e.DecimalShift = Math.Clamp(dto.DecimalShift, 0, 9);
+        e.Decimals = dto.Decimals is null ? null : Math.Clamp(dto.Decimals.Value, 0, 9);
+        e.MinValue = ClampOrNull(dto.MinValue, -1e15, 1e15);
+        e.MaxValue = ClampOrNull(dto.MaxValue, -1e15, 1e15);
+        e.SeparateWriteTag = e.ValueMode == "Input" && dto.SeparateWriteTag;
+        e.WriteTag = e.SeparateWriteTag ? CleanTagName(dto.WriteTag) : null;
     }
 
     private static readonly HashSet<string> ImageExts = new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp" };
 
-    /// <summary>Tai len 1 hinh (vd hinh den/cong tac cho tung trang thai) vao wwwroot/uploads/layout/. Khong nhan SVG (tranh script khi mo truc tiep).</summary>
+    /// <summary>Tai len 1 hinh (vd hinh den/cong tac cho tung trang thai) vao {thu muc du an}/uploads/layout/ (phuc vu o duong dan /uploads/layout/...). Khong nhan SVG (tranh script khi mo truc tiep).</summary>
     [HttpPost("upload-image")]
     [RequestSizeLimit(5_000_000)]
     public async Task<IActionResult> UploadImage(IFormFile image)
@@ -160,7 +233,7 @@ public class LayoutApiController : ControllerBase
         if (string.IsNullOrWhiteSpace(ext) || !ImageExts.Contains(ext))
             return BadRequest(new { message = "Chi nhan anh .png, .jpg, .jpeg, .gif, .webp, .bmp." });
 
-        var dir = Path.Combine(_env.WebRootPath, "uploads", "layout");
+        var dir = Path.Combine(_persistence.ProjectUploadsDirectory, "layout");
         Directory.CreateDirectory(dir);
         var fileName = $"{Guid.NewGuid():N}{ext.ToLowerInvariant()}";
 
@@ -288,6 +361,61 @@ public class LayoutApiController : ControllerBase
     [HttpGet("stats")]
     public IActionResult GetStats([FromQuery] string floor = "B1") => Ok(ComputeStats(floor));
 
+    /// <summary>
+    /// Trạng thái sống của các ĐÈN (Lamp) trên tầng có nguồn là Cảm biến hoặc Vị trí đỗ chỉ định trên camera.
+    /// Trả về { idĐối tượng: "Parked" | "Free" | "Error" | "Unused" }.
+    ///  • Cảm biến: thiết bị không kích hoạt / ngoài số thiết bị đang dùng / chưa báo trạng thái lần nào → Unused;
+    ///    thiết bị đang mất kết nối → Error (cùng quy ước phần Giám sát cảm biến); còn lại theo trạng thái 0 = Free, 1 = Parked, 2 = Error.
+    ///  • Vị trí đỗ trên camera: vị trí chưa được vẽ/khai báo cho camera nào của tầng+Zone → Unused; còn lại theo ô đỗ: Occupied = Parked, Error, còn lại Free.
+    /// </summary>
+    [HttpGet("lamp-states")]
+    public IActionResult GetLampStates([FromQuery] string floor = "B1")
+    {
+        var lamps = _layout.GetElements(floor)
+            .Where(e => e.Type == LayoutElementType.BitLampSwitch && e.BitSource is "Sensor" or "CameraSlot")
+            .ToList();
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (lamps.Count == 0) return Ok(result);
+
+        // --- Cảm biến ---
+        SensorSnapshot? snap = lamps.Any(l => l.BitSource == "Sensor") ? _sensors.GetSnapshot() : null;
+        string SensorState(LayoutElement e)
+        {
+            if (snap is null || e.SensorDevice < 0 || e.SensorDevice >= snap.Devices.Count) return "Unused";
+            var d = snap.Devices[e.SensorDevice];
+            if (!d.Enabled || e.SensorIndex < 0 || e.SensorIndex >= snap.SensorsPerDevice) return "Unused";
+            if (!d.Online) return "Error";
+            return e.SensorIndex < d.States.Length
+                ? d.States[e.SensorIndex] switch { '0' => "Free", '1' => "Parked", '2' => "Error", _ => "Unused" }
+                : "Unused";
+        }
+
+        // --- Vị trí đỗ chỉ định trên camera ---
+        HashSet<string>? declared = null;
+        Dictionary<string, ParkingSlot>? slotByKey = null;
+        if (lamps.Any(l => l.BitSource == "CameraSlot"))
+        {
+            var floorKey = SlotKey.NormalizeFloor(floor);
+            declared = _registry.GetAll()
+                .Where(c => SlotKey.NormalizeFloor(c.Floor) == floorKey)
+                .SelectMany(c => c.Zones.Select(z => SlotKey.ForZone(c.Floor, c.Zone, z.SlotId)))
+                .Where(k => k is not null).Select(k => k!)
+                .ToHashSet(StringComparer.Ordinal);
+            slotByKey = _parking.GetSlots(floor).GroupBy(s => s.SlotId).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        }
+        string CameraSlotState(LayoutElement e)
+        {
+            var key = SlotKey.ForZone(e.Floor, e.LampZone, e.LampPosition);
+            if (key is null || declared is null || !declared.Contains(key)) return "Unused";
+            var status = slotByKey is not null && slotByKey.TryGetValue(key, out var slot) ? slot.Status : SlotStatus.Empty;
+            return status switch { SlotStatus.Occupied => "Parked", SlotStatus.Error => "Error", _ => "Free" };
+        }
+
+        foreach (var lamp in lamps)
+            result[lamp.Id] = lamp.BitSource == "Sensor" ? SensorState(lamp) : CameraSlotState(lamp);
+        return Ok(result);
+    }
+
     /// <summary>Lấy toàn bộ đối tượng layout của 1 tầng, kèm dữ liệu trạng thái sống (live)
     /// của ô đỗ (lấy từ IParkingService) cho các đối tượng loại ParkingSlot.</summary>
     [HttpGet]
@@ -344,6 +472,27 @@ public class LayoutApiController : ControllerBase
             e.StateImage1,
             e.StateText0,
             e.StateText1,
+            e.BitSource,
+            e.SensorDevice,
+            e.SensorIndex,
+            e.LampZone,
+            e.LampPosition,
+            e.StateImageParked,
+            e.StateImageFree,
+            e.StateImageError,
+            e.StateImageUnused,
+            e.StateTextParked,
+            e.StateTextFree,
+            e.StateTextError,
+            e.StateTextUnused,
+            e.Prefix,
+            e.Suffix,
+            e.TextAlign,
+            e.ValueMode,
+            e.DecimalShift,
+            e.Decimals,
+            e.MinValue,
+            e.MaxValue,
             Stats = e.Type == LayoutElementType.SlotStats ? stats : null,
             Slot = e.Type == LayoutElementType.ParkingSlot && e.SlotId is not null &&
                    slotsById.TryGetValue(e.SlotId, out var slot)
@@ -428,6 +577,7 @@ public class LayoutApiController : ControllerBase
         };
         ApplyExtendedProps(element, dto);
         ApplyBitProps(element, dto);
+        ApplyValueProps(element, dto);
 
         if (element.Type == LayoutElementType.ParkingSlot)
             _parking.EnsureSlot(dto.SlotId!, dto.Floor, dto.Zone);
@@ -465,6 +615,7 @@ public class LayoutApiController : ControllerBase
             e.BorderWidth = dto.BorderWidth;
             ApplyExtendedProps(e, dto);
             ApplyBitProps(e, dto);
+            ApplyValueProps(e, dto);
         });
 
         return updated is null

@@ -67,18 +67,19 @@ async function loadSettings() {
         for (const [key, id] of Object.entries(settingFields))
             document.getElementById(id).value = data.settings[key];
         document.getElementById('dataDirText').textContent = data.dataDirectory;
+        const pd = document.getElementById('projectDirText'); if (pd) pd.textContent = data.projectDirectory;
         markSettingsClean();
     } catch (err) {
         document.getElementById('settingsStatus').textContent = '⚠️ Không tải được cài đặt: ' + err.message;
     }
 }
 
-document.getElementById('saveSettingsBtn').addEventListener('click', async () => {
+async function saveDetectionSettings() {
     const status = document.getElementById('settingsStatus');
     const body = {};
     for (const [key, id] of Object.entries(settingFields)) {
         const v = parseFloat(document.getElementById(id).value);
-        if (Number.isNaN(v)) { status.textContent = '⚠️ Có ô chưa nhập số hợp lệ.'; return; }
+        if (Number.isNaN(v)) { status.textContent = '⚠️ Có ô chưa nhập số hợp lệ.'; return false; }
         body[key] = v;
     }
     try {
@@ -89,12 +90,20 @@ document.getElementById('saveSettingsBtn').addEventListener('click', async () =>
         const data = await res.json();
         for (const [key, id] of Object.entries(settingFields))
             document.getElementById(id).value = data.settings[key]; // hien lai gia tri da duoc chuan hoa
-        savedText = '✅ Đã lưu lúc ' + new Date().toLocaleTimeString('vi-VN');
+        savedText = '✅ Đã áp dụng lúc ' + new Date().toLocaleTimeString('vi-VN');
         markSettingsClean();                       // nut Luu toi lai: khong con thay doi nao chua luu
+        return true;
     } catch (err) {
         status.textContent = '⚠️ Lưu thất bại: ' + err.message;
+        return false;
     }
-});
+}
+document.getElementById('saveSettingsBtn').addEventListener('click', saveDetectionSettings);
+function settingsDirty() {
+    const cur = settingsSnapshot();
+    return settingsBaseline !== null ? Object.keys(cur).some(id => cur[id] !== settingsBaseline[id]) : userTouched;
+}
+if (window.PGS) PGS.registerSave('Cấu hình nhận diện', async () => (settingsDirty() ? await saveDetectionSettings() : true), settingsDirty, { auto: true });
 
 // Moi lan nguoi dung doi gia tri mot o → so voi gia tri da luu de bat / tat nut Luu
 for (const id of Object.values(settingFields)) {

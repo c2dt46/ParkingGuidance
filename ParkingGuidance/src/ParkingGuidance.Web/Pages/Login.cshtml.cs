@@ -40,13 +40,23 @@ public class LoginModel : PageModel
             new[]
             {
                 new Claim(ClaimTypes.Name, name),
-                new Claim(ClaimTypes.Role, name)      // "User" | "Megatech" | "DEV"
+                new Claim(ClaimTypes.Role, name)      // "User" | "Megatech" | "Lic" | "DEV"
             },
             CookieAuthenticationDefaults.AuthenticationScheme);
 
+        // Tài khoản Lic (bảo mật cao): KHÔNG nhớ đăng nhập — cookie phiên (đóng trình duyệt là mất), tối đa 60 phút, và mất hiệu lực khi
+        // chương trình chạy lại (claim mã lần chạy, kiểm tra ở Program.cs). Tài khoản khác: nhớ 8 giờ.
+        var isLic = string.Equals(name, "Lic", StringComparison.Ordinal);
+        if (isLic) identity.AddClaim(new Claim(ParkingGuidance.Web.Services.SessionBoot.ClaimType, ParkingGuidance.Web.Services.SessionBoot.Id));
         await HttpContext.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,
-            new ClaimsPrincipal(identity));
+            new ClaimsPrincipal(identity),
+            new AuthenticationProperties
+            {
+                IsPersistent = !isLic,
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(isLic ? 60 : 8 * 60),
+                AllowRefresh = !isLic
+            });
 
         return LocalRedirect(!string.IsNullOrEmpty(ReturnUrl) && Url.IsLocalUrl(ReturnUrl) ? ReturnUrl : "/");
     }
@@ -69,6 +79,7 @@ internal static class Accounts
         "user"     => "888",
         "megatech" => "megatech" + DateTime.Now.ToString(MegatechDateFormat, CultureInfo.InvariantCulture),
         "dev"      => "1",
+        "lic"      => "2",          // TẠM THỜI — đổi mật khẩu thật trước khi đưa vào sử dụng
         _          => null
     };
 
@@ -76,6 +87,7 @@ internal static class Accounts
     {
         "megatech" => "Megatech",
         "dev"      => "DEV",
+        "lic"      => "Lic",
         _          => "User"
     };
 

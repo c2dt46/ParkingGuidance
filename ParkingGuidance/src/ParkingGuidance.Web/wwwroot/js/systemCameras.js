@@ -233,7 +233,7 @@ async function selectCamera(id) {
             <p class="hint small">Cần điền để dịch vụ camera nền thực sự đọc được video — hệ thống dò IP qua ONVIF nhưng chưa tự lấy được URL luồng RTSP (khác nhau tuỳ hãng).</p>
         </div>
         <div class="prop-actions">
-            <button id="saveDetailBtn" class="btn secondary">💾 Lưu thông tin</button>
+            <button id="saveDetailBtn" class="btn secondary">✓ Áp dụng</button>
             ${cam.isCommitted
                 ? ''
                 : '<button id="commitBtn" class="btn primary">➕ Thêm vào hệ thống bãi đỗ</button>'}

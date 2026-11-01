@@ -1,3 +1,4 @@
+using ParkingGuidance.Web.Services.Project;
 using ParkingGuidance.Web.Models;
 using ParkingGuidance.Web.Services.Persistence;
 
@@ -16,7 +17,7 @@ public interface ILedCardService
 }
 
 /// <summary>100 card LED + bảng vùng hiển thị — lưu data/led-cards.json (gộp CardPara + c0..c99 của PGS thành 1 file, chỉ lưu card đã cấu hình).</summary>
-public sealed class LedCardService : ILedCardService
+public sealed class LedCardService : ILedCardService, IProjectScoped
 {
     private const string StateKey = "led-cards";
     private readonly IPersistenceService _persistence;
@@ -64,4 +65,32 @@ public sealed class LedCardService : ILedCardService
     }
 
     private static bool IsConfigured(LedCard c) => c.Para_Enable || c.Areas.Count > 0 || c.Para_IPAddress.Length > 0;
+
+    // ---- IProjectScoped: lưu chung / mở dự án khác ----
+    public string ProjectPartName => "LED";
+
+    public bool FlushProject()
+    {
+        lock (_lock) return _persistence.Commit(StateKey, _cards.Where(IsConfigured).ToList());
+    }
+
+    public void ReloadProject()
+    {
+        var cards = Enumerable.Range(1, HdCardCatalog.CardCount).Select(LedCard.Blank).ToArray();
+        foreach (var c in _persistence.Load<List<LedCard>>(StateKey) ?? new())
+            if (c.CardNo is >= 1 and <= HdCardCatalog.CardCount)
+                cards[c.CardNo - 1] = c.Sanitized(c.CardNo);
+        var stamps = cards.Select(c => c.ConfigStamp()).ToArray();
+
+        var changed = new List<int>();
+        lock (_lock)
+        {
+            var old = _stamps;
+            for (int i = 0; i < stamps.Length; i++)
+                if (old[i] != stamps[i]) changed.Add(i + 1);
+            _cards = cards;
+            _stamps = stamps;
+        }
+        foreach (var no in changed) Changed?.Invoke(no);          // LedDispatcher gửi lại các card có cấu hình khác
+    }
 }

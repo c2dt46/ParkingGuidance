@@ -586,6 +586,25 @@ Momentary tự nhả về OFF khi thả chuột, mất tiêu điểm, đổi tab
 API: `GET api/tasks/tags/bits` (danh sách tag bit), `GET api/tasks/tags/bit-values?names=A,B`, `POST api/layout/upload-image` (ảnh lưu ở `wwwroot/uploads/layout/`);
 ghi giá trị dùng sẵn `PUT api/tasks/tags/project/{name}/value`. Chưa có: tab Security và Macro (chưa có hệ thống phân quyền / macro).
 
+**Đèn (Bit Lamp) hiển thị trạng thái Cảm biến / Vị trí đỗ chỉ định trên camera** — ở chế độ **Bit Lamp**, mục *Nguồn dữ liệu của đèn* (tab General) có 3 lựa chọn:
+- **Tag bit (0 / 1)**: như cũ, 2 ảnh trạng thái 0 / 1.
+- **Cảm biến**: chọn *Thiết bị* (ZCU của MGT200 hoặc Keytop) + *Line (CN) / ID* (MGT200) hoặc *Cảm biến số* (Keytop).
+- **Vị trí đỗ chỉ định trên camera**: chọn 1 *Zone · vị trí* đã vẽ ở Hệ thống › Camera › Vị trí đỗ của tầng đang thiết kế.
+
+Hai nguồn sau có **4 trạng thái**, mỗi trạng thái chọn **ảnh riêng** (tab **Shape**) và **chữ riêng** (tab **Label**); không chọn ảnh thì vẽ chấm tròn mặc định
+(🔴 Đã đỗ · 🟢 Còn trống · 🟡 Lỗi · ⚪ Chưa sử dụng):
+
+| Trạng thái | Cảm biến | Vị trí đỗ trên camera |
+|---|---|---|
+| **Đã đỗ** | cảm biến báo có xe | có xe trong vùng nhận diện |
+| **Còn trống** | cảm biến báo trống | vùng không có xe |
+| **Lỗi** | cảm biến báo lỗi, hoặc thiết bị mất kết nối | camera mất kết nối (ô đang Lỗi) |
+| **Chưa sử dụng** | ZCU không kích hoạt / ngoài số thiết bị đang dùng / cảm biến chưa báo trạng thái lần nào | vị trí chưa khai báo (không còn vùng nào của camera trong tầng + Zone này) |
+
+Trạng thái do máy chủ tính sẵn rồi giao diện hỏi mỗi 1 giây: `GET api/layout/lamp-states?floor=B1` → `{ "<idĐèn>": "Parked|Free|Error|Unused" }`.
+Đèn dùng nguồn Cảm biến / Camera luôn ở chế độ chỉ hiển thị (không có tag ghi). Trường mới của `LayoutElement`: `BitSource`, `SensorDevice`, `SensorIndex`, `LampZone`, `LampPosition`,
+`StateImage{Parked,Free,Error,Unused}`, `StateText{Parked,Free,Error,Unused}`.
+
 ### 14. Quy trình nhận diện biển số chính xác hơn (bỏ phiếu theo thời gian + model ONNX tuỳ chọn)
 Lỗi gốc (xem phân tích): mỗi khung hình được đọc độc lập bằng Tesseract (hay sai 1–2 ký tự hoặc rơi 2 ký tự cuối với biển 1 dòng), khung ĐẦU TIÊN (xe còn đang chạy vào ô)
 lại quyết định biển của cả phiên, và 1 lần đọc lệch ≥ 2 ký tự làm sinh "xe ra/xe vào" ảo. Đã sửa:

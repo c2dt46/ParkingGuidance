@@ -116,7 +116,7 @@
                 <button id="drawZoneBtn" class="btn secondary btn-sm">➕ Vẽ vùng mới</button>
                 <button id="cancelZoneBtn" class="btn secondary btn-sm" style="display:none;">✕ Huỷ vẽ</button>
                 <button id="testDetectBtn" class="btn secondary btn-sm">🔍 Chạy thử nhận diện</button>
-                <button id="saveZonesBtn" class="btn primary btn-sm">💾 Lưu vùng nhận diện</button>
+                <button id="saveZonesBtn" hidden class="btn primary btn-sm">💾 Lưu vùng nhận diện</button>
             </div>
 
             <div id="cameraSourceControls" class="camera-toolbar" style="display:none;">
@@ -155,7 +155,7 @@
                     <span class="hint small" style="margin:0;">Ngưỡng thay đổi ảnh (%)</span>
                     <input id="motionThresholdInput" type="number" min="0" max="100" step="0.5" placeholder="mặc định" style="width:90px;" />
                 </label>
-                <button id="saveMotionBtn" class="btn secondary btn-sm">💾 Lưu ngưỡng</button>
+                <button id="saveMotionBtn" hidden class="btn secondary btn-sm">💾 Lưu ngưỡng</button>
             </div>
 
             <div id="drawHint" class="hint small" style="display:none;">
@@ -269,10 +269,10 @@
 
     <!-- Nút lưu: sáng khi có thay đổi chưa lưu, tối khi đã lưu hết -->
     <div class="settings-savebar">
-        <button id="saveSettingsBtn" class="btn primary save-idle">💾 Lưu cài đặt</button>
+        <button id="saveSettingsBtn" hidden class="btn primary save-idle">💾 Lưu cài đặt</button>
         <span id="settingsStatus" class="hint small"></span>
     </div>
-    <p class="hint small">Dữ liệu (cài đặt, danh sách camera, vùng nhận diện, mặt bằng, phiên đỗ xe) được lưu tại: <code id="dataDirText">...</code></p>
+    <p class="hint small">Dữ liệu <b>dự án</b> (camera, vùng nhận diện, cảm biến, LED, layout, mặt bằng, bãi xe) nằm trong thư mục dự án: <code id="projectDirText">...</code> — bấm <b>💾 Lưu</b> ở đầu menu trái (Ctrl+S) để lưu tất cả. Dữ liệu <b>hệ thống</b> (bản quyền, train, cài đặt nhận diện) nằm cố định tại: <code id="dataDirText">...</code></p>
 
     <section class="panel">
         <h2>Hàng đợi nhận diện AI &amp; trạng thái camera chạy nền</h2>
@@ -323,18 +323,35 @@
             <div class="prop-field" style="grid-column:1/-1"><label for="McDesc">Mô tả</label><input id="McDesc" type="text" maxlength="200" /></div>
         </div>
 
-        <div class="sn-sub"><b>Chọn các vị trí đỗ được đếm</b> — lọc camera theo <b>tầng / Zone</b> hoặc tìm theo IP / hãng, bấm camera để xem các vị trí của nó.
-            Nút <b>Chọn tất cả (đang lọc)</b> chọn mọi vị trí của các camera đang hiện (ví dụ cả một Zone). Trong lưới: bấm ô, kéo chuột, hoặc bấm một ô rồi giữ <b>Shift</b> + bấm ô khác để chọn/bỏ cả đoạn.</div>
+        <div class="mc-help">
+            <b>Chọn các vị trí đỗ được đếm</b>
+            <ol>
+                <li>Lọc camera theo <b>Tầng</b> / <b>Zone</b> hoặc gõ IP / hãng vào ô lọc.</li>
+                <li>Chọn một camera trong ô <b>Camera</b> (gõ để tìm, ↑ ↓ + Enter, hoặc nút ‹ ›) để xem các vị trí của nó.</li>
+                <li>Trong lưới: bấm ô, kéo chuột, hoặc bấm một ô rồi giữ <b>Shift</b> + bấm ô khác để chọn / bỏ cả đoạn.</li>
+                <li>Nút <b>Chọn tất cả (đang lọc)</b> chọn mọi vị trí của các camera đang hiện, ví dụ cả một Zone.</li>
+            </ol>
+        </div>
         <div class="mc-filter">
             <label>Tầng <select id="McFloor"></select></label>
             <label>Zone <select id="McZone"></select></label>
-            <input id="McSearch" type="search" placeholder="🔍 Tìm theo IP / hãng camera…" autocomplete="off" spellcheck="false" />
+            <input id="McSearch" type="search" placeholder="🔍 Lọc danh sách theo IP / hãng…" autocomplete="off" spellcheck="false" />
             <label class="mc-only"><input type="checkbox" id="McOnly" /> Chỉ camera đã chọn</label>
             <button id="McSelAll" class="btn secondary btn-sm" type="button">Chọn tất cả (đang lọc)</button>
             <button id="McSelNone" class="btn secondary btn-sm" type="button">Bỏ chọn (đang lọc)</button>
             <span id="mcFilterInfo" class="hint small" style="margin:0"></span>
         </div>
-        <div id="mcCams" class="mc-camlist"></div>
+        <div class="mc-combo">
+            <span class="mc-combo-label">Camera</span>
+            <button id="McPrev" class="btn secondary btn-sm" type="button" title="Camera trước" aria-label="Camera trước">‹</button>
+            <div class="mc-combo-box">
+                <input id="McCamInput" type="text" role="combobox" aria-expanded="false" aria-controls="mcCamList" aria-autocomplete="list"
+                       autocomplete="off" spellcheck="false" placeholder="Chọn / tìm camera…" />
+                <span id="McCamArrow" class="mc-combo-arrow" aria-hidden="true">▾</span>
+                <div id="mcCamList" class="mc-combo-list" role="listbox" hidden></div>
+            </div>
+            <button id="McNext" class="btn secondary btn-sm" type="button" title="Camera sau" aria-label="Camera sau">›</button>
+        </div>
         <div class="sn-sub"><b id="mcCamTitle"></b>
             <button id="McCamAll" class="btn secondary btn-sm" type="button">Chọn cả camera này</button>
             <button id="McCamNone" class="btn secondary btn-sm" type="button">Bỏ chọn camera này</button></div>
@@ -342,7 +359,7 @@
         <div id="mcPickSummary" class="hint small"></div>
 
         <div class="tg-toolbar">
-            <button id="mcSave" class="btn primary btn-sm"><span class="ico">💾</span> Lưu</button>
+            <button id="mcSave" class="btn primary btn-sm"><span class="ico">✓</span> Áp dụng</button>
             <button id="mcCancel" class="btn secondary btn-sm">Huỷ</button>
             <span id="mcFormState" class="hint small" style="margin:0"></span>
         </div>

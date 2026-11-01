@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.DataProtection;
 using System.Text.Json.Serialization;
 using ParkingGuidance.Web.Hubs;
 using ParkingGuidance.Web.Services.Anpr;
@@ -12,6 +14,7 @@ using ParkingGuidance.Web.Services.Modbus;
 using ParkingGuidance.Web.Services.Led;
 using ParkingGuidance.Web.Services.Parking;
 using ParkingGuidance.Web.Services.Persistence;
+using ParkingGuidance.Web.Services.Project;
 using ParkingGuidance.Web.Services.Sensor;
 using ParkingGuidance.Web.Services.Simulation;
 using ParkingGuidance.Web.Services.Tags;
@@ -44,6 +47,23 @@ builder.Services.AddRazorPages();
 
 
 
+// Khoá mã hoá cookie đăng nhập lưu ra file (thư mục dữ liệu HỆ THỐNG): khởi động lại chương trình (vd. dừng/chạy lại khi debug)
+// không làm mọi tài khoản bị đăng xuất. Mặc định khoá chỉ nằm trong bộ nhớ nên cookie cũ mất hiệu lực sau mỗi lần chạy lại.
+{
+    var localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    var keyDir = string.IsNullOrWhiteSpace(localApp)
+        ? Path.Combine(AppContext.BaseDirectory, "data", "keys")
+        : Path.Combine(localApp, "ParkingGuidance", "keys");
+    try
+    {
+        Directory.CreateDirectory(keyDir);
+        builder.Services.AddDataProtection()
+            .SetApplicationName("ParkingGuidance")
+            .PersistKeysToFileSystem(new DirectoryInfo(keyDir));
+    }
+    catch { /* không tạo được thư mục khoá: dùng khoá trong bộ nhớ như trước */ }
+}
+
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>
@@ -51,6 +71,16 @@ builder.Services
         o.Cookie.Name = "pgs_auth";
         o.LoginPath = "/Login";
         o.ExpireTimeSpan = TimeSpan.FromHours(8);
+        // Tài khoản Lic: phiên chỉ có hiệu lực trong LẦN CHẠY chương trình đã đăng nhập (chạy lại chương trình = phải đăng nhập lại)
+        o.Events.OnValidatePrincipal = async ctx =>
+        {
+            if (ctx.Principal?.IsInRole("Lic") == true &&
+                ctx.Principal.FindFirst(ParkingGuidance.Web.Services.SessionBoot.ClaimType)?.Value != ParkingGuidance.Web.Services.SessionBoot.Id)
+            {
+                ctx.RejectPrincipal();
+                await ctx.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            }
+        };
         // API và SignalR trả 401 thay vì chuyển hướng sang trang đăng nhập
         o.Events.OnRedirectToLogin = ctx =>
         {
@@ -222,7 +252,27 @@ builder.Services.AddSingleton<LicenseService>();
 builder.Services.AddSingleton<ILicenseService>(sp => sp.GetRequiredService<LicenseService>());
 builder.Services.AddHostedService<LicenseWorker>();
 
+// DU AN (loai 2): moi service giu du lieu cua du an (cam bien, camera, LED, layout...) khai bao IProjectScoped de
+//   - nut LUU CHUNG ghi tat ca xuong thu muc du an trong 1 lan, va
+//   - nut MO DU AN nap lai tat ca tu thu muc khac ma khong can khoi dong lai chuong trinh.
+// THU TU DANG KY = THU TU NAP LAI: mat bang -> layout -> bai xe -> tag -> cam bien -> bien MS -> bien MC -> camera -> LED -> Modbus
+// (bien MC phai nap truoc camera vi khi camera nap xong se bao Changed de bien MC tia bot cac vi tri khong con ton tai).
+builder.Services.AddSingleton<IProjectScoped>(sp => (IProjectScoped)sp.GetRequiredService<IFloorService>());
+builder.Services.AddSingleton<IProjectScoped>(sp => (IProjectScoped)sp.GetRequiredService<ILayoutService>());
+builder.Services.AddSingleton<IProjectScoped>(sp => (IProjectScoped)sp.GetRequiredService<IParkingService>());
+builder.Services.AddSingleton<IProjectScoped>(sp => (IProjectScoped)sp.GetRequiredService<IProjectTagService>());
+builder.Services.AddSingleton<IProjectScoped>(sp => (IProjectScoped)sp.GetRequiredService<ISensorService>());
+builder.Services.AddSingleton<IProjectScoped>(sp => (IProjectScoped)sp.GetRequiredService<ISensorVariableService>());
+builder.Services.AddSingleton<IProjectScoped>(sp => (IProjectScoped)sp.GetRequiredService<ICameraVariableService>());
+builder.Services.AddSingleton<IProjectScoped>(sp => (IProjectScoped)sp.GetRequiredService<ICameraRegistryService>());
+builder.Services.AddSingleton<IProjectScoped>(sp => (IProjectScoped)sp.GetRequiredService<ILedCardService>());
+builder.Services.AddSingleton<IProjectScoped>(sp => (IProjectScoped)sp.GetRequiredService<IModbusConfigService>());
+builder.Services.AddSingleton<IProjectService, ProjectService>();
+
 var app = builder.Build();
+
+// Doc/tao project.pgs.json cua du an dang mo ngay khi khoi dong (khong doi den khi co nguoi bam nut)
+app.Services.GetRequiredService<IProjectService>();
 
 app.UseHttpsRedirection();
 app.UseStaticFiles();
@@ -231,6 +281,19 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<LicenseGateMiddleware>();
 app.MapRazorPages();
+
+// Anh cua DU AN (anh nen mat bang, anh den/cong tac layout) nam trong {thu muc du an}/uploads, khong con nam trong wwwroot,
+// nen duoc phuc vu o day: /uploads/floors/..., /uploads/layout/... (doi theo du an dang mo).
+var uploadTypes = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+app.MapGet("/uploads/{**path}", IResult (string path, IPersistenceService persistence) =>
+{
+    if (string.IsNullOrWhiteSpace(path) || path.Contains("..") || path.Contains('\\')) return Results.NotFound();
+    var root = Path.GetFullPath(persistence.ProjectUploadsDirectory) + Path.DirectorySeparatorChar;
+    var full = Path.GetFullPath(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)));
+    if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(full)) return Results.NotFound();
+    if (!uploadTypes.TryGetContentType(full, out var contentType)) contentType = "application/octet-stream";
+    return Results.File(full, contentType);
+});
 app.MapControllers();
 app.MapHub<MonitoringHub>("/hubs/monitoring");
 

@@ -53,7 +53,7 @@ public sealed class LedDispatcher : BackgroundService, ILedDispatcher
     private readonly ILedCardService _cards;
     private readonly ILedDataService _data;
     private readonly ILedTransport _transport;
-    private readonly string _dataDir;
+    private readonly Persistence.IPersistenceService _persistenceSvc;   // ảnh LED tương đối nằm trong thư mục DỰ ÁN (đổi khi mở dự án khác)
     private readonly ILogger<LedDispatcher> _logger;
 
     private readonly TimeSpan _debounce, _minInterval, _resync, _maxBackoff, _startupDelay, _poll;
@@ -73,7 +73,7 @@ public sealed class LedDispatcher : BackgroundService, ILedDispatcher
         _cards = cards;
         _data = data;
         _transport = transport;
-        _dataDir = persistence.DataDirectory;
+        _persistenceSvc = persistence;
         _logger = logger;
 
         _debounce = TimeSpan.FromMilliseconds(Math.Clamp(cfg.GetValue("Led:DebounceMs", 400), 0, 10_000));
@@ -263,7 +263,7 @@ public sealed class LedDispatcher : BackgroundService, ILedDispatcher
 
     /// <summary>Ảnh lưu tương đối trong thư mục dữ liệu (led-images/...) hoặc đường dẫn tuyệt đối như PGS.</summary>
     private string ResolveImage(string path) =>
-        string.IsNullOrWhiteSpace(path) ? "" : Path.IsPathRooted(path) ? path : Path.Combine(_dataDir, path);
+        string.IsNullOrWhiteSpace(path) ? "" : Path.IsPathRooted(path) ? path : Path.Combine(_persistenceSvc.ProjectDirectory, path);
 
     // -----------------------------------------------------------------------------------------
     public IReadOnlyList<LedCardStatus> GetStatuses()

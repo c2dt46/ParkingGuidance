@@ -17,7 +17,7 @@
         <label for="LedTimeout" data-i18n="led.timeout">Thời gian chờ gửi LED (giây)</label>
         <input id="LedTimeout" type="number" min="1" max="120" step="1" title="Thời gian tối đa chờ card/SDK phản hồi (1–120 giây)" />
     </div>
-    <div class="prop-field"><label>&nbsp;</label><button id="LedTimeoutSave" class="btn primary btn-sm"><span class="ico">💾</span> <span data-i18n="led.save">Lưu</span></button></div>
+    <div class="prop-field"><label>&nbsp;</label><button id="LedTimeoutSave" hidden class="btn primary btn-sm"><span class="ico">💾</span> <span data-i18n="led.save">Lưu</span></button></div>
     <span id="LedTimeoutState" class="hint small"></span>
 </div>
 <div class="hint small" data-i18n="led.timeoutHint">Quá thời gian này mà card/SDK không phản hồi thì lần gửi bị coi là lỗi (bridge tự khởi động lại và thử lại sau). Có hiệu lực ngay, không cần khởi động lại.</div>

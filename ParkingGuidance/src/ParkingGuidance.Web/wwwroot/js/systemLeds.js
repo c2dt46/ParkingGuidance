@@ -349,22 +349,29 @@ $('btnUp').addEventListener('click', () => move(-1));
 $('BtnDow').addEventListener('click', () => move(1));
 
 // ----------------------------------------------------------------- timeout gui LED (luu vao cai dat he thong)
+let ledTimeoutBase = null;
 async function loadLedSettings() {
     try {
         const s = await api(API + '/settings');
         $('LedTimeout').value = s.requestTimeoutSeconds;
+        ledTimeoutBase = String($('LedTimeout').value);
     } catch (e) { $('LedTimeoutState').textContent = '⚠️ Không tải được timeout: ' + e.message; }
 }
 async function saveLedSettings() {
     const v = parseFloat($('LedTimeout').value);
-    if (Number.isNaN(v)) { $('LedTimeoutState').textContent = '⚠️ Timeout phải là một số (giây).'; return; }
+    if (Number.isNaN(v)) { $('LedTimeoutState').textContent = '⚠️ Timeout phải là một số (giây).'; return false; }
     try {
         const s = await send(API + '/settings', 'PUT', { requestTimeoutSeconds: v });
         $('LedTimeout').value = s.requestTimeoutSeconds; // hien lai gia tri da duoc gioi han 1-120
         $('LedTimeoutState').textContent = '✅ Đã lưu timeout ' + s.requestTimeoutSeconds + ' giây lúc ' + new Date().toLocaleTimeString('vi-VN');
-    } catch (e) { $('LedTimeoutState').textContent = '⚠️ Lưu thất bại: ' + e.message; }
+        ledTimeoutBase = String($('LedTimeout').value);
+        return true;
+    } catch (e) { $('LedTimeoutState').textContent = '⚠️ Lưu thất bại: ' + e.message; return false; }
 }
 $('LedTimeoutSave').addEventListener('click', saveLedSettings);
+// Nút Lưu chung: ghi nốt card LED đang chờ (tự lưu sau 400 ms) + timeout gửi LED
+if (window.PGS) PGS.registerSave('LED', async () => { await flushSave(); return await saveLedSettings(); },
+    () => !!saveTimer || (ledTimeoutBase !== null && String($('LedTimeout').value) !== ledTimeoutBase), { auto: true });
 $('LedTimeout').addEventListener('keydown', e => { if (e.key === 'Enter') saveLedSettings(); });
 loadLedSettings();
 

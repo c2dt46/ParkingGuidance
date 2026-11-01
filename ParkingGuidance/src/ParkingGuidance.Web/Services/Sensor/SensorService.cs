@@ -1,3 +1,4 @@
+using ParkingGuidance.Web.Services.Project;
 using System.Collections.Concurrent;
 using ParkingGuidance.Web.Models;
 using ParkingGuidance.Web.Services.Persistence;
@@ -87,7 +88,7 @@ public interface ISensorService
 /// Trạng thái 2 loại cảm biến (MGT200 / Keytop) trong bộ nhớ — tương đương KTB._Sensor_Status_ / _Sensor_Err_ /
 /// PM200_Status / KeytopStatus của PGS. Cài đặt lưu data/sensors.json.
 /// </summary>
-public sealed class SensorService : ISensorService
+public sealed class SensorService : ISensorService, IProjectScoped
 {
     private const string StateKey = "sensors";
     private const int MaxDevices = SensorSettings.KeytopMax;     // 85 (>= 32 ZCU của MGT200)
@@ -120,6 +121,25 @@ public sealed class SensorService : ISensorService
     }
 
     public SensorSettings Settings => _settings;
+
+    // ---- IProjectScoped: lưu chung / mở dự án khác ----
+    public string ProjectPartName => "Cảm biến";
+
+    public bool FlushProject()
+    {
+        lock (_lock) return _persistence.Commit(StateKey, _settings);
+    }
+
+    public void ReloadProject()
+    {
+        lock (_lock)
+        {
+            _settings = (_persistence.Load<SensorSettings>(StateKey) ?? new SensorSettings()).Sanitized();
+            ClearStatesLocked();                                   // trạng thái đo của dự án cũ không còn đúng
+        }
+        FailPendingCommands("Dự án vừa được mở, hãy thử lại.");
+        SettingsChanged?.Invoke();                                 // SensorDriverService đóng kết nối cũ, kết nối lại theo cài đặt mới
+    }
 
     public (SensorSettings? Saved, string? Error) SaveSettings(SensorSettings input)
     {

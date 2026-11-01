@@ -85,6 +85,67 @@
     let painting = null;            // { val } khi dang keo chuot de chon / bo chon
     let anchor = null;              // { cam, i } o bam gan nhat — moc cho Shift+bam chon ca doan
 
+    // ---- combobox chon camera (thay cho day nut: dung duoc khi co hang tram camera)
+    const COMBO_MAX = 200;           // chi ve toi da ngan nay dong; gõ them de thu hep
+    const combo = { open: false, q: '', active: 0, list: [] };
+    const camText = c => `${c.floorName} / Zone ${c.zone} · ${c.label}`;
+
+    // camera hien trong danh sach xo = bo loc (tang / Zone / chi da chon / o loc) + tu khoa dang go trong combobox
+    function comboVisible() {
+        const terms = combo.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        let idx = filteredIdx();
+        if (terms.length) idx = idx.filter(i => {
+            const c = edit.cams[i], hay = `${c.label} ${c.floorName} ${c.floor} zone ${c.zone}`.toLowerCase();
+            return terms.every(t => hay.includes(t));
+        });
+        return idx;
+    }
+    function renderComboList() {
+        const box = $('mcCamList'), inp = $('McCamInput');
+        const all = comboVisible();
+        combo.list = all.slice(0, COMBO_MAX);
+        if (combo.active >= combo.list.length) combo.active = combo.list.length - 1;
+        if (combo.active < 0 && combo.list.length) combo.active = 0;
+        if (!combo.list.length) {
+            box.innerHTML = '<div class="mc-opt-none">Không có camera phù hợp</div>';
+            inp.removeAttribute('aria-activedescendant');
+            return;
+        }
+        box.innerHTML = combo.list.map((i, k) => {
+            const c = edit.cams[i], n = countCam(c), t = c.positions.length, empty = t === 0;
+            return `<div role="option" id="mcOpt${i}" data-c="${i}" aria-selected="${i === edit.cam}" ` +
+                   `class="mc-opt${k === combo.active ? ' act' : ''}${i === edit.cam ? ' sel' : ''}${n ? ' has' : ''}${!empty && n === t ? ' full' : ''}${empty ? ' empty' : ''}" ` +
+                   `title="${esc(c.label)} — ${empty ? 'chưa có vị trí đỗ nào' : n + '/' + t + ' vị trí được chọn'}">` +
+                   `<span class="nm"><span class="loc">${esc(c.floorName)} · Z${esc(c.zone)}</span><span class="lb">${esc(c.label)}</span></span><span class="cnt">${empty ? 'chưa có vị trí' : n + '/' + t}</span></div>`;
+        }).join('') + (all.length > combo.list.length
+            ? `<div class="mc-opt-none">… còn ${all.length - combo.list.length} camera nữa — gõ thêm để thu hẹp</div>` : '');
+        inp.setAttribute('aria-activedescendant', 'mcOpt' + combo.list[combo.active]);
+        const act = box.querySelector('.mc-opt.act'); if (act) act.scrollIntoView({ block: 'nearest' });
+    }
+    function openCombo() {
+        if (!edit || combo.open || !edit.cams.length) return;
+        combo.open = true; combo.q = '';
+        combo.active = Math.max(0, comboVisible().indexOf(edit.cam));
+        $('mcCamList').hidden = false;
+        $('McCamInput').setAttribute('aria-expanded', 'true');
+        renderComboList();
+        $('McCamInput').select();
+    }
+    function closeCombo() {
+        combo.open = false; combo.q = '';
+        $('mcCamList').hidden = true;
+        $('McCamInput').setAttribute('aria-expanded', 'false');
+        const cur = edit && edit.cams[edit.cam];
+        $('McCamInput').value = cur ? camText(cur) : '';
+    }
+    function selectCam(i) { if (!edit) return; edit.cam = i; anchor = null; closeCombo(); renderAll(); }
+    function stepCam(d) {
+        if (!edit) return;
+        const idx = filteredIdx(), p = idx.indexOf(edit.cam), q = p + d;
+        if (p < 0 || q < 0 || q >= idx.length) return;
+        edit.cam = idx[q]; anchor = null; renderAll();
+    }
+
     const curPositions = () => (edit.cams[edit.cam] ? edit.cams[edit.cam].positions : []);
     const countCam = c => c.positions.reduce((n, p) => n + (edit.picked.has(p.key) ? 1 : 0), 0);
 
@@ -136,7 +197,8 @@
     function closeEditor() {
         edit = null; painting = null; anchor = null;
         $('mcForm').style.display = 'none';
-        $('mcGrid').innerHTML = ''; $('mcCams').innerHTML = '';        // giai phong DOM cua bo chon
+        $('mcGrid').innerHTML = ''; $('mcCamList').innerHTML = '';     // giai phong DOM cua bo chon
+        closeCombo();
     }
 
     // mau o duoc chon theo trang thai dang dem: Da do = do, Con trong = xanh la, Loi = vang; chua chon trang thai = xanh duong
@@ -175,14 +237,16 @@
         // camera dang xem khong con trong bo loc thi chuyen sang camera dau tien dang hien
         if (!idx.includes(edit.cam)) { edit.cam = idx.length ? idx[0] : -1; anchor = null; }
 
-        const box = $('mcCams');
         $('mcFilterInfo').textContent = edit.cams.length ? `Hiện ${idx.length}/${edit.cams.length} camera` : '';
-        box.innerHTML = idx.length ? idx.map(i => {
-            const c = edit.cams[i], n = countCam(c), t = c.positions.length;
-            const empty = t === 0;
-            return `<button type="button" class="mc-cam${i === edit.cam ? ' sel' : ''}${n ? ' has' : ''}${!empty && n === t ? ' full' : ''}${empty ? ' empty' : ''}" data-c="${i}" ` +
-                   `title="${esc(c.label)} — ${empty ? 'chưa có vị trí đỗ nào' : n + '/' + t + ' vị trí được chọn'}"><span class="nm">${esc(c.floorName)} / Zone ${esc(c.zone)} · ${esc(c.label)}</span><span class="cnt">${empty ? 'chưa có vị trí' : n + '/' + t}</span></button>`;
-        }).join('') : '';
+
+        // cap nhat combobox (o go + nut truoc/sau); neu danh sach dang mo thi ve lai de dem so vi tri moi
+        const inp = $('McCamInput'), cur = edit.cams[edit.cam], pos = idx.indexOf(edit.cam);
+        inp.disabled = !edit.cams.length;
+        inp.placeholder = !edit.cams.length ? 'Chưa có camera' : idx.length ? 'Chọn / tìm camera…' : 'Không có camera phù hợp bộ lọc';
+        if (!combo.open) inp.value = cur ? camText(cur) : '';
+        $('McPrev').disabled = pos <= 0;
+        $('McNext').disabled = pos < 0 || pos >= idx.length - 1;
+        if (combo.open) renderComboList();
 
         const c = edit.cams[edit.cam];
         $('mcCamTitle').textContent = c ? `${c.floorName} / Zone ${c.zone} — ${c.label}: ${countCam(c)}/${c.positions.length} vị trí được chọn` : '';
@@ -264,10 +328,44 @@
         if (edit) { renderCams(); renderSummary(); }
     }
 
-    $('mcCams').addEventListener('click', e => {
-        const b = e.target.closest('.mc-cam'); if (!b || !edit) return;
-        edit.cam = +b.dataset.c; anchor = null; renderAll();
+    // ---- su kien combobox camera
+    const cin = $('McCamInput');
+    cin.addEventListener('focus', openCombo);
+    cin.addEventListener('click', openCombo);
+    cin.addEventListener('blur', closeCombo);
+    cin.addEventListener('input', () => {
+        if (!edit) return;
+        if (!combo.open) openCombo();
+        combo.q = cin.value; combo.active = 0; renderComboList();
     });
+    cin.addEventListener('keydown', e => {
+        if (!edit) return;
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (!combo.open) { openCombo(); return; }
+            const n = combo.list.length;
+            if (n) { combo.active = (combo.active + (e.key === 'ArrowDown' ? 1 : -1) + n) % n; renderComboList(); }
+        } else if (e.key === 'Enter') {
+            if (!combo.open) return;
+            e.preventDefault();
+            const i = combo.list[combo.active]; if (i != null) selectCam(i);
+        } else if (e.key === 'Escape') {
+            if (combo.open) { e.preventDefault(); e.stopPropagation(); closeCombo(); }
+        }
+    });
+    // mousedown (khong phai click) + preventDefault: chon xong ma o go khong bi mat focus truoc
+    $('mcCamList').addEventListener('mousedown', e => {
+        e.preventDefault();
+        const o = e.target.closest('.mc-opt[data-c]');
+        if (o) selectCam(+o.dataset.c);
+    });
+    $('McCamArrow').addEventListener('mousedown', e => {
+        e.preventDefault();
+        if (!edit) return;
+        if (combo.open) closeCombo(); else { cin.focus(); openCombo(); }
+    });
+    $('McPrev').addEventListener('click', () => stepCam(-1));
+    $('McNext').addEventListener('click', () => stepCam(1));
     function setAll(positions, on) { positions.forEach(p => { if (on) edit.picked.add(p.key); else edit.picked.delete(p.key); }); renderAll(); }
     $('McCamAll').addEventListener('click', () => { if (edit) setAll(curPositions(), true); });
     $('McCamNone').addEventListener('click', () => { if (edit) setAll(curPositions(), false); });

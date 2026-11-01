@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 let zoneCamera = null;      // camera dang chon (day du du lieu tu server)
 let zones = [];             // ban lam viec cac vung (chua luu cho den khi bam "Luu")
+let zonesBaseline = null, motionBaseline = null;   // ảnh chụp lúc chọn camera / lưu xong
 let drawing = false;
 let currentImageFile = null;
 let lastTestResult = null;  // ket qua nhan dien gan nhat (ve lai khi anh moi khong thay doi)
@@ -125,6 +126,8 @@ document.getElementById('zoneCameraSelect').addEventListener('change', async (e)
     zones = JSON.parse(JSON.stringify(zoneCamera.zones || []));
     loadUsedSlotIds(all);
     document.getElementById('motionThresholdInput').value = zoneCamera.motionThreshold ?? '';
+    zonesBaseline = JSON.stringify(zones);
+    motionBaseline = document.getElementById('motionThresholdInput').value;
     applyModeUi(zoneCamera.detectionMode || 'Automatic');
 
     // Goi y danh sach o do co san tren tang cua camera nay (de gan SlotId khong go nham)
@@ -651,15 +654,15 @@ function renderZoneList() {
 // ---------------------------------------------------------------------------
 // Luu vung + nguong chuyen dong
 // ---------------------------------------------------------------------------
-document.getElementById('saveZonesBtn').addEventListener('click', async () => {
-    if (!zoneCamera) return;
+async function saveZones(silent, auto) {
+    if (!zoneCamera) return true;
     for (let i = 0; i < zones.length; i++) {
         const z = zones[i];
         const err = checkSlotId(z.slotId, i);
-        if (err) { alert(`Vùng thứ ${i + 1}: ${err}`); return; }
+        if (err) { if (!auto) alert(`Vùng thứ ${i + 1}: ${err}`); return false; }
         z.slotId = parseSlotNumber(z.slotId);
         z.name = `Ô ${z.slotId}`;
-        if (z.points.length < 3) { alert(`Vùng ${z.slotId} cần ít nhất 3 điểm.`); return; }
+        if (z.points.length < 3) { if (!auto) alert(`Vùng ${z.slotId} cần ít nhất 3 điểm.`); return false; }
     }
 
     const res = await fetch(`/api/system/cameras/${zoneCamera.id}/zones`, {
@@ -670,24 +673,39 @@ document.getElementById('saveZonesBtn').addEventListener('click', async () => {
 
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(err.message || 'Không lưu được vùng nhận diện.');
-        return;
+        if (!auto) alert(err.message || 'Không áp dụng được vùng nhận diện.');
+        return false;
     }
-    alert('Đã lưu vùng nhận diện cho camera này.');
-});
+    zonesBaseline = JSON.stringify(zones);
+    if (!silent) alert('Đã áp dụng vùng nhận diện cho camera này (bấm 💾 Lưu ở menu trái để ghi vào file dự án).');
+    return true;
+}
+document.getElementById('saveZonesBtn').addEventListener('click', () => saveZones(false));
 
-document.getElementById('saveMotionBtn').addEventListener('click', async () => {
-    if (!zoneCamera) return;
+async function saveMotion(silent, auto) {
+    if (!zoneCamera) return true;
     const raw = document.getElementById('motionThresholdInput').value;
     const value = raw === '' ? null : parseFloat(raw);
 
-    await fetch(`/api/system/cameras/${zoneCamera.id}/motion-threshold`, {
+    const res = await fetch(`/api/system/cameras/${zoneCamera.id}/motion-threshold`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ motionThreshold: value })
     });
-    alert('Đã lưu ngưỡng tối ưu.');
-});
+    if (!res.ok) { if (!auto) alert('Không áp dụng được ngưỡng tối ưu.'); return false; }
+    motionBaseline = raw;
+    if (!silent) alert('Đã áp dụng ngưỡng tối ưu (bấm 💾 Lưu ở menu trái để ghi vào file dự án).');
+    return true;
+}
+document.getElementById('saveMotionBtn').addEventListener('click', () => saveMotion(false));
+
+// Nút Lưu chung (thanh Dự án): lưu vùng + ngưỡng của camera đang chọn nếu có sửa
+function zonesDirty() { return !!zoneCamera && zonesBaseline !== null && JSON.stringify(zones) !== zonesBaseline; }
+function motionDirty() { return !!zoneCamera && motionBaseline !== null && document.getElementById('motionThresholdInput').value !== motionBaseline; }
+if (window.PGS) {
+    PGS.registerSave('Vùng nhận diện', async (auto) => (zonesDirty() ? await saveZones(true, !!auto) : true), zonesDirty, { auto: true });
+    PGS.registerSave('Ngưỡng chuyển động', async (auto) => (motionDirty() ? await saveMotion(true, !!auto) : true), motionDirty, { auto: true });
+}
 
 // ---------------------------------------------------------------------------
 // Che do nhan dien: Tu dong / Thu cong + nut "Nhan dien ngay"

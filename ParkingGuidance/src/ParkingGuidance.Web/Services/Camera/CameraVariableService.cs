@@ -1,3 +1,4 @@
+using ParkingGuidance.Web.Services.Project;
 using ParkingGuidance.Web.Models;
 using ParkingGuidance.Web.Services.CameraRegistry;
 using ParkingGuidance.Web.Services.Floor;
@@ -78,7 +79,7 @@ public interface ICameraVariableService
 /// (không giữ bản sao, không có luồng nền). Còn trống = ô "Empty", Đã đỗ = "Occupied", Lỗi = "Error" (vd camera mất kết nối).
 /// Vị trí mà vùng nhận diện đã bị xoá khỏi camera thì không được đếm.
 /// </summary>
-public sealed class CameraVariableService : ICameraVariableService
+public sealed class CameraVariableService : ICameraVariableService, IProjectScoped
 {
     private const string StateKey = "camera-variables";
     public const int MaxVariables = 200;
@@ -104,27 +105,42 @@ public sealed class CameraVariableService : ICameraVariableService
         _projectTags = projectTags;
         _logger = logger;
 
-        try
-        {
-            foreach (var v in _persistence.Load<List<CameraVariable>>(StateKey) ?? new())
-            {
-                if (v is null || string.IsNullOrWhiteSpace(v.Name)) continue;
-                if (_vars.Any(x => x.Name.Equals(v.Name, StringComparison.OrdinalIgnoreCase))) continue;
-                if (v.Count is { } c && !Enum.IsDefined(c)) v.Count = null;
-                v.Slots = (v.Slots ?? new()).Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).Distinct().ToList();
-                v.Description = (v.Description ?? "").Trim();
-                _vars.Add(v);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Khong doc duoc bien MC; dung danh sach trong.");
-        }
+        LoadFromDisk();
 
         // Xoá vị trí đỗ (vùng nhận diện) / xoá camera / đổi tầng-Zone của camera thì bỏ luôn các vị trí đó khỏi dữ liệu biến MC.
         _cameras.Changed += Prune;
         if (_cameras.GetAll().Count > 0) Prune();               // dọn phần còn sót từ trước (không dọn khi chưa có camera nào, tránh xoá nhầm)
     }
+
+    private void LoadFromDisk()
+    {
+        lock (_lock)
+        {
+            _vars.Clear();
+            try
+            {
+                foreach (var v in _persistence.Load<List<CameraVariable>>(StateKey) ?? new())
+                {
+                    if (v is null || string.IsNullOrWhiteSpace(v.Name)) continue;
+                    if (_vars.Any(x => x.Name.Equals(v.Name, StringComparison.OrdinalIgnoreCase))) continue;
+                    if (v.Count is { } c && !Enum.IsDefined(c)) v.Count = null;
+                    v.Slots = (v.Slots ?? new()).Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).Distinct().ToList();
+                    v.Description = (v.Description ?? "").Trim();
+                    _vars.Add(v);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Khong doc duoc bien MC; dung danh sach trong.");
+            }
+
+        }
+    }
+
+    // ---- IProjectScoped: lưu chung / mở dự án khác ----
+    public string ProjectPartName => "Biến MC (camera)";
+    public bool FlushProject() { lock (_lock) return _persistence.Commit(StateKey, _vars); }
+    public void ReloadProject() { LoadFromDisk(); }
 
     /// <summary>Bỏ khỏi mọi biến MC các vị trí không còn tồn tại trên camera nào, rồi lưu nếu có thay đổi.</summary>
     private void Prune()

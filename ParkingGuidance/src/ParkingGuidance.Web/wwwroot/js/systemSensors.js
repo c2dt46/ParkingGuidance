@@ -67,6 +67,8 @@ function readForm() {
     };
 }
 
+let snBaseline = null;     // ảnh chụp form lúc tải / lưu xong, để biết có thay đổi chưa lưu
+
 async function saveSettings() {
     const state = $('SnSaveState');
     try {
@@ -74,10 +76,13 @@ async function saveSettings() {
         settings = saved;
         fillForm(saved);                       // hien lai gia tri da duoc chuan hoa (vd gioi han so luong)
         selDevice = 1;
-        state.textContent = '✅ Đã lưu lúc ' + new Date().toLocaleTimeString('vi-VN');
+        state.textContent = '✅ Đã áp dụng lúc ' + new Date().toLocaleTimeString('vi-VN');
+        snBaseline = JSON.stringify(readForm());
         await refreshStatus();
+        return true;
     } catch (e) {
         state.textContent = '⚠️ Lưu thất bại: ' + e.message;
+        return false;
     }
 }
 
@@ -324,6 +329,8 @@ document.querySelectorAll('input[name="SensorType"]').forEach(r => r.addEventLis
 $('SnAll').addEventListener('click', () => { enabledEdit.fill(true); renderEnableGrid(); });
 $('SnNone').addEventListener('click', () => { enabledEdit.fill(false); renderEnableGrid(); });
 $('SnSave').addEventListener('click', saveSettings);
+// Nút Lưu chung của thanh Dự án (Ctrl+S) gọi hàm này
+if (window.PGS) PGS.registerSave('Cảm biến', () => saveSettings(), () => snBaseline !== null && JSON.stringify(readForm()) !== snBaseline, { auto: true });
 $('SnTest').addEventListener('click', testFrame);
 initLampTable();
 initCmdPanel();
@@ -334,7 +341,7 @@ $('CmdRun').addEventListener('click', () => runCommand(false));
 $('CmdAuto').addEventListener('change', toggleAuto);
 
 (async () => {
-    try { settings = await api(API + '/settings'); fillForm(settings); }
+    try { settings = await api(API + '/settings'); fillForm(settings); snBaseline = JSON.stringify(readForm()); }
     catch (e) { $('SnSaveState').textContent = '⚠️ Không tải được cài đặt: ' + e.message; }
     await refreshStatus();
     setInterval(() => { if (activeTab === 'mon' && !document.hidden) refreshStatus(); }, 1000);   // chi poll khi dang xem tab Giam sat

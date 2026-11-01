@@ -111,7 +111,7 @@
 
       <div class="row">
         <label class="field" for="password">Mật khẩu</label>
-        <input id="password" name="Password" type="password" autocomplete="current-password" autofocus>
+        <input id="password" name="Password" type="password" autocomplete="new-password" autofocus>   <!-- new-password: trình duyệt không đề nghị lưu / điền sẵn mật khẩu -->
       </div>
 
       <p class="error" id="error" role="alert">@Model.Error</p>
@@ -121,7 +121,7 @@
 
 <script>
 (function () {
-  // Danh sach hien trong combobox. Tai khoan DEV khong nam o day nhung van dang nhap duoc khi go ten.
+  // Danh sach hien trong combobox. Tai khoan DEV khong nam o day nhung van dang nhap duoc khi go ten. Lic cung la tai khoan AN (khong co trong danh sach), chi dang nhap khi go ten.
   var ACCOUNTS = ['User', 'Megatech'];
 
   var combo = document.getElementById('combo');

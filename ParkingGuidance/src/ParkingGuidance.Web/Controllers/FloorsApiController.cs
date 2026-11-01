@@ -5,6 +5,7 @@ using ParkingGuidance.Web.Services.CameraRegistry;
 using ParkingGuidance.Web.Services.Floor;
 using ParkingGuidance.Web.Services.Layout;
 using ParkingGuidance.Web.Services.Parking;
+using ParkingGuidance.Web.Services.Persistence;
 
 namespace ParkingGuidance.Web.Controllers;
 
@@ -17,10 +18,12 @@ public class FloorsApiController : ControllerBase
     private readonly ILayoutService _layout;
     private readonly IParkingService _parking;
     private readonly ICameraRegistryService _cameras;
+    private readonly IPersistenceService _persistence;
 
     public FloorsApiController(IFloorService floors, IWebHostEnvironment env,
-        ILayoutService layout, IParkingService parking, ICameraRegistryService cameras)
+        ILayoutService layout, IParkingService parking, ICameraRegistryService cameras, IPersistenceService persistence)
     {
+        _persistence = persistence;
         _floors = floors;
         _env = env;
         _layout = layout;
@@ -85,7 +88,7 @@ public class FloorsApiController : ControllerBase
     {
         try
         {
-            var floorsDir = Path.Combine(_env.WebRootPath, "uploads", "floors");
+            var floorsDir = Path.Combine(_persistence.ProjectUploadsDirectory, "floors");
             if (Directory.Exists(floorsDir))
             {
                 var rx = new Regex("^" + Regex.Escape(floorId) + @"_\d+\.[A-Za-z0-9]+$", RegexOptions.IgnoreCase);
@@ -93,11 +96,11 @@ public class FloorsApiController : ControllerBase
                     TryDelete(file);
             }
 
-            var uploadsRoot = Path.GetFullPath(Path.Combine(_env.WebRootPath, "uploads")) + Path.DirectorySeparatorChar;
+            var uploadsRoot = Path.GetFullPath(_persistence.ProjectUploadsDirectory) + Path.DirectorySeparatorChar;
             foreach (var url in layoutImageUrls.Distinct())
             {
                 if (!url.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase)) continue;
-                var full = Path.GetFullPath(Path.Combine(_env.WebRootPath, url.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
+                var full = Path.GetFullPath(Path.Combine(_persistence.ProjectDirectory, url.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
                 if (full.StartsWith(uploadsRoot, StringComparison.OrdinalIgnoreCase)) TryDelete(full);
             }
         }
@@ -117,7 +120,7 @@ public class FloorsApiController : ControllerBase
         if (image is null || image.Length == 0)
             return BadRequest(new { message = "Thieu file anh." });
 
-        var uploadsDir = Path.Combine(_env.WebRootPath, "uploads", "floors");
+        var uploadsDir = Path.Combine(_persistence.ProjectUploadsDirectory, "floors");
         Directory.CreateDirectory(uploadsDir);
 
         var ext = Path.GetExtension(image.FileName);

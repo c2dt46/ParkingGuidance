@@ -1,3 +1,4 @@
+using ParkingGuidance.Web.Services.Project;
 using System.Text.RegularExpressions;
 using ParkingGuidance.Web.Models;
 using ParkingGuidance.Web.Services.Persistence;
@@ -50,7 +51,7 @@ public interface ISensorVariableService
 /// (không giữ bản sao, không có luồng nền). Quy ước giống phần "Giám sát": thiết bị đang kết nối nhưng mất kết nối thì mọi cảm biến
 /// của nó tính là Lỗi; cảm biến chưa báo lần nào không thuộc trạng thái nào.
 /// </summary>
-public sealed class SensorVariableService : ISensorVariableService
+public sealed class SensorVariableService : ISensorVariableService, IProjectScoped
 {
     private const string StateKey = "sensor-variables";
     public const int MaxVariables = 200;
@@ -72,22 +73,7 @@ public sealed class SensorVariableService : ISensorVariableService
         _projectTags = projectTags;
         _logger = logger;
 
-        try
-        {
-            foreach (var v in _persistence.Load<List<SensorVariable>>(StateKey) ?? new())
-            {
-                if (v is null || !NameRx.IsMatch(v.Name ?? "")) continue;
-                if (_vars.Any(x => x.Name.Equals(v.Name, StringComparison.OrdinalIgnoreCase))) continue;
-                var (clean, _) = CleanBody(v);
-                if (clean is null) continue;
-                clean.Name = v.Name;
-                _vars.Add(clean);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Khong doc duoc bien MS; dung danh sach trong.");
-        }
+        LoadFromDisk();
     }
 
     // ------------------------------------------------------------------ đọc
@@ -102,6 +88,36 @@ public sealed class SensorVariableService : ISensorVariableService
         return copy.OrderBy(SortKey).ThenBy(v => v.Name, StringComparer.OrdinalIgnoreCase)
                    .Select(v => Evaluate(v, snap, current)).ToList();
     }
+
+    private void LoadFromDisk()
+    {
+        lock (_lock)
+        {
+            _vars.Clear();
+            try
+            {
+                foreach (var v in _persistence.Load<List<SensorVariable>>(StateKey) ?? new())
+                {
+                    if (v is null || !NameRx.IsMatch(v.Name ?? "")) continue;
+                    if (_vars.Any(x => x.Name.Equals(v.Name, StringComparison.OrdinalIgnoreCase))) continue;
+                    var (clean, _) = CleanBody(v);
+                    if (clean is null) continue;
+                    clean.Name = v.Name;
+                    _vars.Add(clean);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Khong doc duoc bien MS; dung danh sach trong.");
+            }
+
+        }
+    }
+
+    // ---- IProjectScoped: lưu chung / mở dự án khác ----
+    public string ProjectPartName => "Biến MS (cảm biến)";
+    public bool FlushProject() { lock (_lock) return _persistence.Commit(StateKey, _vars); }
+    public void ReloadProject() { LoadFromDisk(); }
 
     public SensorVariable? Get(string name)
     {

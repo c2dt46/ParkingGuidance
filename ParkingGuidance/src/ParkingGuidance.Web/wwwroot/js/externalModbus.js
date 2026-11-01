@@ -135,15 +135,17 @@
                 body: JSON.stringify(data[kind])
             });
             const d = await res.json().catch(() => ({}));
-            if (!res.ok) { say(kind, d.message || `Lỗi ${res.status}`, true); return; }
+            if (!res.ok) { say(kind, d.message || `Lỗi ${res.status}`, true); return false; }
             data[kind] = d[KIND[kind].api] || [];
             dirty[kind] = false;
             if (kind === 'client' && mapId !== null && !data.client.some(r => r.id === mapId)) closeMap();
             render(kind);
             if (kind === 'client' && mapId !== null) renderMap();
-            say(kind, '✔ Đã lưu.');
+            say(kind, '✔ Đã áp dụng.');
+            return true;
         } catch (err) {
             say(kind, `Không lưu được: ${err.message}`, true);
+            return false;
         }
     }
 
@@ -297,6 +299,13 @@
     $('mbSvSave').addEventListener('click', () => save('server'));
     $('mbClSave').addEventListener('click', () => save('client'));
     bind('server'); bind('client');
+    // Nút Lưu chung (thanh Dự án): lưu Server / Client nếu có sửa
+    if (window.PGS) PGS.registerSave('Modbus', async () => {
+        let ok = true;
+        if (dirty.server) ok = (await save('server')) !== false && ok;
+        if (dirty.client) ok = (await save('client')) !== false && ok;
+        return ok;
+    }, () => dirty.server || dirty.client, { auto: true });
 
     window.addEventListener('beforeunload', e => {
         if (dirty.server || dirty.client) { e.preventDefault(); e.returnValue = ''; }

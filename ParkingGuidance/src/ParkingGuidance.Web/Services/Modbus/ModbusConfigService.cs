@@ -1,3 +1,4 @@
+using ParkingGuidance.Web.Services.Project;
 using System.Net;
 using System.Net.Sockets;
 using ParkingGuidance.Web.Models;
@@ -22,7 +23,7 @@ public interface IModbusConfigService
     event Action? Changed;
 }
 
-public sealed class ModbusConfigService : IModbusConfigService
+public sealed class ModbusConfigService : IModbusConfigService, IProjectScoped
 {
     private const string StateKey = "modbus-config";
     public const int MaxEntries = 32;
@@ -48,19 +49,7 @@ public sealed class ModbusConfigService : IModbusConfigService
         _vars = vars;
         _camVars = camVars;
         _logger = logger;
-        try
-        {
-            var loaded = _persistence.Load<ModbusConfig>(StateKey);
-            if (loaded is not null)
-            {
-                _cfg.Servers = (loaded.Servers ?? new()).Where(s => s is not null && s.Id >= 0).OrderBy(s => s.Id).ToList();
-                _cfg.Clients = (loaded.Clients ?? new()).Where(c => c is not null && c.Id >= 0).OrderBy(c => c.Id).ToList();
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Khong doc duoc khai bao Modbus; dung danh sach trong.");
-        }
+        LoadFromDisk();
     }
 
     public ModbusConfig Get()
@@ -72,6 +61,33 @@ public sealed class ModbusConfigService : IModbusConfigService
                 Clients = _cfg.Clients.Select(c => c.Clone()).ToList()
             };
     }
+
+    private void LoadFromDisk()
+    {
+        lock (_lock)
+        {
+            _cfg = new ModbusConfig();
+            try
+            {
+                var loaded = _persistence.Load<ModbusConfig>(StateKey);
+                if (loaded is not null)
+                {
+                    _cfg.Servers = (loaded.Servers ?? new()).Where(s => s is not null && s.Id >= 0).OrderBy(s => s.Id).ToList();
+                    _cfg.Clients = (loaded.Clients ?? new()).Where(c => c is not null && c.Id >= 0).OrderBy(c => c.Id).ToList();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Khong doc duoc khai bao Modbus; dung danh sach trong.");
+            }
+
+        }
+    }
+
+    // ---- IProjectScoped: lưu chung / mở dự án khác ----
+    public string ProjectPartName => "Modbus";
+    public bool FlushProject() { lock (_lock) return _persistence.Commit(StateKey, _cfg); }
+    public void ReloadProject() { LoadFromDisk(); RaiseChanged(); }
 
     public string? SaveServers(IEnumerable<ModbusServerEntry> servers)
     {

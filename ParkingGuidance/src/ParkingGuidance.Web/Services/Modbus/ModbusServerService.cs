@@ -228,6 +228,7 @@ public sealed class ModbusServerService : BackgroundService, IModbusServerStatus
             using (client)
             using (ct.Register(() => { try { client.Close(); } catch { /* da dong */ } }))
             {
+                if (ct.IsCancellationRequested) return;       // server dang tat/doi cau hinh: client da bi dong, NoDelay se NullReference
                 client.NoDelay = true;
                 var stream = client.GetStream();
                 var header = new byte[7];
@@ -266,9 +267,9 @@ public sealed class ModbusServerService : BackgroundService, IModbusServerStatus
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException or SocketException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException or SocketException or InvalidOperationException or NullReferenceException)
         {
-            /* master ngat ket noi / het gio / dang tat: khong phai loi cua chuong trinh */
+            /* (NullReference: TcpClient da bi dong boi ct.Register khi server dang tat/doi cau hinh -> Client = null) master ngat ket noi / het gio / dang tat: khong phai loi cua chuong trinh */
         }
         catch (Exception ex)
         {
