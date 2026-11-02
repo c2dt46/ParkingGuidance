@@ -61,6 +61,19 @@ public class LayoutElement
     /// <summary>Chỉ dùng cho Nút ấn: mã mặt bằng sẽ chuyển tới khi bấm ở chế độ "Chạy" (null = không có hành động).</summary>
     public string? TargetFloorId { get; set; }
 
+    /// <summary>Nút ấn chuyển mặt bằng: tô màu nút khi mặt bằng ĐANG XEM chính là <see cref="TargetFloorId"/> để nhận biết (mặc định bật).</summary>
+    public bool ButtonActiveEnabled { get; set; } = true;
+
+    /// <summary>Nút ấn: false = chữ thường (mặc định là in đậm), null/true = in đậm.</summary>
+    public bool? FontBold { get; set; }
+
+    /// <summary>Nút ấn: true = chữ nghiêng.</summary>
+    public bool? FontItalic { get; set; }
+
+    /// <summary>Màu nền / màu chữ của nút khi đang ở mặt bằng đích (#rrggbb). null = mặc định (xanh lá / trắng).</summary>
+    public string? ActiveBackgroundColor { get; set; }
+    public string? ActiveTextColor { get; set; }
+
     // --- Hình ảnh ---
     public string? ImageUrl { get; set; }
 

@@ -45,6 +45,11 @@ public class LayoutApiController : ControllerBase
 
         public string? Label { get; set; }
         public string? TargetFloorId { get; set; }
+        public bool ButtonActiveEnabled { get; set; } = true;
+        public bool? FontBold { get; set; }
+        public bool? FontItalic { get; set; }
+        public string? ActiveBackgroundColor { get; set; }
+        public string? ActiveTextColor { get; set; }
         public string? ImageUrl { get; set; }
         public string? Content { get; set; }
         /// <summary>Với loại ParkingSlot: SỐ THỨ TỰ vị trí nhận diện (1, 2, 3...) — khoá ô "{tầng}-{zone}-{số}" do máy chủ tạo.</summary>
@@ -146,6 +151,19 @@ public class LayoutApiController : ControllerBase
         e.TextColor = dto.TextColor is not null && Regex.IsMatch(dto.TextColor, "^#[0-9a-fA-F]{6}$") ? dto.TextColor : null;
         e.FontSize = ClampOrNull(dto.FontSize, 1, 200);
         e.LineArrow = dto.LineArrow is "none" or "start" or "end" or "both" ? dto.LineArrow : null;
+    }
+
+    /// <summary>Nút ấn: bật/tắt đổi màu khi đang ở mặt bằng đích + 2 màu tuỳ chọn (chỉ nhận #rrggbb). Loại khác: bỏ qua.</summary>
+    private static void ApplyButtonProps(LayoutElement e, ElementDto dto)
+    {
+        if (e.Type != LayoutElementType.Button) return;
+        static string? Hex(string? c) => c is not null && Regex.IsMatch(c, "^#[0-9a-fA-F]{6}$") ? c : null;
+        e.ButtonActiveEnabled = dto.ButtonActiveEnabled;
+        e.TextAlign = dto.TextAlign is "left" or "center" or "right" ? dto.TextAlign : null;
+        e.FontBold = dto.FontBold == false ? false : null;          // chi luu khi tat dam (mac dinh dam)
+        e.FontItalic = dto.FontItalic == true ? true : null;
+        e.ActiveBackgroundColor = Hex(dto.ActiveBackgroundColor);
+        e.ActiveTextColor = Hex(dto.ActiveTextColor);
     }
 
     /// <summary>Thống kê chỗ (SlotStats): hướng, cỡ chữ nhãn, có tính camera không, danh sách biến MS cộng thêm (đã kiểm tra tên). Loại khác: bỏ qua.</summary>
@@ -430,12 +448,60 @@ public class LayoutApiController : ControllerBase
     [HttpGet("stats")]
     public IActionResult GetStats([FromQuery] string floor = "B1") => Ok(ComputeStats(floor));
 
+    // ---- Trạng thái đèn nguồn Cảm biến / Vị trí đỗ trên camera (dùng chung cho lamp-states và lamp-info) ----
+
+    /// <summary>Cảm biến: thiết bị không kích hoạt / ngoài số thiết bị đang dùng / chưa báo trạng thái → Unused; thiết bị mất kết nối → Error;
+    /// còn lại 0 = Free, 1 = Parked, 2 = Error. Kèm lý do (hiện ở cửa sổ thông tin).</summary>
+    private static (string State, string Reason) SensorLampState(SensorSnapshot? snap, LayoutElement e)
+    {
+        if (snap is null || e.SensorDevice < 0 || e.SensorDevice >= snap.Devices.Count)
+            return ("Unused", "Thiết bị nằm ngoài số thiết bị đang sử dụng");
+        var d = snap.Devices[e.SensorDevice];
+        if (!d.Enabled) return ("Unused", "Thiết bị chưa được kích hoạt");
+        if (e.SensorIndex < 0 || e.SensorIndex >= snap.SensorsPerDevice)
+            return ("Unused", "Cảm biến nằm ngoài số cảm biến của thiết bị");
+        if (!d.Online) return ("Error", "Thiết bị đang mất kết nối");
+        var c = e.SensorIndex < d.States.Length ? d.States[e.SensorIndex] : '?';
+        return c switch
+        {
+            '0' => ("Free", ""),
+            '1' => ("Parked", ""),
+            '2' => ("Error", "Cảm biến báo lỗi"),
+            _ => ("Unused", "Cảm biến chưa báo trạng thái lần nào")
+        };
+    }
+
+    /// <summary>Vị trí đỗ trên camera: chưa khai báo trên camera nào của tầng+Zone → Unused; còn lại theo ô đỗ (Occupied = Parked, Error, còn lại Free).</summary>
+    private static (string State, string Reason) CameraLampState(LayoutElement e, HashSet<string> declared, Dictionary<string, ParkingSlot> slotByKey)
+    {
+        var key = SlotKey.ForZone(e.Floor, e.LampZone, e.LampPosition);
+        if (key is null) return ("Unused", "Chưa chọn vị trí đỗ");
+        if (!declared.Contains(key)) return ("Unused", "Vị trí chưa được khai báo trên camera nào của tầng");
+        var status = slotByKey.TryGetValue(key, out var slot) ? slot.Status : SlotStatus.Empty;
+        return status switch
+        {
+            SlotStatus.Occupied => ("Parked", ""),
+            SlotStatus.Error => ("Error", slot?.ErrorMessage ?? "Camera không lấy được ảnh"),
+            _ => ("Free", "")
+        };
+    }
+
+    /// <summary>Các vị trí đã khai báo trên camera của tầng + ô đỗ hiện tại (khoá ô → ParkingSlot).</summary>
+    private (HashSet<string> Declared, Dictionary<string, ParkingSlot> SlotByKey) CameraLookups(string floor)
+    {
+        var floorKey = SlotKey.NormalizeFloor(floor);
+        var declared = _registry.GetAll()
+            .Where(c => SlotKey.NormalizeFloor(c.Floor) == floorKey)
+            .SelectMany(c => c.Zones.Select(z => SlotKey.ForZone(c.Floor, c.Zone, z.SlotId)))
+            .Where(k => k is not null).Select(k => k!)
+            .ToHashSet(StringComparer.Ordinal);
+        var slotByKey = _parking.GetSlots(floor).GroupBy(s => s.SlotId).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        return (declared, slotByKey);
+    }
+
     /// <summary>
     /// Trạng thái sống của các ĐÈN (Lamp) trên tầng có nguồn là Cảm biến hoặc Vị trí đỗ chỉ định trên camera.
-    /// Trả về { idĐối tượng: "Parked" | "Free" | "Error" | "Unused" }.
-    ///  • Cảm biến: thiết bị không kích hoạt / ngoài số thiết bị đang dùng / chưa báo trạng thái lần nào → Unused;
-    ///    thiết bị đang mất kết nối → Error (cùng quy ước phần Giám sát cảm biến); còn lại theo trạng thái 0 = Free, 1 = Parked, 2 = Error.
-    ///  • Vị trí đỗ trên camera: vị trí chưa được vẽ/khai báo cho camera nào của tầng+Zone → Unused; còn lại theo ô đỗ: Occupied = Parked, Error, còn lại Free.
+    /// Trả về { idĐối tượng: "Parked" | "Free" | "Error" | "Unused" } (xem <see cref="SensorLampState"/>, <see cref="CameraLampState"/>).
     /// </summary>
     [HttpGet("lamp-states")]
     public IActionResult GetLampStates([FromQuery] string floor = "B1")
@@ -446,43 +512,88 @@ public class LayoutApiController : ControllerBase
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         if (lamps.Count == 0) return Ok(result);
 
-        // --- Cảm biến ---
         SensorSnapshot? snap = lamps.Any(l => l.BitSource == "Sensor") ? _sensors.GetSnapshot() : null;
-        string SensorState(LayoutElement e)
-        {
-            if (snap is null || e.SensorDevice < 0 || e.SensorDevice >= snap.Devices.Count) return "Unused";
-            var d = snap.Devices[e.SensorDevice];
-            if (!d.Enabled || e.SensorIndex < 0 || e.SensorIndex >= snap.SensorsPerDevice) return "Unused";
-            if (!d.Online) return "Error";
-            return e.SensorIndex < d.States.Length
-                ? d.States[e.SensorIndex] switch { '0' => "Free", '1' => "Parked", '2' => "Error", _ => "Unused" }
-                : "Unused";
-        }
-
-        // --- Vị trí đỗ chỉ định trên camera ---
-        HashSet<string>? declared = null;
-        Dictionary<string, ParkingSlot>? slotByKey = null;
-        if (lamps.Any(l => l.BitSource == "CameraSlot"))
-        {
-            var floorKey = SlotKey.NormalizeFloor(floor);
-            declared = _registry.GetAll()
-                .Where(c => SlotKey.NormalizeFloor(c.Floor) == floorKey)
-                .SelectMany(c => c.Zones.Select(z => SlotKey.ForZone(c.Floor, c.Zone, z.SlotId)))
-                .Where(k => k is not null).Select(k => k!)
-                .ToHashSet(StringComparer.Ordinal);
-            slotByKey = _parking.GetSlots(floor).GroupBy(s => s.SlotId).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
-        }
-        string CameraSlotState(LayoutElement e)
-        {
-            var key = SlotKey.ForZone(e.Floor, e.LampZone, e.LampPosition);
-            if (key is null || declared is null || !declared.Contains(key)) return "Unused";
-            var status = slotByKey is not null && slotByKey.TryGetValue(key, out var slot) ? slot.Status : SlotStatus.Empty;
-            return status switch { SlotStatus.Occupied => "Parked", SlotStatus.Error => "Error", _ => "Free" };
-        }
+        var (declared, slotByKey) = lamps.Any(l => l.BitSource == "CameraSlot")
+            ? CameraLookups(floor)
+            : (new HashSet<string>(), new Dictionary<string, ParkingSlot>());
 
         foreach (var lamp in lamps)
-            result[lamp.Id] = lamp.BitSource == "Sensor" ? SensorState(lamp) : CameraSlotState(lamp);
+            result[lamp.Id] = (lamp.BitSource == "Sensor" ? SensorLampState(snap, lamp) : CameraLampState(lamp, declared, slotByKey)).State;
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Thông tin chi tiết của 1 đèn nguồn Cảm biến / Vị trí đỗ trên camera — hiện khi bấm vào đèn ở chế độ Chạy.
+    /// Cảm biến: loại + số thiết bị, Line/ID (MGT200) hoặc số cảm biến (Keytop), thiết bị kích hoạt / kết nối, lần cuối nhận dữ liệu.
+    /// Camera: Zone + số vị trí, trạng thái ô, biển số đang đỗ / biển số chỉ định + kết quả đối chiếu, giờ vào, camera phụ trách, xe rời gần nhất, lỗi.
+    /// </summary>
+    [HttpGet("lamp-info/{id}")]
+    public IActionResult GetLampInfo(string id, [FromQuery] string floor = "B1")
+    {
+        var el = _layout.GetElements(floor).FirstOrDefault(e => e.Id == id && e.Type == LayoutElementType.BitLampSwitch);
+        if (el is null || el.BitSource is not ("Sensor" or "CameraSlot"))
+            return NotFound(new { message = "Không phải đèn cảm biến / vị trí đỗ." });
+
+        if (el.BitSource == "Sensor")
+        {
+            var snap = _sensors.GetSnapshot();
+            var (state, reason) = SensorLampState(snap, el);
+            var dev = el.SensorDevice >= 0 && el.SensorDevice < snap.Devices.Count ? snap.Devices[el.SensorDevice] : null;
+            bool keytop = string.Equals(snap.Type, "Keytop", StringComparison.OrdinalIgnoreCase);
+            return Ok(new
+            {
+                Kind = "Sensor",
+                State = state,
+                Reason = reason,
+                Comment = el.Comment,
+                Sensor = new
+                {
+                    Type = snap.Type,
+                    Device = el.SensorDevice,
+                    Line = keytop ? (int?)null : el.SensorIndex / 32 + 1,
+                    Id = keytop ? (int?)null : el.SensorIndex % 32,
+                    Number = el.SensorIndex + 1,
+                    DeviceEnabled = dev?.Enabled ?? false,
+                    DeviceOnline = dev?.Online ?? false,
+                    LastSeen = dev?.LastSeen
+                }
+            });
+        }
+
+        var (declared, slotByKey) = CameraLookups(floor);
+        var (st, why) = CameraLampState(el, declared, slotByKey);
+        var key = SlotKey.ForZone(el.Floor, el.LampZone, el.LampPosition);
+        ParkingSlot? slot = key is not null && slotByKey.TryGetValue(key, out var sl) ? sl : null;
+
+        var floorKey = SlotKey.NormalizeFloor(floor);
+        var cameras = key is null ? new List<object>() : _registry.GetAll()
+            .Where(c => SlotKey.NormalizeFloor(c.Floor) == floorKey && c.Zones.Any(z => SlotKey.ForZone(c.Floor, c.Zone, z.SlotId) == key))
+            .Select(c => (object)new { Id = c.Id, Ip = c.IpAddress, Brand = c.Brand, Model = c.Model })
+            .ToList();
+
+        return Ok(new
+        {
+            Kind = "CameraSlot",
+            State = st,
+            Reason = why,
+            Comment = el.Comment,
+            Slot = new
+            {
+                Floor = floor,
+                Zone = el.LampZone,
+                Position = el.LampPosition,
+                Declared = key is not null && declared.Contains(key),
+                Status = slot?.Status.ToString(),
+                PlateNumber = slot?.PlateNumber,
+                AssignedPlate = slot?.AssignedPlate,
+                PlateCheck = slot?.PlateCheck,
+                ParkedAt = slot?.ParkedAt,
+                ErrorMessage = slot?.ErrorMessage,
+                LastExitPlate = slot?.LastExitPlate,
+                LastExitTime = slot?.LastExitTime,
+                Cameras = cameras
+            }
+        });
     }
 
     /// <summary>Lấy toàn bộ đối tượng layout của 1 tầng, kèm dữ liệu trạng thái sống (live)
@@ -505,6 +616,11 @@ public class LayoutApiController : ControllerBase
             e.Height,
             e.Label,
             e.TargetFloorId,
+            e.ButtonActiveEnabled,
+            e.FontBold,
+            e.FontItalic,
+            e.ActiveBackgroundColor,
+            e.ActiveTextColor,
             e.ImageUrl,
             e.Content,
             e.SlotId,
@@ -656,6 +772,7 @@ public class LayoutApiController : ControllerBase
         ApplyBitProps(element, dto);
         ApplyValueProps(element, dto);
         ApplyStatProps(element, dto);
+        ApplyButtonProps(element, dto);
 
         if (element.Type == LayoutElementType.ParkingSlot)
             _parking.EnsureSlot(dto.SlotId!, dto.Floor, dto.Zone);
@@ -695,6 +812,7 @@ public class LayoutApiController : ControllerBase
             ApplyBitProps(e, dto);
             ApplyValueProps(e, dto);
             ApplyStatProps(e, dto);
+            ApplyButtonProps(e, dto);
         });
 
         return updated is null

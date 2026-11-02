@@ -601,6 +601,11 @@ Hai nguồn sau có **4 trạng thái**, mỗi trạng thái chọn **ảnh riê
 | **Lỗi** | cảm biến báo lỗi, hoặc thiết bị mất kết nối | camera mất kết nối (ô đang Lỗi) |
 | **Chưa sử dụng** | ZCU không kích hoạt / ngoài số thiết bị đang dùng / cảm biến chưa báo trạng thái lần nào | vị trí chưa khai báo (không còn vùng nào của camera trong tầng + Zone này) |
 
+**Bấm vào đèn (chế độ Chạy)** để xem thông tin vị trí đỗ (cập nhật trực tiếp mỗi giây, Esc / ✕ / bấm ra ngoài để đóng) — nội dung theo nguồn của đèn:
+- *Cảm biến*: loại thiết bị (MGT200 / Keytop), thiết bị (ZCU n), Line/ID hoặc số cảm biến, đã kích hoạt chưa, đang kết nối hay mất kết nối, thời điểm nhận dữ liệu cuối, lý do khi Lỗi / Chưa sử dụng.
+- *Vị trí đỗ trên camera*: Zone + số vị trí, trạng thái ô, biển số đang đỗ, biển số chỉ định + kết quả đối chiếu (đỗ đúng / đỗ sai / đang kiểm tra), giờ vào và thời gian đã đỗ, camera phụ trách, xe rời gần nhất, thông báo lỗi.
+Chỉ hoạt động ở chế độ Chạy (ở Build, bấm vào đèn là chọn đối tượng). Máy chủ: `GET api/layout/lamp-info/{id}?floor=B1`.
+
 Trạng thái do máy chủ tính sẵn rồi giao diện hỏi mỗi 1 giây: `GET api/layout/lamp-states?floor=B1` → `{ "<idĐèn>": "Parked|Free|Error|Unused" }`.
 Đèn dùng nguồn Cảm biến / Camera luôn ở chế độ chỉ hiển thị (không có tag ghi). Trường mới của `LayoutElement`: `BitSource`, `SensorDevice`, `SensorIndex`, `LampZone`, `LampPosition`,
 `StateImage{Parked,Free,Error,Unused}`, `StateText{Parked,Free,Error,Unused}`.
@@ -630,6 +635,16 @@ Trạng thái do máy chủ tính sẵn rồi giao diện hỏi mỗi 1 giây: `
   biến không còn tồn tại / đếm trạng thái khác được viền đỏ (không tồn tại tính 0). Tắt *Tính từ camera* nếu chỉ muốn dùng cảm biến. Khi số Lỗi có cộng cảm biến thì nhãn đổi từ "Lỗi ảnh" thành "Lỗi".
 - Số liệu do máy chủ tính (`GET api/layout` → `stats`: `free/occupied/error`, kèm `camera*` và `sensor*`), làm mới mỗi 5 giây và khi có sự kiện bãi đỗ.
 Trường mới của `LayoutElement`: `StatsOrientation`, `LabelFontSize` (cỡ chữ số dùng `FontSize`), `Stat{Free,Occupied,Error}Camera`, `Stat{Free,Occupied,Error}Vars`.
+
+### 13d. Nút ấn chuyển mặt bằng: tô màu khi đang ở mặt bằng đó
+Nút ấn có *Hành động chuyển đến mặt bằng* sẽ **đổi màu** (mặc định nền xanh lá, chữ trắng, kèm vòng sáng) khi mặt bằng đang xem chính là mặt bằng đích của nút — giúp nhận biết đang ở đâu khi mỗi mặt bằng đều có thanh nút điều hướng.
+Trong hộp thuộc tính của nút: tích/bỏ *Đổi màu nút khi đang ở mặt bằng đích*, chọn *Màu nền* và *Màu chữ* khi đang ở đó (để mặc định thì không lưu màu). Hiệu lực ở cả Build và Chạy, tự cập nhật khi đổi mặt bằng.
+Trường mới của `LayoutElement`: `ButtonActiveEnabled`, `ActiveBackgroundColor`, `ActiveTextColor`.
+
+### 13e. Nút ấn: thuộc tính chữ; Hình ảnh: chọn từ máy & không nền
+- **Nút ấn** có mục *Chữ trên nút*: căn lề (trái/giữa/phải), màu chữ, cỡ chữ, in đậm (mặc định bật), in nghiêng. Trường mới của `LayoutElement`: `FontBold`, `FontItalic` (căn lề dùng `TextAlign`, màu/cỡ dùng `TextColor`/`FontSize`).
+- **Hình ảnh**: nút *📁 Chọn ảnh từ máy…* tải ảnh lên `uploads/layout/` của dự án (PNG/JPG/GIF/WEBP/BMP, ≤ 5 MB; vẫn dán được URL), *✕ Bỏ ảnh* để xoá.
+  Tích *Không tô nền (trong suốt)* để bỏ nền và viền mặc định: chỉ còn ảnh, hiển thị đủ ảnh (không cắt) và giữ phần trong suốt của PNG/WEBP; muốn có viền thì đặt độ dày viền.
 
 ### 14. Quy trình nhận diện biển số chính xác hơn (bỏ phiếu theo thời gian + model ONNX tuỳ chọn)
 Lỗi gốc (xem phân tích): mỗi khung hình được đọc độc lập bằng Tesseract (hay sai 1–2 ký tự hoặc rơi 2 ký tự cuối với biển 1 dòng), khung ĐẦU TIÊN (xe còn đang chạy vào ô)

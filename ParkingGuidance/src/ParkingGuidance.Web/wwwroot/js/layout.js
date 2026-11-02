@@ -188,11 +188,17 @@ function buildElementNode(el) {
             div.classList.add('as-button');
             if (el.targetFloorId) div.classList.add('has-action');
             div.textContent = el.label || 'Nút ấn';
+            {   // can le chu tren nut (.layout-el la flex dang cot: can ngang bang align-items)
+                const jc = { left: 'flex-start', right: 'flex-end', center: 'center' }[el.textAlign];
+                if (jc) { div.style.alignItems = jc; div.style.textAlign = el.textAlign; if (el.textAlign !== 'center') div.style.padding = '0 calc(10 * var(--px))'; }
+            }
             break;
 
         case 'Image':
             if (el.imageUrl) {
-                div.innerHTML = `<img src="${escHtml(el.imageUrl)}" alt="" />`;
+                // "Khong nen" (backgroundColor = transparent): bo nen + vien mac dinh, hien du anh (contain) de giu phan trong suot
+                if (el.backgroundColor === 'transparent') div.classList.add('img-nobg');
+                div.innerHTML = `<img src="${escHtml(el.imageUrl)}" alt="" draggable="false" />`;
             } else {
                 div.innerHTML = `<span class="layout-el-placeholder">🖼️ Chưa có ảnh</span>`;
             }
@@ -485,6 +491,107 @@ async function pollLampStates() {
     if (!document.hidden) await refreshLampStates();
     setTimeout(pollLampStates, LAMP_POLL_MS);
 }
+
+// ---- Thong tin vi tri do khi bam vao den Cam bien / Vi tri do camera (che do Chay) ----
+// Cam bien: loai + so thiet bi, Line/ID (MGT200) hoac so cam bien (Keytop), ket noi, lan cuoi nhan du lieu.
+// Camera: Zone + vi tri, trang thai, bien so dang do / bien so chi dinh + ket qua doi chieu, gio vao, camera phu trach, xe roi gan nhat, loi.
+let lampPop = null;       // { id, pop, timer }
+function closeLampInfo() {
+    if (!lampPop) return;
+    clearInterval(lampPop.timer);
+    lampPop.pop.remove();
+    lampPop = null;
+}
+
+function fmtSpan(ms) {           // 1 gio 5 phut / 12 phut / 30 giay
+    const sec = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+    if (h > 0) return `${h} giờ ${m} phút`;
+    return m > 0 ? `${m} phút` : `${sec} giây`;
+}
+const fmtSince = (iso) => { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? fmtSpan(Date.now() - d.getTime()) : ''; };
+
+function lampInfoHtml(d) {
+    const row = (k, v) => `<div class="lamp-info-row"><span>${k}</span><b>${v}</b></div>`;
+    const st = LAMP_STATES.includes(d.state) ? d.state : 'Unused';
+    let title = '', rows = '';
+
+    if (d.kind === 'Sensor') {
+        const s = d.sensor || {}, keytop = String(s.type).toLowerCase() === 'keytop';
+        title = keytop ? `Cảm biến ${s.number} · Keytop ${s.device}` : `Cảm biến · ZCU ${s.device} · CN${s.line} · ID ${s.id}`;
+        rows += row('Loại thiết bị', keytop ? 'Keytop' : 'MGT200 (ZCU)');
+        rows += row('Thiết bị', `${keytop ? 'Keytop' : 'ZCU'} ${s.device}`);
+        rows += keytop ? row('Cảm biến số', s.number) : row('Line / ID', `CN${s.line} / ID ${s.id}`);
+        rows += row('Kích hoạt', s.deviceEnabled ? 'Có' : 'Không');
+        rows += row('Kết nối', s.deviceEnabled ? (s.deviceOnline ? 'Đang kết nối' : '<span class="li-bad">Mất kết nối</span>') : '—');
+        rows += row('Dữ liệu cuối', s.lastSeen ? `${escHtml(fmtDateTime(s.lastSeen))} (${escHtml(fmtSince(s.lastSeen))} trước)` : 'Chưa nhận');
+    } else {
+        const s = d.slot || {};
+        title = `Vị trí đỗ ${escHtml(s.position ?? '—')}${s.zone ? ` · Zone ${escHtml(s.zone)}` : ''} · tầng ${escHtml(s.floor ?? CURRENT_FLOOR)}`;
+        if (s.declared) {
+            const parked = s.status === 'Occupied';
+            const unknownPlate = !s.plateNumber || String(s.plateNumber).toUpperCase() === 'UNKNOWN';
+            if (parked) rows += row('Biển số đang đỗ', unknownPlate ? 'Chưa đọc được biển' : escHtml(s.plateNumber));
+            rows += row('Biển số chỉ định', s.assignedPlate ? escHtml(s.assignedPlate) : 'Không chỉ định (xe nào cũng được)');
+            if (parked && s.assignedPlate) {
+                const chk = { Valid: '<span class="li-ok">Đỗ đúng</span>', Invalid: '<span class="li-bad">Đỗ sai biển chỉ định</span>', Pending: 'Đang kiểm tra' }[s.plateCheck];
+                if (chk) rows += row('Đối chiếu', chk);
+            }
+            if (parked && s.parkedAt) rows += row('Giờ vào', `${escHtml(fmtDateTime(s.parkedAt))} (đã đỗ ${escHtml(fmtSince(s.parkedAt))})`);
+            const cams = (s.cameras || []).map(c => escHtml(c.ip + (c.brand || c.model ? ` (${[c.brand, c.model].filter(Boolean).join(' ')})` : ''))).join('<br>');
+            rows += row('Camera', cams || '—');
+            if (s.lastExitTime) rows += row('Xe rời gần nhất', `${escHtml(s.lastExitPlate && s.lastExitPlate !== 'UNKNOWN' ? s.lastExitPlate : 'Chưa rõ biển')} · ${escHtml(fmtDateTime(s.lastExitTime))}`);
+        }
+    }
+    if (d.reason) rows += row(st === 'Error' ? 'Lỗi' : 'Ghi chú trạng thái', `<span class="${st === 'Error' ? 'li-bad' : ''}">${escHtml(d.reason)}</span>`);
+    if (d.comment) rows += row('Ghi chú', escHtml(d.comment));
+
+    return `<div class="lamp-info-head"><span class="lamp-info-dot bit-s-${st.toLowerCase()}"></span>
+            <div class="lamp-info-title">${title}</div>
+            <button type="button" class="lamp-info-x" title="Đóng (Esc)">✕</button></div>
+        <div class="lamp-info-state li-${st.toLowerCase()}">${LAMP_LABEL[st]}</div>
+        <div class="lamp-info-body">${rows}</div>`;
+}
+
+async function showLampInfo(el, div) {
+    closeLampInfo();
+    const pop = document.createElement('div');
+    pop.className = 'lamp-info-pop';
+    pop.innerHTML = '<div class="lamp-info-body">Đang tải…</div>';
+    document.body.appendChild(pop);
+    const me = { id: el.id, pop, timer: null };
+    lampPop = me;
+
+    const place = () => {       // dat canh den; tran man hinh thi chuyen sang ben trai / keo vao trong
+        const r = div.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+        let left = r.right + 10;
+        if (left + w > window.innerWidth - 8) left = Math.max(8, r.left - w - 10);
+        const top = Math.max(8, Math.min(r.top, window.innerHeight - h - 8));
+        pop.style.left = `${left}px`; pop.style.top = `${top}px`;
+    };
+    const load = async () => {
+        if (editMode) { closeLampInfo(); return; }
+        try {
+            const r = await fetch(`/api/layout/lamp-info/${encodeURIComponent(el.id)}?floor=${encodeURIComponent(CURRENT_FLOOR)}`, { cache: 'no-store' });
+            if (!r.ok) throw new Error('lamp-info ' + r.status);
+            const d = await r.json();
+            if (lampPop !== me) return;
+            pop.innerHTML = lampInfoHtml(d);
+            pop.querySelector('.lamp-info-x').addEventListener('click', closeLampInfo);
+        } catch {
+            if (lampPop !== me) return;
+            pop.innerHTML = '<div class="lamp-info-body">Không tải được thông tin vị trí đỗ.</div>';
+        }
+        place();
+    };
+    place();
+    await load();
+    if (lampPop === me) me.timer = setInterval(load, 1000);       // thong tin cap nhat truc tiep trong luc dang mo
+}
+document.addEventListener('mousedown', (e) => { if (lampPop && !e.target.closest('.lamp-info-pop')) closeLampInfo(); }, true);
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && lampPop) { e.stopImmediatePropagation(); closeLampInfo(); }      // Esc dong cua so truoc, khong thoat che do Chay
+}, true);
+window.addEventListener('floorchange', closeLampInfo);
 
 function sendBit(tag, raw) {
     return fetch(`/api/tasks/tags/project/${encodeURIComponent(tag)}/value`, {
@@ -803,19 +910,19 @@ function alignSelectHtml(el, def) {
     return `<select id="propAlign">${o('left', 'Trái')}${o('center', 'Giữa')}${o('right', 'Phải')}</select>`;
 }
 
-function fontFieldsHtml(el) {
+function fontFieldsHtml(el, defColor = '#e6ebf5') {
     return `
         <div class="prop-grid-2">
             <div class="prop-field"><label>Màu chữ</label>
-                <input id="propTextColor" type="color" value="${escHtml(el.textColor || '#e6ebf5')}" /></div>
+                <input id="propTextColor" type="color" value="${escHtml(el.textColor || defColor)}" /></div>
             <div class="prop-field"><label>Cỡ chữ (px)</label>
                 <input id="propFontSize" type="number" min="1" max="200" step="1" placeholder="mặc định" value="${el.fontSize ?? ''}" /></div>
         </div>`;
 }
 
-function applyFontFromForm(el) {
+function applyFontFromForm(el, defColor = '#e6ebf5') {
     const tc = document.getElementById('propTextColor').value;
-    el.textColor = (tc.toLowerCase() !== '#e6ebf5' || el.textColor) ? tc : null;
+    el.textColor = (tc.toLowerCase() !== defColor || el.textColor) ? tc : null;
     const fs = parseFloat(document.getElementById('propFontSize').value);
     el.fontSize = Number.isFinite(fs) && fs > 0 ? fs : null;
 }
@@ -1050,6 +1157,23 @@ function renderLineStroke(div, el) {
     if (hasEnd) head('end');
 }
 
+// Nut chuyen mat bang: to mau khi mat bang DANG XEM chinh la mat bang dich cua nut (de nhan biet dang o dau)
+const BTN_ACTIVE_BG = '#16a34a', BTN_ACTIVE_FG = '#ffffff';
+function isButtonActive(el) {
+    return el.type === 'Button' && el.buttonActiveEnabled !== false && !!el.targetFloorId
+        && String(el.targetFloorId).toLowerCase() === String(CURRENT_FLOOR).toLowerCase();
+}
+function applyButtonActiveStyle(div, el) {
+    const on = isButtonActive(el);
+    div.classList.toggle('is-active', on);
+    if (!on) return;
+    const bg = el.activeBackgroundColor || BTN_ACTIVE_BG;
+    div.style.backgroundColor = bg;
+    div.style.color = el.activeTextColor || BTN_ACTIVE_FG;
+    div.style.boxShadow = `0 0 0 max(2px, calc(3 * var(--px))) ${bg}66`;      // vong sang quanh nut (cung mau nen, trong suot ~40%)
+    div.title = (el.label ? el.label + ' — ' : '') + 'đang ở mặt bằng này';
+}
+
 function applyCommonStyle(div, el) {
     applyTransformStyle(div, el);
     if (el.type === 'Line') { renderLineStroke(div, el); return; }   // duong thang khong co nen/vien hop
@@ -1073,6 +1197,9 @@ function applyCommonStyle(div, el) {
         div.style.borderRadius = `calc(${Number(el.cornerRadius)} * var(--px))`;
     if (el.textColor) div.style.color = el.textColor;
     if (el.fontSize) div.style.fontSize = `calc(${Number(el.fontSize)} * var(--px))`;
+    if (el.fontBold === false) div.style.fontWeight = '400';
+    if (el.fontItalic) div.style.fontStyle = 'italic';
+    if (el.type === 'Button') applyButtonActiveStyle(div, el);
 }
 
 // ---------------------------------------------------------------------------
@@ -1236,6 +1363,9 @@ function onElementMouseDown(e) {
         if (target?.type === 'Button' && target.targetFloorId) {
             e.preventDefault();
             navigateToFloor(target.targetFloorId);
+        } else if (target?.type === 'BitLampSwitch' && e.button === 0 && bitSourceOf(target) !== 'Tag') {
+            e.preventDefault();                       // den Cam bien / Vi tri do camera: bam de xem thong tin vi tri do
+            showLampInfo(target, div);
         } else if (target?.type === 'BitLampSwitch' && e.button === 0) {
             e.preventDefault();
             onBitPress(target, div, 'mouse');
@@ -2351,25 +2481,62 @@ async function renderStatsProps(el) {
 // ---------------------------------------------------------------------------
 // Panel: Text / Hinh anh
 // ---------------------------------------------------------------------------
+// Chon anh tu may: tai len /api/layout/upload-image roi dien URL tra ve vao o (kich hoat xem truoc truc tiep)
+function bindImageUpload() {
+    const inp = document.getElementById('propImageUrl'), file = document.getElementById('propImgFile');
+    const fo = document.getElementById('propFillOpacity');
+    if (fo) fo.addEventListener('input', () => { document.getElementById('propFillOpacityVal').textContent = fo.value; });
+    document.getElementById('propImgUp').addEventListener('click', () => file.click());
+    document.getElementById('propImgClr').addEventListener('click', () => {
+        inp.value = '';
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    file.addEventListener('change', async () => {
+        const f = file.files[0];
+        if (!f) return;
+        const fd = new FormData();
+        fd.append('image', f);
+        try {
+            const r = await fetch('/api/layout/upload-image', { method: 'POST', body: fd });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.message || 'Không tải được ảnh.');
+            inp.value = d.url;
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+        } catch (err) { alert(err.message || 'Không tải được ảnh.'); }
+        file.value = '';
+    });
+}
+
 function renderGenericProps(el) {
     let fieldHtml = '';
     if (el.type === 'Text') {
         fieldHtml = `<div class="prop-field"><label>Nội dung</label><textarea id="propContent" rows="3">${escHtml(el.content)}</textarea></div>`;
     } else if (el.type === 'Image') {
-        fieldHtml = `<div class="prop-field"><label>URL hình ảnh</label><input id="propImageUrl" type="text" placeholder="https://..." value="${escHtml(el.imageUrl)}" /></div>`;
+        fieldHtml = `
+            <div class="prop-field"><label>Hình ảnh</label>
+                <input id="propImageUrl" type="text" placeholder="Chọn ảnh từ máy hoặc dán URL (https://...)" value="${escHtml(el.imageUrl)}" />
+                <div class="prop-inline" style="margin-top:6px;">
+                    <button type="button" class="btn secondary" id="propImgUp" style="padding:6px;">📁 Chọn ảnh từ máy…</button>
+                    <button type="button" class="btn secondary" id="propImgClr" style="padding:6px;">✕ Bỏ ảnh</button>
+                </div>
+                <input type="file" id="propImgFile" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp" hidden />
+                <p class="hint small" style="margin:4px 0 0;">PNG/JPG/GIF/WEBP/BMP, tối đa 5 MB. Ảnh PNG/WEBP nền trong suốt nên tích "Không tô nền (trong suốt)" bên dưới.</p>
+            </div>`;
     }
 
     propsPanel.innerHTML = `
         <h3>${typeLabel(el.type)}</h3>
         ${fieldHtml}
         ${positionFieldsHtml(el)}
-        ${styleFieldsHtml(el)}
+        ${styleFieldsHtml(el, { shape: el.type === 'Image' })}
         ${DIRTY_NOTE_HTML}
         <div class="prop-actions">
             <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
             <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
         </div>
     `;
+
+    if (el.type === 'Image') bindImageUpload();
 
     const applyForm = (el) => {
         if (el.type === 'Text') el.content = document.getElementById('propContent').value;
@@ -2608,6 +2775,20 @@ async function renderButtonProps(el) {
             <select id="propTargetFloor">${floorOptions}</select>
         </div>
         <p class="hint small">Hành động chỉ hoạt động ở chế độ "▶️ Chạy". Ở chế độ Build, bấm vào nút để chỉnh sửa.</p>
+        <div class="prop-section-title">Chữ trên nút</div>
+        <div class="prop-field"><label>Căn lề</label>${alignSelectHtml(el, 'center')}</div>
+        ${fontFieldsHtml(el, '#ffffff')}
+        <div class="prop-inline">
+            <label class="checkbox-label"><input type="checkbox" id="propBtnBold" ${el.fontBold === false ? '' : 'checked'} /> In đậm</label>
+            <label class="checkbox-label"><input type="checkbox" id="propBtnItalic" ${el.fontItalic ? 'checked' : ''} /> In nghiêng</label>
+        </div>
+        <div class="prop-section-title">Nhận biết mặt bằng đang xem</div>
+        <label class="checkbox-label"><input type="checkbox" id="propBtnActiveOn" ${el.buttonActiveEnabled === false ? '' : 'checked'} /> Đổi màu nút khi đang ở mặt bằng đích</label>
+        <div class="prop-grid-2">
+            <div class="prop-field"><label>Màu nền khi đang ở đó</label><input id="propBtnActiveBg" type="color" value="${el.activeBackgroundColor || BTN_ACTIVE_BG}" /></div>
+            <div class="prop-field"><label>Màu chữ khi đang ở đó</label><input id="propBtnActiveFg" type="color" value="${el.activeTextColor || BTN_ACTIVE_FG}" /></div>
+        </div>
+        <p class="hint small">Nút được tô màu (kèm vòng sáng) khi mặt bằng đang xem chính là mặt bằng đích của nút. Xem thử: chọn mặt bằng đích trùng với tầng đang thiết kế.</p>
         ${positionFieldsHtml(el)}
         ${styleFieldsHtml(el)}
         ${DIRTY_NOTE_HTML}
@@ -2620,6 +2801,14 @@ async function renderButtonProps(el) {
     const applyForm = (el) => {
         el.label = document.getElementById('propLabel').value;
         el.targetFloorId = document.getElementById('propTargetFloor').value || null;
+        el.textAlign = document.getElementById('propAlign').value || null;
+        applyFontFromForm(el, '#ffffff');
+        el.fontBold = document.getElementById('propBtnBold').checked ? null : false;
+        el.fontItalic = document.getElementById('propBtnItalic').checked ? true : null;
+        el.buttonActiveEnabled = document.getElementById('propBtnActiveOn').checked;
+        const abg = document.getElementById('propBtnActiveBg').value, afg = document.getElementById('propBtnActiveFg').value;
+        el.activeBackgroundColor = abg && abg.toLowerCase() !== BTN_ACTIVE_BG ? abg : null;      // = mac dinh thi khong luu
+        el.activeTextColor = afg && afg.toLowerCase() !== BTN_ACTIVE_FG ? afg : null;
         applyPositionFieldsFromForm(el);
         applyStyleFieldsFromForm(el);
     };
