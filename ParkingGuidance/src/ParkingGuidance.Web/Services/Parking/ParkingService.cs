@@ -226,8 +226,13 @@ public class ParkingService : IParkingService, IProjectScoped
         if (changed) SaveState();
     }
 
-    public IReadOnlyList<ParkingSlot> GetSlots(string? floor = null) =>
-        _slots.Values.Where(s => floor == null || s.Floor == floor).OrderBy(s => s.SlotId).ToList();
+    // So khớp tầng theo dạng chuẩn hoá (b1 = B1): ô đỗ luôn lưu tên tầng đã chuẩn hoá (chữ HOA) trong khi id tầng của layout/camera
+    // có thể là chữ thường -- so sánh nguyên văn sẽ không thấy ô đỗ nào và đèn/bản đồ luôn báo "Còn trống".
+    public IReadOnlyList<ParkingSlot> GetSlots(string? floor = null)
+    {
+        var norm = floor is null ? null : SlotKey.NormalizeFloor(floor);
+        return _slots.Values.Where(s => norm == null || SlotKey.NormalizeFloor(s.Floor) == norm).OrderBy(s => s.SlotId).ToList();
+    }
 
     public IReadOnlyList<CameraDevice> GetCameras() => _cameras.Values.ToList();
 

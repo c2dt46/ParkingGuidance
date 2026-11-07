@@ -13,17 +13,27 @@ public static class LedFrameBuilder
         return (int)Math.Clamp(v, 0, 999_999_999);
     }
 
+    /// <summary>Nội dung vùng Chữ: chọn biến string (project tag) thì lấy giá trị hiện tại của tag; chưa chọn / tag không còn thì dùng chữ cố định.</summary>
+    public static string TextValue(LedAreaRow r, LedDataSnapshot s) =>
+        !string.IsNullOrEmpty(r.TTag) && s.Strings.TryGetValue(r.TTag, out var v) ? v : r.Ttext;
+
     /// <summary>
-    /// Khoá dữ liệu của card — như Data_To_HDCard của PGS: chỉ gồm giá trị hiển thị của các vùng Number.
-    /// Chữ/ảnh không nằm trong khoá: chỉ gửi lần đầu, khi bấm "Gửi tới card" hoặc đi kèm lần gửi khi số đổi (đúng PGS).
+    /// Khoá dữ liệu của card — như Data_To_HDCard của PGS: gồm giá trị hiển thị của các vùng Number
+    /// và nội dung của các vùng Chữ gắn biến string. Khoá khác lần gửi thành công gần nhất → card được gửi lại;
+    /// gửi lỗi thì khoá "đã gửi" không đổi nên lần sau vẫn tự gửi lại (lùi dần, tuần tự từng card).
+    /// Chữ cố định / ảnh không nằm trong khoá: chỉ gửi lần đầu, khi bấm "Gửi tới card" hoặc đi kèm lần gửi khi dữ liệu đổi (đúng PGS).
     /// </summary>
     public static string DataKey(LedCard card, LedDataSnapshot s)
     {
         var sb = new StringBuilder();
         foreach (var r in card.Areas)
         {
-            if (r.Type != LedAreaType.Number) continue;
-            sb.Append(NumberValue(r, s)).Append(';');
+            if (r.Type == LedAreaType.Number) sb.Append(NumberValue(r, s)).Append(';');
+            else if (r.Type == LedAreaType.Text && !string.IsNullOrEmpty(r.TTag))
+            {
+                var t = TextValue(r, s);
+                sb.Append('T').Append(t.Length).Append(':').Append(t).Append(';');   // độ dài đứng trước → không nhập nhằng dù chuỗi chứa ';'
+            }
         }
         return sb.ToString();
     }
@@ -39,7 +49,7 @@ public static class LedFrameBuilder
                 case LedAreaType.Text:
                 {
                     var (cr, cg, cb) = HdCardCatalog.TextRgb[r.Tcolor];
-                    areas.Add(new LedSendArea(r.OriginX, r.OriginY, r.Width, r.Height, false, r.Ttext, "",
+                    areas.Add(new LedSendArea(r.OriginX, r.OriginY, r.Width, r.Height, false, TextValue(r, s), "",
                         cr, cg, cb, r.Tfont_Type, r.Tfont, r.Teffects, r.Tspeed, r.Tstopover));
                     break;
                 }

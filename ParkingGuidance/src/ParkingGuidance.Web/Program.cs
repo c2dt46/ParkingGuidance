@@ -70,7 +70,9 @@ builder.Services
     {
         o.Cookie.Name = "pgs_auth";
         o.LoginPath = "/Login";
-        o.ExpireTimeSpan = TimeSpan.FromHours(8);
+        // Mặc định cho cookie; thời hạn thật của từng tài khoản đặt lúc đăng nhập (Login.cshtml.cs, LoginPolicy): User / Megatech nhớ lâu, DEV 8 giờ, Lic không nhớ
+        o.ExpireTimeSpan = ParkingGuidance.Web.Services.LoginPolicy.RememberSpan(builder.Configuration);
+        o.SlidingExpiration = true;
         // Tài khoản Lic: phiên chỉ có hiệu lực trong LẦN CHẠY chương trình đã đăng nhập (chạy lại chương trình = phải đăng nhập lại)
         o.Events.OnValidatePrincipal = async ctx =>
         {

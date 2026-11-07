@@ -17,8 +17,8 @@
         btn.className = 'btn secondary btn-sm panel-toggle';
         head.appendChild(btn);
 
-        let hidden = false;
-        try { hidden = localStorage.getItem(KEY + id) === '1'; } catch { /* che do rieng tu: khong nho */ }
+        let hidden = sec.dataset.collapsedDefault === '1';   // data-collapsed-default="1": mac dinh an khi chua tung chon
+        try { const saved = localStorage.getItem(KEY + id); if (saved !== null) hidden = saved === '1'; } catch { /* che do rieng tu: khong nho */ }
 
         function apply() {
             [...sec.children].forEach(ch => { if (ch !== head) ch.classList.toggle('pc-hidden', hidden); });

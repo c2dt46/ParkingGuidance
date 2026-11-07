@@ -13,6 +13,10 @@ namespace ParkingGuidance.Web.Pages;
 [AllowAnonymous]
 public class LoginModel : PageModel
 {
+    private readonly IConfiguration _config;
+
+    public LoginModel(IConfiguration config) => _config = config;
+
     [BindProperty] public string Account { get; set; } = "User";
     [BindProperty] public string? Password { get; set; }
     [BindProperty(SupportsGet = true)] public string? ReturnUrl { get; set; }
@@ -45,16 +49,22 @@ public class LoginModel : PageModel
             CookieAuthenticationDefaults.AuthenticationScheme);
 
         // Tài khoản Lic (bảo mật cao): KHÔNG nhớ đăng nhập — cookie phiên (đóng trình duyệt là mất), tối đa 60 phút, và mất hiệu lực khi
-        // chương trình chạy lại (claim mã lần chạy, kiểm tra ở Program.cs). Tài khoản khác: nhớ 8 giờ.
+        // chương trình chạy lại (claim mã lần chạy, kiểm tra ở Program.cs).
+        // User và Megatech (quản trị): NHỚ đăng nhập lâu (Auth:RememberDays, mặc định 30 ngày, tự gia hạn khi dùng) để mở lại chương trình là vào thẳng.
+        // DEV: nhớ 8 giờ như trước.
         var isLic = string.Equals(name, "Lic", StringComparison.Ordinal);
+        var isDev = string.Equals(name, "DEV", StringComparison.Ordinal);
         if (isLic) identity.AddClaim(new Claim(ParkingGuidance.Web.Services.SessionBoot.ClaimType, ParkingGuidance.Web.Services.SessionBoot.Id));
+        var span = isLic ? ParkingGuidance.Web.Services.LoginPolicy.LicSpan
+                 : isDev ? ParkingGuidance.Web.Services.LoginPolicy.DevSpan
+                 : ParkingGuidance.Web.Services.LoginPolicy.RememberSpan(_config);
         await HttpContext.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,
             new ClaimsPrincipal(identity),
             new AuthenticationProperties
             {
                 IsPersistent = !isLic,
-                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(isLic ? 60 : 8 * 60),
+                ExpiresUtc = DateTimeOffset.UtcNow.Add(span),
                 AllowRefresh = !isLic
             });
 

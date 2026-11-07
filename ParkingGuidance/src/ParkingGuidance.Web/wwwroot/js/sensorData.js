@@ -19,6 +19,7 @@
     let sensorType = 'Pm200';       // loai cam bien dang dung
     let keytopCount = 1;
     let timer = null;
+    let lastHtml = '';
 
     // ----------------------------------------------------------------- bang danh sach
     async function refresh() {
@@ -36,10 +37,11 @@
     function renderTable() {
         if (sel && !rows.some(r => r.name === sel)) sel = null;
         const body = $('dvBody');
+        let html;
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="7" class="hint small">Chưa có biến nào — bấm "Thêm biến".</td></tr>';
+            html = '<tr><td colspan="7" class="hint small">Chưa có biến nào — bấm "Thêm biến".</td></tr>';
         } else {
-            body.innerHTML = rows.map((r, i) => {
+            html = rows.map((r, i) => {
                 const val = r.valid
                     ? `<span class="dv-val ${CLS[r.count] || ''}">${r.value}</span><span class="dv-sub">trên ${r.selected} cảm biến` +
                       `${r.unknown ? ` · ${r.unknown} chưa có dữ liệu` : ''}${r.inactive ? ` · ${r.inactive} ngoài vùng quét` : ''}</span>`
@@ -52,18 +54,34 @@
                     <td>${esc(r.devices) || '<span class="dv-sub">chưa chọn cảm biến</span>'}</td><td>${valCell}</td><td>${esc(r.description)}</td></tr>`;
             }).join('');
         }
+        if (html !== lastHtml) { body.innerHTML = html; lastHtml = html; }   // giữ nguyên DOM nếu không đổi: tránh mất cú bấm khi bảng làm mới mỗi giây
         $('dvEdit').disabled = !sel;
         $('dvDel').disabled = !sel;
     }
 
-    $('dvBody').addEventListener('click', e => {
+    $('dvBody').addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
         const tr = e.target.closest('tr[data-name]'); if (!tr) return;
         sel = tr.dataset.name; renderTable();
+        // Đang ở trạng thái sửa: chọn biến nào thì form sửa chuyển sang thông tin của biến đó
+        if (edit && edit.original !== sel) switchEditor(sel);
     });
     $('dvBody').addEventListener('dblclick', e => {
         const tr = e.target.closest('tr[data-name]'); if (!tr) return;
-        sel = tr.dataset.name; renderTable(); openEditor(sel);
+        sel = tr.dataset.name; renderTable();
+        if (!edit || edit.original !== sel) openEditor(sel);   // đã đang sửa đúng biến này thì giữ nguyên, không nạp lại làm mất thay đổi
     });
+
+    // Chuyển form sửa sang biến khác; nếu biến đang sửa còn thay đổi chưa lưu thì hỏi trước
+    async function switchEditor(name) {
+        if (edit && editSnapshot() !== edit.base &&
+            !confirm(`Biến ${edit.original} có thay đổi chưa lưu. Bỏ thay đổi và chuyển sang biến ${name}?`)) {
+            sel = edit.original; renderTable();
+            return;
+        }
+        await openEditor(name);
+        if (!edit || edit.original !== name) { if (edit) sel = edit.original; renderTable(); }   // không đọc được biến mới: ở lại biến cũ
+    }
     $('dvAdd').addEventListener('click', async () => {
         // Thêm ngay 1 biến MS (tên tự đặt MS0, MS1… lấp chỗ trống nhỏ nhất) — không mở form.
         $('dvAdd').disabled = true;
@@ -109,15 +127,25 @@
     const countOf = m => { let n = 0; for (const b of m) n += b; return n; };
     const countDev = dev => { const m = edit.mask.get(dev); return m ? countOf(m) : 0; };
 
+    // Dấu vết nội dung form sửa (trạng thái đếm, mô tả, các cảm biến đã chọn) để biết có thay đổi chưa lưu
+    function editSnapshot() {
+        if (!edit) return '';
+        const sel = [...edit.mask.keys()].sort((a, b) => a - b).map(d => d + ':' + edit.mask.get(d).join('')).filter(x => x.includes('1'));
+        return JSON.stringify([$('DvCount').value, $('DvDesc').value.trim(), sel]);
+    }
+
+    let openTok = 0;
     async function openEditor(name) {
         if (!name) return;
+        const tok = ++openTok;                 // chọn liên tiếp nhiều biến: chỉ biến chọn sau cùng được nạp
         let v = null;
         try {
             const res = await fetch(`${API}/${encodeURIComponent(name)}`);
             if (!res.ok) { $('dvState').textContent = 'Không đọc được biến này.'; return; }
             v = await res.json();
         } catch { $('dvState').textContent = 'Không đọc được biến này.'; return; }
-        anchor = null;
+        if (tok !== openTok) return;
+        anchor = null; painting = null;
         edit = { original: v.name, source: v.source, dev: 0, mask: new Map(), locked: !!v.count };
         v.selection.forEach(p => edit.mask.set(p.device, Uint8Array.from(p.mask, c => (c === '1' ? 1 : 0))));
         if (v.selection.length) edit.dev = v.selection[0].device;
@@ -130,6 +158,7 @@
         $('dvFormState').textContent = '';
         $('dvForm').style.display = '';
         renderAll();
+        edit.base = editSnapshot();
     }
 
     function closeEditor() {

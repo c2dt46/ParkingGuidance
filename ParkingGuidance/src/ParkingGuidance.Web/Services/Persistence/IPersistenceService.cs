@@ -27,6 +27,15 @@ public interface IPersistenceService
     /// <summary>{ProjectDirectory}/led-images — ảnh cho vùng Image của bảng LED.</summary>
     string ProjectLedImagesDirectory { get; }
 
+    /// <summary>true = lúc khởi động đã xác định được dự án để CHẠY LẠI: cấu hình <c>Persistence:ProjectPath</c> hoặc dự án mở gần nhất còn nguyên vẹn
+    /// (thư mục còn và có project.pgs.json). false = chưa từng mở dự án nào, hoặc dự án mở gần nhất không còn dùng được → chương trình chỉ chạy TẠM
+    /// trên thư mục dự án mặc định và chờ người dùng mở / tạo dự án.</summary>
+    bool StartedWithProject { get; }
+
+    /// <summary>Đường dẫn dự án mở gần nhất nhưng KHÔNG dùng được lúc khởi động (thư mục bị xoá / đổi tên, ổ đĩa hoặc ổ mạng chưa sẵn sàng, mất project.pgs.json).
+    /// null = không có trường hợp này. Con trỏ này được GIỮ NGUYÊN trong app-state.json cho tới khi người dùng mở / tạo dự án khác.</summary>
+    string? MissingLastProject { get; }
+
     /// <summary>Key này thuộc dữ liệu dự án (true) hay hệ thống (false).</summary>
     bool IsProjectKey(string key);
 

@@ -7,11 +7,6 @@
     <h1><span data-i18n="nav.device">Thiết bị</span> — <span data-i18n="nav.ledn">LED</span></h1>
 </div>
 
-<div class="source-tabs">
-    <button class="tab-btn active" data-tab="card"><span class="ico">💡</span> <span data-i18n="led.tabCard">Cài đặt card LED</span></button>
-</div>
-<div id="hdTransport" class="hint small"></div>
-
 <div class="hd-settings">
     <div class="prop-field">
         <label for="LedTimeout" data-i18n="led.timeout">Thời gian chờ gửi LED (giây)</label>
@@ -35,6 +30,7 @@
         <div class="prop-field"><label data-i18n="led.gray">Mức xám</label><select id="Graylevel"></select></div>
         <div class="prop-field"><label data-i18n="led.conn">Kết nối</label><button id="hdConn" class="btn secondary btn-sm" title="Bấm để kiểm tra kết nối">—</button></div>
         <div class="prop-field"><label>&nbsp;</label><button id="Mybutton" class="btn secondary btn-sm" data-i18n="led.cardList">Danh sách card</button></div>
+        <div class="prop-field"><label>&nbsp;</label><button id="btnDelCard" class="btn secondary btn-sm" title="Xóa card đang chọn (các card sau dồn lên)"><span class="ico">🗑️</span> <span data-i18n="led.delCard">Xóa card</span></button></div>
     </div>
     <div id="hdCardHint" class="hint small"></div>
 
@@ -45,22 +41,24 @@
         </table>
     </div>
 
+    <div class="hd-toolbar">
+            <button id="btnProps" class="btn secondary btn-sm" title="Mở / đóng hộp thoại thuộc tính (hoặc nháy đúp vào vùng)"><span class="ico">⚙️</span> <span data-i18n="led.props">Thuộc tính</span></button>
+            <button id="btnAddFile" class="btn secondary btn-sm"><span class="ico">🖼️</span> <span data-i18n="led.addImage">Thêm hình ảnh</span></button>
+            <button id="btnAddText" class="btn secondary btn-sm"><span class="ico">🔤</span> <span data-i18n="led.addText">Thêm chữ</span></button>
+            <button id="btnAddNum" class="btn secondary btn-sm"><span class="ico">🔢</span> <span data-i18n="led.addNum">Thêm số</span></button>
+            <button id="btnDel" class="btn secondary btn-sm"><span class="ico">🗑️</span> <span data-i18n="led.del">Xóa</span></button>
+            <button id="btnUp" class="btn secondary btn-sm"><span class="ico">⬆️</span> <span data-i18n="led.up">Lên</span></button>
+            <button id="BtnDow" class="btn secondary btn-sm"><span class="ico">⬇️</span> <span data-i18n="led.down">Xuống</span></button>
+            <button id="button4" class="btn primary btn-sm"><span class="ico">📤</span> <span data-i18n="led.send">Gửi tới card</span></button>
+            <span id="hdWarn" class="hd-warn" hidden></span>
+    </div>
+
     <div class="hd-main">
         <div class="hd-left">
             <table class="data-table hd-rows" id="CommList">
                 <thead><tr><th style="width:60px" data-i18n="led.no">STT</th><th data-i18n="led.type">Loại</th></tr></thead>
                 <tbody></tbody>
             </table>
-            <div class="hd-buttons">
-                <button id="btnProps" class="btn secondary btn-sm" title="Mở / đóng hộp thoại thuộc tính (hoặc nháy đúp vào vùng)"><span class="ico">⚙️</span> <span data-i18n="led.props">Thuộc tính</span></button>
-                <button id="btnAddFile" class="btn secondary btn-sm"><span class="ico">🖼️</span> <span data-i18n="led.addImage">Thêm hình ảnh</span></button>
-                <button id="btnAddText" class="btn secondary btn-sm"><span class="ico">🔤</span> <span data-i18n="led.addText">Thêm chữ</span></button>
-                <button id="btnAddNum" class="btn secondary btn-sm"><span class="ico">🔢</span> <span data-i18n="led.addNum">Thêm số</span></button>
-                <button id="btnDel" class="btn secondary btn-sm"><span class="ico">🗑️</span> <span data-i18n="led.del">Xóa</span></button>
-                <button id="btnUp" class="btn secondary btn-sm"><span class="ico">⬆️</span> <span data-i18n="led.up">Lên</span></button>
-                <button id="BtnDow" class="btn secondary btn-sm"><span class="ico">⬇️</span> <span data-i18n="led.down">Xuống</span></button>
-                <button id="button4" class="btn primary btn-sm"><span class="ico">📤</span> <span data-i18n="led.send">Gửi tới card</span></button>
-            </div>
             <div id="hdSaveState" class="hint small"></div>
         </div>
 
@@ -113,8 +111,10 @@
                 <!-- CÀI ĐẶT VÙNG NHỚ CHỮ -->
                 <div id="palText" class="hd-pal" style="display:none;">
                     <h3 data-i18n="led.hTxt">CÀI ĐẶT VÙNG NHỚ CHỮ</h3>
+                    <p class="hint small" data-i18n="led.txtHint">Chọn biến string thì chữ hiển thị = giá trị biến (ô Nội dung bị khóa). Khi giá trị đổi hoặc lần gửi trước chưa thành công, hệ thống tự gửi lại tuần tự tới card.</p>
                     <div class="hd-grid">
                         <div class="prop-field" style="grid-column:1/-1"><label data-i18n="led.msg">Nội dung</label><input data-f="ttext" data-t="str" id="Texttext" /></div>
+                        <div class="prop-field" style="grid-column:1/-1"><label data-i18n="led.dStr">Biến string (project tag)</label><select data-f="tTag" data-t="str" data-src="srcStr" id="TextTag"></select></div>
                         <div class="prop-field"><label data-i18n="led.color">Màu</label><select data-f="tcolor" data-t="int" data-src="textColors"></select></div>
                         <div class="prop-field"><label data-i18n="led.fsize">Cỡ chữ</label><select data-f="tfont" data-t="int" data-src="fontSizes"></select></div>
                         <div class="prop-field"><label data-i18n="led.ftype">Loại font</label><select data-f="tfont_Type" data-t="str" data-src="fontTypes"></select></div>
@@ -148,5 +148,5 @@
 </section>
 
 @section Scripts {
-    <script src="~/js/systemLeds.js"></script>
+    <script src="~/js/systemLeds.js" asp-append-version="true"></script>
 }

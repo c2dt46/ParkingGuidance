@@ -8,7 +8,7 @@ using ParkingGuidance.Web.Services.Settings;
 
 namespace ParkingGuidance.Web.Controllers;
 
-/// <summary>Cài đặt card LED theo Form HDCard của PGS: 100 card, bảng vùng Image/Text/Number; vùng Number lấy dữ liệu từ biến MS, biến MC và project tag.</summary>
+/// <summary>Cài đặt card LED theo Form HDCard của PGS: số card tăng dần (mặc định 1, tối đa 100), bảng vùng Image/Text/Number; vùng Number lấy dữ liệu từ biến MS, biến MC và project tag, vùng Chữ có thể lấy từ project tag String.</summary>
 [ApiController]
 [Route("api/system/leds")]
 public class LedApiController : ControllerBase
@@ -55,16 +55,34 @@ public class LedApiController : ControllerBase
     [HttpGet("catalog")]
     public IActionResult Catalog() => Ok(HdCardCatalog.ToDto());
 
-    /// <summary>Danh sách 100 card (nút "Danh sách card") kèm trạng thái.</summary>
+    /// <summary>Danh sách các card đang dùng (nút "Danh sách card") kèm trạng thái.</summary>
     [HttpGet("cards")]
     public IActionResult Cards()
     {
         var statuses = _dispatcher.GetStatuses();
-        return Ok(_cards.GetAll().Select((c, i) => new
+        return Ok(_cards.GetAll().Take(_cards.Count).Select((c, i) => new
         {
             c.CardNo, ip = c.Para_IPAddress, enabled = c.Para_Enable, width = c.Para_Width, height = c.Para_Height,
             model = HdCardCatalog.Models[c.Para_Mode], areaCount = c.Areas.Count, status = statuses[i]
         }));
+    }
+
+    /// <summary>Mục "Thêm card" của ô Card số: thêm 1 card trống ở cuối rồi trả về số card mới + tổng số card.</summary>
+    [HttpPost("cards")]
+    public IActionResult AddCard()
+    {
+        var (added, error) = _cards.AddCard();
+        return added is null ? BadRequest(new { message = error }) : Ok(new { cardNo = added.CardNo, count = _cards.Count });
+    }
+
+    /// <summary>Nút "Xóa card": xóa card đang chọn, card sau dồn lên và được gửi lại tới card thật (vì IP/nội dung của số thứ tự đó đã đổi).</summary>
+    [HttpDelete("cards/{no:int}")]
+    public IActionResult DeleteCard(int no)
+    {
+        var (count, error) = _cards.DeleteCard(no);
+        if (error is not null) return BadRequest(new { message = error });
+        for (int i = no; i <= count; i++) _dispatcher.ForceSend(i);
+        return Ok(new { cardNo = Math.Min(no, count), count });
     }
 
     [HttpGet("cards/{no:int}")]
@@ -96,7 +114,7 @@ public class LedApiController : ControllerBase
         return Ok(new { ok = r.Ok, code = r.Code, error = r.Error, elapsedMs = r.ElapsedMs });
     }
 
-    /// <summary>Dữ liệu động cho giao diện (gọi định kỳ): trạng thái card + giá trị hiện tại của biến MS, biến MC và project tag (khoá = tên).</summary>
+    /// <summary>Dữ liệu động cho giao diện (gọi định kỳ): số card, trạng thái card + giá trị hiện tại của biến MS, biến MC, project tag số và project tag String (khoá = tên).</summary>
     [HttpGet("live")]
     public IActionResult Live()
     {
@@ -105,17 +123,18 @@ public class LedApiController : ControllerBase
         {
             transport = _dispatcher.TransportName,
             warning = _dispatcher.TransportWarning,
+            cardCount = _cards.Count,
             statuses = _dispatcher.GetStatuses(),
-            ms = s.Ms, mc = s.Mc, tags = s.Tags
+            ms = s.Ms, mc = s.Mc, tags = s.Tags, strings = s.Strings
         });
     }
 
-    /// <summary>Danh sách để chọn trong vùng Number: biến MS, biến MC, project tag kiểu số (Integer/Boolean/Real), kèm giá trị hiện tại.</summary>
+    /// <summary>Danh sách để chọn: biến MS, biến MC, project tag kiểu số (Integer/Boolean/Real) cho vùng Number và project tag String cho vùng Chữ, kèm giá trị hiện tại.</summary>
     [HttpGet("data-sources")]
     public IActionResult DataSources()
     {
         var d = _data.GetSources();
-        return Ok(new { ms = d.Ms, mc = d.Mc, tags = d.Tags });
+        return Ok(new { ms = d.Ms, mc = d.Mc, tags = d.Tags, strings = d.Strings });
     }
 
     // ---------------- Ảnh cho vùng Image ----------------

@@ -1,5 +1,6 @@
 @page "/"
 @using ParkingGuidance.Web.Services.Licensing
+@using ParkingGuidance.Web.Models
 @{
     ViewData["Title"] = "Giám sát bãi xe";
     ViewData["ContentClass"] = "content-fill";   // trang này dùng tối đa không gian cho khung thiết kế
@@ -9,8 +10,18 @@
     var forceRun = AccessLevel.Of(User) == AccessLevel.User;
     if (forceRun) ViewData["BodyClass"] = "layout-run-mode";
 
+    // Màn hình Header / Navigation khi chạy được nhúng bằng iframe: /?panel=Header | /?panel=Navigation
+    // (trang chỉ hiện đúng mặt bằng Header/Navigation của dự án, luôn ở chế độ Chạy, không có menu / thanh công cụ).
+    var panelKind = FloorKind.Parse(Request.Query["panel"].ToString());
+    var isPanelPage = panelKind != FloorKind.Normal;
+    if (isPanelPage) { forceRun = true; ViewData["BodyClass"] = "layout-run-mode layout-panel-mode"; }
+
     // Các tài khoản khác: nhớ chế độ (Chạy/Build) theo từng tài khoản trên trình duyệt này, chỉ đổi khi người dùng tự đổi (nút Build/Chạy, ESC)
     var modeKey = global::System.Text.Json.JsonSerializer.Serialize("pg.layoutMode:" + (User.Identity?.Name ?? ""));
+
+    // Tài khoản đang chạy (hiển thị ở góc dưới-phải màn hình Chạy)
+    var roleLabel = AccessLevel.Of(User) switch { AccessLevel.Dev => "Nhà phát triển", AccessLevel.Lic => "Cấp giấy phép", AccessLevel.Admin => "Quản trị viên", _ => "Người dùng" };
+    var userInfo = global::System.Text.Json.JsonSerializer.Serialize(new { name = User.Identity?.Name ?? "", role = roleLabel });
 }
 
 @* Chạy ngay khi trang đang dựng để vào đúng chế độ đã nhớ, không bị nháy giao diện Build *@
@@ -24,6 +35,7 @@
     <div class="layout-toolbar ribbon">
         <div class="ribbon-tabs" role="tablist">
             <button type="button" class="ribbon-tab active" role="tab" aria-selected="true" data-ribbon-tab="graphics">Đồ họa</button>
+            <button type="button" class="ribbon-tab" role="tab" aria-selected="false" data-ribbon-tab="format">Định dạng</button>
             <button type="button" class="ribbon-tab" role="tab" aria-selected="false" data-ribbon-tab="floors">Mặt bằng</button>
             <button type="button" class="ribbon-tab" role="tab" aria-selected="false" data-ribbon-tab="zoom">Phóng to / Thu nhỏ</button>
             <button type="button" class="ribbon-run" id="runModeBtn" title="Chạy mặt bằng (nhấn ESC để thoát)" aria-label="Chạy mặt bằng"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg></button>
@@ -60,6 +72,9 @@
                         <button type="button" class="rb-btn" data-add="Button" title="Nút ấn: bấm ở chế độ Chạy để chuyển mặt bằng"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="8" width="18" height="9" rx="3"/><path d="M8 12.5h8"/></svg><span>Nút ấn</span></button>
                         <button type="button" class="rb-btn" data-add="Image"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 18l5-5 4 4 3-3 4 4"/></svg><span>Hình ảnh</span></button>
                     </div>
+                    <div class="rb-col">
+                        <button type="button" class="rb-btn" data-add="DateTime" title="Ngày giờ: đồng hồ hiển thị ngày / giờ hiện tại — chọn chỉ ngày, chỉ giờ, định dạng, thứ, 24h/12h, giây, 1–2 dòng, ngôn ngữ, múi giờ"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="14" height="14" rx="2"/><path d="M3 9h14M7 2v4M13 2v4"/><circle cx="18" cy="17" r="4.2" fill="var(--panel)"/><path d="M18 15v2.2l1.4 1"/></svg><span>Ngày giờ</span></button>
+                    </div>
                 </div>
                 <span class="rb-label">Thành phần</span>
             </div>
@@ -95,17 +110,65 @@
                 </div>
                 <span class="rb-label">Hiển thị vùng</span>
             </div>
+        </div>
+
+        <div class="ribbon-body fmt-off" id="fmtPanel" data-ribbon-panel="format" role="tabpanel" hidden>
+            <div class="rb-group">
+                <div class="rb-items rb-center">
+                    <div class="fmt-sel"><b id="fmtSelName">Chưa chọn đối tượng</b><span id="fmtSelHint">Nhấp vào 1 đối tượng trên bản đồ</span></div>
+                </div>
+                <span class="rb-label">Đối tượng</span>
+            </div>
 
             <div class="rb-group">
                 <div class="rb-items">
-                    <div class="rb-col">
-                        <label class="rb-btn file-btn"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 18l5-5 4 4 3-3 4 4"/></svg><span>Chọn ảnh nền</span>
-                            <input type="file" id="floorBgInput" accept="image/*" hidden />
-                        </label>
-                        <button type="button" id="clearBgBtn" class="rb-btn"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M8 9l8 6M16 9l-8 6"/></svg><span>Bỏ ảnh nền</span></button>
+                    <div class="fmt-grid">
+                        <label class="fmt-lbl" for="fmtX"><i>X</i>X:</label><input id="fmtX" class="fmt-in" type="number" step="0.1" disabled />
+                        <label class="fmt-lbl" for="fmtY"><i>Y</i>Y:</label><input id="fmtY" class="fmt-in" type="number" step="0.1" disabled />
+                    </div>
+                    <div class="fmt-btns">
+                        <button type="button" class="rb-btn" id="fmtCenterH" title="Căn giữa đối tượng theo chiều ngang của khung" disabled>↔ Giữa ngang</button>
+                        <button type="button" class="rb-btn" id="fmtCenterV" title="Căn giữa đối tượng theo chiều dọc của khung" disabled>↕ Giữa dọc</button>
                     </div>
                 </div>
-                <span class="rb-label">Ảnh nền</span>
+                <span class="rb-label">Vị trí (% khung)</span>
+            </div>
+
+            <div class="rb-group">
+                <div class="rb-items">
+                    <div class="fmt-grid">
+                        <label class="fmt-lbl" for="fmtW"><i>↔</i><span id="fmtWLbl">Rộng:</span></label><input id="fmtW" class="fmt-in" type="number" step="0.1" min="1" max="100" disabled />
+                        <label class="fmt-lbl" for="fmtH"><i>↕</i><span id="fmtHLbl">Cao:</span></label><input id="fmtH" class="fmt-in" type="number" step="0.1" min="1" max="100" disabled />
+                    </div>
+                    <label class="fmt-lock" title="Khi đổi Rộng thì Cao đổi theo cùng tỉ lệ (và ngược lại). Hình tròn đều tự được khoá."><input type="checkbox" id="fmtLock" disabled /> Khoá tỉ lệ</label>
+                </div>
+                <span class="rb-label">Kích thước (% khung)</span>
+            </div>
+
+            <div class="rb-group">
+                <div class="rb-items">
+                    <div class="fmt-grid">
+                        <label class="fmt-lbl" for="fmtRot"><i>⟳</i>Góc (°):</label><input id="fmtRot" class="fmt-in" type="number" step="1" min="-360" max="360" disabled />
+                    </div>
+                    <div class="fmt-btns">
+                        <button type="button" class="rb-btn" id="fmtRotL" title="Xoay trái 90°" disabled>↺ −90°</button>
+                        <button type="button" class="rb-btn" id="fmtRotR" title="Xoay phải 90°" disabled>↻ +90°</button>
+                    </div>
+                </div>
+                <span class="rb-label">Xoay</span>
+            </div>
+
+            <div class="rb-group">
+                <div class="rb-items">
+                    <div class="fmt-grid">
+                        <label class="fmt-lbl" for="fmtZ"><i>≡</i>Lớp:</label><input id="fmtZ" class="fmt-in" type="number" step="1" min="-1000" max="1000" disabled />
+                    </div>
+                    <div class="fmt-btns">
+                        <button type="button" class="rb-btn" id="fmtBack" title="Đưa ra sau cùng (làm nền cho các ô đỗ / nút)" disabled>⬇ Ra sau</button>
+                        <button type="button" class="rb-btn" id="fmtFront" title="Đưa lên trên cùng" disabled>⬆ Lên trước</button>
+                    </div>
+                </div>
+                <span class="rb-label">Thứ tự lớp</span>
             </div>
         </div>
 
@@ -135,6 +198,57 @@
                     </label>
                 </div>
                 <span class="rb-label">Khởi động</span>
+            </div>
+            <div class="rb-group" id="floorPanelGroup" hidden>
+                <div class="rb-items rb-center">
+                    <label class="rb-check" id="floorEnabledField" title="Bật: màn hình này luôn hiển thị khi chạy. Tắt: không hiển thị (vẫn giữ nội dung đã thiết kế).">
+                        <input type="checkbox" id="floorEnabled" />
+                        <span>Sử dụng</span>
+                    </label>
+                    <div class="rb-field" id="floorPanelSizeField">
+                        <label for="floorPanelW">Rộng × Cao (px)</label>
+                        <span class="rb-size"><input type="number" id="floorPanelW" class="rb-input" min="5" max="4000" step="1" /> × <input type="number" id="floorPanelH" class="rb-input" min="5" max="4000" step="1" /></span>
+                    </div>
+                    <label class="rb-check" id="floorFullSizeField" title="Header: rộng hết màn hình. Navigation: cao hết phần còn lại dưới Header. Mặt bằng đỗ xe vẫn bắt đầu từ góc giữa Header và Navigation.">
+                        <input type="checkbox" id="floorFullSize" />
+                        <span>Toàn kích thước</span>
+                    </label>
+                    <label class="rb-check" id="floorShowAccountField" hidden title="Hiện tài khoản + nút Đăng xuất ở đáy màn hình Navigation (khi bật, khối này không còn hiện ở góc dưới-trái màn hình).">
+                        <input type="checkbox" id="floorShowAccount" />
+                        <span>Hiện tài khoản &amp; Đăng xuất</span>
+                    </label>
+                </div>
+                <span class="rb-label" id="floorPanelLabel">Header / Navigation</span>
+            </div>
+            <div class="rb-group" id="runInsetGroup">
+                <div class="rb-items rb-center">
+                    <div class="rb-field">
+                        <label for="runBottomInset">Chừa đáy khi chạy (px)</label>
+                        <input type="number" id="runBottomInset" class="rb-input" min="0" max="400" step="1" placeholder="Tự động" style="width:84px" title="Chỉ dùng khi KHÔNG ở toàn màn hình: trừ phần dưới bị taskbar che. Để trống = tự tính. Lưu riêng từng máy." />
+                    </div>
+                </div>
+                <span class="rb-label">Màn hình chạy</span>
+            </div>
+            <div class="rb-group">
+                <div class="rb-items">
+                    <div class="rb-col">
+                        <label class="rb-btn file-btn"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 18l5-5 4 4 3-3 4 4"/></svg><span>Chọn ảnh nền</span>
+                            <input type="file" id="floorBgInput" accept="image/*" hidden />
+                        </label>
+                        <button type="button" id="clearBgBtn" class="rb-btn"><svg class="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M8 9l8 6M16 9l-8 6"/></svg><span>Bỏ ảnh nền</span></button>
+                    </div>
+                </div>
+                <span class="rb-label">Ảnh nền</span>
+            </div>
+            <div class="rb-group" id="floorColorGroup">
+                <div class="rb-items rb-center">
+                    <div class="rb-field">
+                        <label for="floorBgColor">Màu nền</label>
+                        <input type="color" id="floorBgColor" class="rb-color" title="Màu nền của mặt bằng đang chọn (Header, Navigation và mặt bằng đỗ xe đều có màu riêng)" />
+                    </div>
+                    <button type="button" id="floorBgColorReset" class="rb-btn apply" title="Bỏ màu đã chọn, dùng màu mặc định của giao diện"><span>Mặc định</span></button>
+                </div>
+                <span class="rb-label">Màu nền</span>
             </div>
         </div>
 
@@ -193,6 +307,12 @@
     </aside>
 </div>
 
+@if (isPanelPage && panelKind == FloorKind.Navigation)
+{
+    @* Khối tài khoản + Đăng xuất đặt ở đáy màn hình Navigation (chỉ hiện khi Navigation bật tuỳ chọn "Hiện tài khoản & Đăng xuất") *@
+    <div id="pgNavAccount"><partial name="_LogoutButton" /></div>
+}
+
 <div id="zonePickModal" class="modal-overlay" style="display:none;">
     <div class="modal-box" style="width:460px;">
         <h3>Thêm vùng nhận diện vào bản đồ</h3>
@@ -210,7 +330,7 @@
 </div>
 
 @section Scripts {
-    <script>window.PG_FORCE_RUN = @(forceRun ? "true" : "false");</script>
+    <script>window.PG_USER = @Html.Raw(userInfo); window.PG_FORCE_RUN = @(forceRun ? "true" : "false"); window.PG_PANEL = @Html.Raw(isPanelPage ? "\"" + panelKind + "\"" : "null");</script>
     <script>
         // Chuyển tab thanh công cụ (Đồ họa / Mặt bằng / Phóng to - Thu nhỏ). Các phần tử chỉ bị ẩn, không bị xoá khỏi trang
         // nên floors.js và layout.js vẫn tìm thấy đúng ID như cũ.
@@ -233,6 +353,7 @@
             if (fit && zs) fit.addEventListener('click', function () { zs.value = '1'; zs.dispatchEvent(new Event('change')); });
         })();
     </script>
+    <script src="~/js/propUi.js" asp-append-version="true"></script>
     <script src="~/js/floorManager.js" asp-append-version="true"></script>
     <script src="~/js/dashboard.js" asp-append-version="true"></script>
     <script src="~/js/layout.js" asp-append-version="true"></script>

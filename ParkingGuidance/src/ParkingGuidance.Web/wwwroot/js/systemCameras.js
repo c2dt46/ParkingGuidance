@@ -201,7 +201,7 @@ async function selectCamera(id) {
     const floorsRes = await fetch('/api/floors');
     const floors = await floorsRes.json();
     const floorOptions = ['<option value="">— Chưa gán —</option>']
-        .concat(floors.map(f => `<option value="${f.id}" ${cam.floor === f.id ? 'selected' : ''}>${f.id} — ${f.name}</option>`))
+        .concat(floors.filter(f => !f.kind || f.kind === 'Normal').map(f => `<option value="${f.id}" ${cam.floor === f.id ? 'selected' : ''}>${f.id} — ${f.name}</option>`))
         .join('');
 
     const panel = document.getElementById('cameraDetailPanel');

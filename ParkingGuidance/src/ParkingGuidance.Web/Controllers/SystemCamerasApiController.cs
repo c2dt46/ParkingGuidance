@@ -570,8 +570,16 @@ public class SystemCamerasApiController : ControllerBase
             await _hub.Clients.All.SendAsync("SlotsChanged");
         }
 
+        // Đọc lại từ bãi đỗ NGAY SAU KHI ghi (đúng thứ bản đồ, đèn và popup sẽ thấy) để giao diện báo rõ đã lưu gì
+        var saved = register
+            ? regItems.Select(r => _parking.FindSlot(r.Key)).Where(sl => sl is not null)
+                .Select(sl => new { Position = SlotKey.NumberOfKey(sl!.SlotId), sl.SlotId, Status = sl.Status.ToString(), sl.PlateNumber, sl.ParkedAt })
+                .OrderBy(x => int.TryParse(x.Position, out var n) ? n : int.MaxValue).ToList()
+            : null;
+
         return Ok(new
         {
+            Saved = saved,
             FrameWidth = mat.Width,
             FrameHeight = mat.Height,
             VehicleCount = vehicles.Count,

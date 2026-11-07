@@ -13,8 +13,10 @@ const tt = (key, vi) => (window.PGPrefs ? window.PGPrefs.t(key, vi) : vi);
 let cardNo = 1;
 let card = null;          // LedCard dang sua (dung ten thuoc tinh camelCase cua API)
 let selRow = -1;
-let live = { ms: {}, mc: {}, tags: {}, statuses: [] };
-let dataSources = { ms: [], mc: [], tags: [] };   // bien MS, bien MC, project tag (kieu so) de chon trong vung Number
+let live = { ms: {}, mc: {}, tags: {}, strings: {}, statuses: [] };
+let cardCount = 1;        // số card đang dùng (mặc định 1, thêm bằng mục "Thêm card")
+const ADD_VALUE = 'add';  // giá trị của mục "Thêm card" trong ô Card số
+let dataSources = { ms: [], mc: [], tags: [], strings: [] };   // bien MS, bien MC, project tag (kieu so) de chon trong vung Number
 let saveTimer = null;
 let saving = false;
 let loading = false;      // dang do du lieu len control -> khong tu luu (chan_dieu_chinh cua PGS)
@@ -35,7 +37,7 @@ function newRow(type, x, y, w, h) {
     return {
         no: 0, type, originX: x, originY: y, width: w, height: h,
         ipath: '', ispeed: 1, istopover: 0, ieffects: 0,
-        ttext: '', tspeed: 1, tstopover: 0, teffects: 0, tcolor: 0, tfont: 5, tfont_Type: '.Vn3DH',
+        ttext: '', tTag: '', tspeed: 1, tstopover: 0, teffects: 0, tcolor: 0, tfont: 5, tfont_Type: '.Vn3DH',
         nMs: '', nMc: '', nTag: '', ncolor: 0, nmode: 0, nquantity: 2, nlimitY: 2000, nlimitR: 1000,
         nfont: 5, nfont_Type: '.Vn3DH', nFull: 0
     };
@@ -44,7 +46,8 @@ function newRow(type, x, y, w, h) {
 // ----------------------------------------------------------------- khoi tao
 async function init() {
     catalog = await api(API + '/catalog');
-    $('CardNo').innerHTML = Array.from({ length: 100 }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('');
+    try { live = await api(API + '/live'); } catch { /* giữ mặc định 1 card */ }
+    paintCardNoOptions(live.cardCount || 1);
     $('Card_model').innerHTML = catalog.models.map(m => `<option value="${m.index}">${esc(m.name)}</option>`).join('');
 
     const src = {
@@ -60,15 +63,31 @@ async function init() {
     setInterval(refreshLive, 2000);
 }
 
+// ----------------------------------------------------------------- ô Card số: các card đang dùng + mục "Thêm card"
+function paintCardNoOptions(count) {
+    cardCount = Math.max(1, count | 0);
+    const max = catalog?.maxCards ?? 100;
+    $('CardNo').innerHTML = Array.from({ length: cardCount }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('') +
+        (cardCount < max ? `<option value="${ADD_VALUE}">➕ ${esc(tt('led.addCard', 'Thêm card'))}</option>` : '');
+    if (cardNo > cardCount) cardNo = cardCount;
+    $('CardNo').value = String(cardNo);
+    $('btnDelCard').disabled = cardCount <= 1;
+}
+
 // ----------------------------------------------------------------- nguon so cua vung Number: bien MS + bien MC + project tag
 function dataSourceOptions(kind) {
     const none = `<option value="">${esc(tt('led.none', 'Không'))}</option>`;
+    const shown = v => {
+        if (kind !== 'strings') return v.value;
+        const t = String(v.text ?? '');
+        return '"' + (t.length > 30 ? t.slice(0, 30) + '…' : t) + '"';
+    };
     return none + (dataSources[kind] || []).map(v =>
-        `<option value="${esc(v.name)}">${esc(v.name)}${v.description ? ' — ' + esc(v.description) : ''}${v.type ? ' [' + esc(v.type) + ']' : ''} (= ${v.value})</option>`).join('');
+        `<option value="${esc(v.name)}">${esc(v.name)}${v.description ? ' — ' + esc(v.description) : ''}${v.type ? ' [' + esc(v.type) + ']' : ''} (= ${esc(shown(v))})</option>`).join('');
 }
 async function loadDataSources() {
     try { dataSources = await api(API + '/data-sources'); } catch { /* giu danh sach cu */ }
-    const kinds = { srcMs: 'ms', srcMc: 'mc', srcTag: 'tags' };
+    const kinds = { srcMs: 'ms', srcMc: 'mc', srcTag: 'tags', srcStr: 'strings' };
     document.querySelectorAll('select[data-src^="src"]').forEach(el => { el.innerHTML = dataSourceOptions(kinds[el.dataset.src]); });
     if (card && selRow >= 0) showPanel();   // danh sach vua doi -> dien lai gia tri dong dang chon
 }
@@ -77,7 +96,7 @@ async function loadDataSources() {
 async function loadCard(no) {
     await flushSave();
     cardNo = no;
-    $('CardNo').value = no;
+    $('CardNo').value = String(no);
     card = await api(`${API}/cards/${no}`);
     selRow = -1;
     paintCardPara();
@@ -102,7 +121,8 @@ function paintCardPara() {
 
 function modelHint() {
     const m = catalog.models[card.para_Mode];
-    return `${m.name}: tối đa ${m.maxWidth}×${m.maxHeight} px, ${m.maxBlocks} khối (mỗi khối 32 cột × 16 hàng). Rộng là bội số của 32, cao là bội số của 16.`;
+    return `${m.name}: tối đa ${m.maxWidth}×${m.maxHeight} px, ${m.maxBlocks} khối (mỗi khối 32 cột × 16 hàng). Rộng là bội số của 32, cao là bội số của 16.` +
+        (live.transport ? ` Giao tiếp: ${live.transport}.` : '') + (live.warning ? ` ⚠️ ${live.warning}` : '');
 }
 
 // color_check / gray_check cua HDCard
@@ -153,7 +173,38 @@ function warnText(c) {
 }
 
 // ----------------------------------------------------------------- cac control thong so card
-$('CardNo').addEventListener('change', () => loadCard(parseInt($('CardNo').value, 10)));
+$('CardNo').addEventListener('change', async () => {
+    const v = $('CardNo').value;
+    if (v === ADD_VALUE) {                       // mục "Thêm card": tạo card mới ở cuối rồi chuyển sang card đó
+        try {
+            await flushSave();
+            const r = await send(API + '/cards', 'POST');
+            cardNo = r.cardNo;
+            paintCardNoOptions(r.count);
+            await loadCard(r.cardNo);
+        } catch (e) {
+            $('CardNo').value = String(cardNo);
+            $('hdSaveState').textContent = '⚠️ ' + e.message;
+        }
+        return;
+    }
+    loadCard(parseInt(v, 10));
+});
+
+// Nút "Xóa card": xóa card đang chọn, card sau dồn lên (luôn giữ tối thiểu 1 card)
+$('btnDelCard').addEventListener('click', async () => {
+    if (cardCount <= 1) return;
+    if (!confirm(tt('led.delCardAsk', 'Xóa card {n}? Các card phía sau sẽ được đánh số lại.').replace('{n}', cardNo))) return;
+    try {
+        clearTimeout(saveTimer); saveTimer = null;   // bỏ lần lưu đang chờ của card sắp xóa
+        const r = await api(`${API}/cards/${cardNo}`, { method: 'DELETE' });
+        cardNo = r.cardNo;
+        paintCardNoOptions(r.count);
+        await loadCard(r.cardNo);
+        $('hdSaveState').textContent = '🗑️ ' + tt('led.delCardDone', 'Đã xóa card');
+        if ($('DanhsachCard').style.display !== 'none') paintCardList();
+    } catch (e) { $('hdSaveState').textContent = '⚠️ ' + e.message; }
+});
 
 $('IPCard').addEventListener('blur', () => {
     const v = $('IPCard').value.trim();
@@ -282,7 +333,7 @@ window.addEventListener('resize', fitLedProps);
 function selectRow(i) {
     selRow = i;
     paintRows(); showPanel(); paintLed();
-    if (card.areas[i]?.type === 'Number') loadDataSources();   // bien MS / MC / tag co the vua duoc them o trang khac
+    if (card.areas[i]?.type === 'Number' || card.areas[i]?.type === 'Text') loadDataSources();   // bien MS / MC / tag co the vua duoc them o trang khac
 }
 
 // Hien thi panel theo loai (update() cua HDCard)
@@ -306,7 +357,16 @@ function showPanel() {
         el.value = v;
     });
     loading = false;
+    syncTextInput();
     fitLedProps();
+}
+
+// Vùng Chữ gắn biến string: chữ hiển thị = giá trị biến nên khóa ô Nội dung cố định
+function syncTextInput() {
+    const r = card?.areas[selRow];
+    const useTag = r?.type === 'Text' && !!r.tTag;
+    $('Texttext').disabled = useTag;
+    $('Texttext').title = useTag ? tt('led.txtLocked', 'Đang dùng biến string — chọn "Không" để nhập chữ cố định') : '';
 }
 
 // Moi control co data-f: sua la ghi thang vao dong dang chon, ve lai mo phong va tu luu
@@ -316,6 +376,7 @@ document.querySelectorAll('#palArea [data-f]').forEach(el => {
         const r = card.areas[selRow];
         if (!r) return;
         r[el.dataset.f] = el.dataset.t === 'int' ? (parseInt(el.value, 10) || 0) : el.value;
+        if (el.dataset.f === 'tTag') syncTextInput();
         paintLed(); scheduleSave();
     });
 });
@@ -332,11 +393,22 @@ $('btnAddFile').addEventListener('click', () => add('Image'));
 $('btnAddText').addEventListener('click', () => add('Text'));
 $('btnAddNum').addEventListener('click', () => add('Number'));
 
-$('btnDel').addEventListener('click', () => {
-    if (selRow < 0) return;
+// Xóa vùng đang chọn (chọn bằng cách bấm vào vùng trên khung LED hoặc 1 dòng trong bảng)
+function deleteSelectedArea() {
+    if (!card || selRow < 0 || !card.areas[selRow]) return;
     card.areas.splice(selRow, 1);
     selRow = Math.min(selRow, card.areas.length - 1);
     paintRows(); showPanel(); paintLed(); scheduleSave();
+}
+$('btnDel').addEventListener('click', deleteSelectedArea);
+// Phím Delete cũng xóa vùng đang chọn (không áp dụng khi đang gõ trong ô nhập / combobox)
+document.addEventListener('keydown', e => {
+    if (e.key !== 'Delete' || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+    const t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (selRow < 0) return;
+    e.preventDefault();
+    deleteSelectedArea();
 });
 function move(d) {
     const j = selRow + d;
@@ -434,9 +506,14 @@ function areaKey(r, show) {
     return [r.type, r.width, r.height, show?.text, show?.color, r.type === 'Number' ? r.nfont : r.tfont,
         r.type === 'Number' ? r.nfont_Type : r.tfont_Type, r.ipath].join('|');
 }
+// Vùng Chữ: có chọn biến string (và biến còn tồn tại) thì lấy giá trị hiện tại của tag, ngược lại dùng chữ cố định (giống bộ gửi ở server)
+function textValue(r) {
+    const m = live.strings;
+    return r.tTag && m && Object.prototype.hasOwnProperty.call(m, r.tTag) ? String(m[r.tTag]) : r.ttext;
+}
 function areaShow(r) {
     if (r.type === 'Number') return numberShow(r);
-    if (r.type === 'Text') return { text: r.ttext, color: r.tcolor };
+    if (r.type === 'Text') return { text: textValue(r), color: r.tcolor };
     return null;
 }
 // Ve vung r len canvas cv (kich thuoc canvas = rong*scale x cao*scale)
@@ -700,6 +777,8 @@ function syncGeomInputs(r) {
 function paintConn() {
     const b = $('hdConn');
     const st = live.statuses[cardNo - 1];
+    const warn = $('hdWarn');
+    warn.hidden = true;
     if (!st) { b.textContent = '—'; return; }
     const map = { Online: ['🟢 Online', ''], Offline: ['🔴 Mất kết nối', st.lastError || ''], Pending: ['🟡 Chờ gửi', ''], Disabled: ['⚪ Tắt', ''] };
     const [t, tip] = map[st.state] ?? ['—', ''];
@@ -707,6 +786,12 @@ function paintConn() {
     b.title = tip || 'Bấm để kiểm tra kết nối';
     const note = st.configChanged ? '⚠️ Cấu hình card đã đổi so với lần gửi cuối — bấm "Gửi tới card" để áp dụng.' : '';
     $('hdCardHint').textContent = (note ? note + ' ' : '') + modelHint();
+    // Card/SDK không phản hồi (hết timeout): cảnh báo bên phải thanh nút, như bản thiết kế
+    if (st.state === 'Offline') {
+        warn.textContent = '⚠️ ' + tt('led.warnTimeout', "Quá {s}s không có phản hồi từ card/SDK (chỉnh ở ô 'Timeout gửi LED')").replace('{s}', ledTimeoutBase ?? 15);
+        warn.title = st.lastError || '';
+        warn.hidden = false;
+    }
 }
 
 function paintCardList() {
@@ -727,17 +812,19 @@ $('cardListBody').addEventListener('click', e => {
 async function refreshLive() {
     try {
         live = await api(API + '/live');
-        $('hdTransport').innerHTML = `Giao tiếp: <strong>${esc(live.transport)}</strong>` +
-            (live.warning ? ` — <span style="color:#f59e0b">⚠️ ${esc(live.warning)}</span>` : '');
-        paintConn();
+        if ((live.cardCount || 1) !== cardCount) {              // số card đổi (mở dự án khác / trang khác thêm-xóa)
+            paintCardNoOptions(live.cardCount || 1);
+            if (card && card.cardNo !== cardNo) await loadCard(cardNo);
+        }
+        if (card) paintConn();
         // cap nhat so tren khung mo phong (Luon_quet_Tick) ma khong ve lai toan bo
         if (card) {
             const els = $('palLedBlock').children;
             card.areas.forEach((r, i) => {
-                if (r.type !== 'Number' || !els[i]) return;
+                if (!(r.type === 'Number' || (r.type === 'Text' && r.tTag)) || !els[i]) return;
                 const cv = els[i].querySelector('canvas');
                 if (!cv) return;
-                const key = areaKey(r, numberShow(r));
+                const key = areaKey(r, areaShow(r));
                 if (cv.dataset.k === key) return;   // khong doi -> khong ve lai
                 drawArea(r, cv, curScale);
                 cv.dataset.k = key;
@@ -747,4 +834,4 @@ async function refreshLive() {
     } catch { /* thu lai o lan sau */ }
 }
 
-init().catch(err => { $('hdTransport').textContent = '⚠️ Không tải được: ' + err.message; });
+init().catch(err => { $('hdCardHint').textContent = '⚠️ Không tải được: ' + err.message; });

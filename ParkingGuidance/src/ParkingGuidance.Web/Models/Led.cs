@@ -37,6 +37,8 @@ public class LedAreaRow
     public int Tcolor { get; set; }
     public int Tfont { get; set; } = 5;
     public string Tfont_Type { get; set; } = ".Vn3DH";
+    /// <summary>Tên project tag kiểu String; rỗng = dùng nội dung cố định <see cref="Ttext"/>. Khi chọn tag, chữ hiển thị = giá trị hiện tại của tag.</summary>
+    public string TTag { get; set; } = "";
 
     // Number: giá trị hiển thị = biến MS (NMs) + biến MC (NMc) + project tag (NTag); mục để trống tính là 0.
     // (Thay cho "dữ liệu loại A/B/C" cũ — các thanh ghi A/B/C không còn trong dự án; cấu hình cũ có NAdata/NBdata/NCdata sẽ bị bỏ qua khi nạp.)
@@ -71,7 +73,7 @@ public class LedAreaRow
             Width = C(Width, 1, 1000), Height = C(Height, 1, 1000),
             Ipath = Ipath ?? "", Ispeed = C(Ispeed, 1, 2000), Istopover = C(Istopover, 0, 255), Ieffects = C(Ieffects, 0, HdCardCatalog.Effects.Length - 1),
             Ttext = Ttext ?? "", Tspeed = C(Tspeed, 1, 2000), Tstopover = C(Tstopover, 0, 255), Teffects = C(Teffects, 0, HdCardCatalog.Effects.Length - 1),
-            Tcolor = C(Tcolor, 0, 2), Tfont = C(Tfont, 5, 139), Tfont_Type = Font(Tfont_Type),
+            Tcolor = C(Tcolor, 0, 2), Tfont = C(Tfont, 5, 139), Tfont_Type = Font(Tfont_Type), TTag = Name(TTag),
             NMs = Name(NMs), NMc = Name(NMc), NTag = Name(NTag),
             Ncolor = C(Ncolor, 0, 2), Nmode = C(Nmode, 0, 1), Nquantity = C(Nquantity, 2, 10),
             NlimitY = C(NlimitY, 0, 99999), NlimitR = C(NlimitR, 0, 99999),
@@ -80,7 +82,7 @@ public class LedAreaRow
     }
 }
 
-/// <summary>1 card LED (Para_* của HDCard) + bảng vùng hiển thị của nó. PGS quản lý 100 card, số thứ tự 1..100.</summary>
+/// <summary>1 card LED (Para_* của HDCard) + bảng vùng hiển thị của nó. Số card tăng dần theo nhu cầu (mặc định 1, thêm bằng mục "Thêm card"), tối đa 100.</summary>
 public class LedCard
 {
     private static readonly Regex IpRegex = new(@"^([1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])(\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])){3}$", RegexOptions.Compiled);

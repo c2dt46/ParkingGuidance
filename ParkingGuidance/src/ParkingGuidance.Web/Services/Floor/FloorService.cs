@@ -14,6 +14,10 @@ public interface IFloorService
     /// <summary>Đặt mặt bằng khởi động (chỉ 1 mặt bằng duy nhất; các mặt bằng khác tự bỏ đánh dấu).</summary>
     FloorPlan? SetStartup(string id);
     bool DeleteFloor(string id);
+    /// <summary>Cấu hình màn hình Header / Navigation (luôn có sẵn): dùng / không dùng + kích thước pixel + toàn kích thước + (Navigation) tài khoản.</summary>
+    (FloorPlan? Floor, string? Error) UpdatePanel(string id, bool? enabled, int? width, int? height, bool? showAccount = null, bool? fullSize = null);
+    /// <summary>Đặt màu nền (#RRGGBB) cho mặt bằng bất kỳ (kể cả Header / Navigation); null / rỗng = màu mặc định.</summary>
+    FloorPlan? SetBackgroundColor(string id, string? color);
 }
 
 /// <summary>Lưu trữ danh sách mặt bằng — tự tải lại khi khởi động và tự lưu sau mỗi thay đổi
@@ -38,18 +42,24 @@ public class FloorService : IFloorService, IProjectScoped
 
     private void LoadFromDisk()
     {
-        lock (_gate) _floors.Clear();
         var saved = _persistence.Load<List<FloorPlan>>(StateKey);
-        if (saved is not null && saved.Count > 0)
+        // Xoá + nạp lại trong CÙNG MỘT lần khoá: nếu để hở giữa 2 bước, 1 request đọc danh sách đúng lúc đó thấy "trống" và
+        // GetFloors() sẽ tự tạo thêm mặt bằng "DEFAULT" vào dự án vừa mở.
+        lock (_gate)
         {
-            foreach (var f in saved) _floors[f.Id] = f;
+            _floors.Clear();
+            if (saved is not null && saved.Count > 0)
+            {
+                foreach (var f in saved) _floors[f.Id] = f;
+            }
+            else
+            {
+                _floors["B1"] = new FloorPlan { Id = "B1", Name = "Tầng hầm B1", IsStartup = true };
+                SaveState();
+            }
+            EnsureDefaults();
+            NormalizeStartup();
         }
-        else
-        {
-            _floors["B1"] = new FloorPlan { Id = "B1", Name = "Tầng hầm B1", IsStartup = true };
-            SaveState();
-        }
-        lock (_gate) NormalizeStartup();
     }
 
     // ---- IProjectScoped: lưu chung / mở dự án khác ----
@@ -64,6 +74,7 @@ public class FloorService : IFloorService, IProjectScoped
         lock (_gate)
         {
             EnsureAtLeastOneFloor();
+            EnsureDefaults();
             NormalizeStartup();
         }
         return _floors.Values.OrderBy(f => f.Id).ToList();
@@ -75,11 +86,12 @@ public class FloorService : IFloorService, IProjectScoped
     {
         if (_floors.IsEmpty) return;
         var ordered = _floors.Values.OrderBy(f => f.Id).ToList();
-        var keep = ordered.FirstOrDefault(f => f.IsStartup) ?? ordered[0];
+        var normals = ordered.Where(f => !f.IsPanel).ToList();   // Header / Navigation không bao giờ là mặt bằng khởi động
+        var keep = normals.FirstOrDefault(f => f.IsStartup) ?? normals.FirstOrDefault();
         bool changed = false;
         foreach (var f in ordered)
         {
-            var want = ReferenceEquals(f, keep);
+            var want = keep is not null && ReferenceEquals(f, keep);
             if (f.IsStartup != want) { f.IsStartup = want; changed = true; }
         }
         if (changed) SaveState();
@@ -89,7 +101,7 @@ public class FloorService : IFloorService, IProjectScoped
     {
         lock (_gate)
         {
-            if (!_floors.TryGetValue(id, out var target)) return null;
+            if (!_floors.TryGetValue(id, out var target) || target.IsPanel) return null;
             foreach (var f in _floors.Values) f.IsStartup = ReferenceEquals(f, target);
             SaveState();
             return target;
@@ -99,9 +111,69 @@ public class FloorService : IFloorService, IProjectScoped
     /// <summary>Luôn có ít nhất 1 mặt bằng: nếu danh sách trống thì tự tạo "Mặt bằng mặc định". Gọi trong lock(_gate).</summary>
     private void EnsureAtLeastOneFloor()
     {
-        if (!_floors.IsEmpty) return;
+        if (_floors.Values.Any(f => !f.IsPanel)) return;   // phải còn ít nhất 1 mặt bằng đỗ xe (Header/Navigation không tính)
         _floors[DefaultFloorId] = new FloorPlan { Id = DefaultFloorId, Name = DefaultFloorName, IsStartup = true };
         SaveState();
+    }
+
+    /// <summary>Mọi dự án luôn có đúng 1 Header + 1 Navigation (mặc định chưa dùng), tên cố định. Dữ liệu từ bản trước (đã tạo bằng tay) được giữ nguyên
+    /// mã và coi là đang dùng. Gọi trong lock(_gate).</summary>
+    private void EnsureDefaults()
+    {
+        bool changed = false;
+        foreach (var kind in new[] { FloorKind.Header, FloorKind.Navigation })
+        {
+            var f = _floors.Values.Where(x => x.Kind == kind).OrderBy(x => x.Id).FirstOrDefault();
+            if (f is null)
+            {
+                var id = kind == FloorKind.Header ? FloorKind.HeaderId : FloorKind.NavigationId;
+                while (_floors.ContainsKey(id)) id += "_";     // mã bị mặt bằng thường chiếm (rất hiếm)
+                var (dw, dh) = FloorKind.DefaultSize(kind);
+                f = new FloorPlan { Id = id, Name = kind, Kind = kind, PanelWidth = dw, PanelHeight = dh, Enabled = false };
+                _floors[id] = f;
+                changed = true;
+            }
+            if (f.Name != kind) { f.Name = kind; changed = true; }                 // tên cố định
+            if (f.Enabled is null) { f.Enabled = true; changed = true; }           // dữ liệu cũ: đã tạo = đang dùng
+            if (f.IsStartup) { f.IsStartup = false; changed = true; }
+            if (f.PanelWidth <= 0 || f.PanelHeight <= 0)
+            {
+                var (dw, dh) = FloorKind.DefaultSize(kind);
+                if (f.PanelWidth <= 0) f.PanelWidth = dw;
+                if (f.PanelHeight <= 0) f.PanelHeight = dh;
+                changed = true;
+            }
+        }
+        if (changed) SaveState();
+    }
+
+    public (FloorPlan? Floor, string? Error) UpdatePanel(string id, bool? enabled, int? width, int? height, bool? showAccount = null, bool? fullSize = null)
+    {
+        lock (_gate)
+        {
+            if (!_floors.TryGetValue(id, out var floor)) return (null, "Không tìm thấy mặt bằng.");
+            if (!floor.IsPanel) return (null, "Chỉ Header / Navigation mới có thiết lập này.");
+            int w = width ?? floor.PanelWidth, h = height ?? floor.PanelHeight;
+            if (w < FloorKind.MinSize || w > FloorKind.MaxSize || h < FloorKind.MinSize || h > FloorKind.MaxSize)
+                return (null, $"Chiều rộng / chiều cao phải trong khoảng {FloorKind.MinSize}–{FloorKind.MaxSize} px.");
+            floor.PanelWidth = w; floor.PanelHeight = h;
+            if (enabled.HasValue) floor.Enabled = enabled.Value;
+            floor.ShowAccount = floor.Kind == FloorKind.Navigation && (showAccount ?? floor.ShowAccount);
+            if (fullSize.HasValue) floor.FullSize = fullSize.Value;
+            SaveState();
+            return (floor, null);
+        }
+    }
+
+    public FloorPlan? SetBackgroundColor(string id, string? color)
+    {
+        lock (_gate)
+        {
+            if (!_floors.TryGetValue(id, out var floor)) return null;
+            floor.BackgroundColor = string.IsNullOrWhiteSpace(color) ? null : color.Trim().ToLowerInvariant();
+            SaveState();
+            return floor;
+        }
     }
 
     public FloorPlan AddFloor(string id, string name)
@@ -114,6 +186,7 @@ public class FloorService : IFloorService, IProjectScoped
     public FloorPlan? RenameFloor(string id, string name)
     {
         if (!_floors.TryGetValue(id, out var floor)) return null;
+        if (floor.IsPanel) return floor;                 // Header / Navigation: tên cố định
         floor.Name = name;
         SaveState();
         return floor;
@@ -131,6 +204,7 @@ public class FloorService : IFloorService, IProjectScoped
     {
         lock (_gate)
         {
+            if (_floors.TryGetValue(id, out var existing) && existing.IsPanel) return false;   // Header / Navigation: mặc định, không xoá được
             var ok = _floors.TryRemove(id, out _);
             if (!ok) return false;
             SaveState();

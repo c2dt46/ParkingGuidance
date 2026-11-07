@@ -13,6 +13,7 @@ public sealed class ProjectService : IProjectService
     private readonly ILogger<ProjectService> _logger;
     private readonly object _gate = new();
     private ProjectManifest _manifest;
+    private volatile bool _opened;      // false = chưa mở dự án nào: đang chạy tạm trên thư mục mặc định, CHƯA ghi nhận làm dự án mở gần nhất
 
     public event Action? Changed;
 
@@ -25,9 +26,35 @@ public sealed class ProjectService : IProjectService
         lock (_gate)
         {
             _manifest = ReadManifest(_persistence.ProjectDirectory) ?? NewManifest(_persistence.ProjectDirectory, null);
-            WriteManifest(_persistence.ProjectDirectory, _manifest);
-            RememberCurrent();
+            _opened = _persistence.StartedWithProject;
+            if (_opened)
+            {
+                // Chạy lại dự án của lần trước (hoặc dự án cấu hình sẵn)
+                WriteManifest(_persistence.ProjectDirectory, _manifest);
+                RememberCurrent();
+            }
+            // Chưa có dự án nào để chạy lại: KHÔNG ghi project.pgs.json và KHÔNG ghi đè "dự án mở gần nhất" bằng thư mục mặc định.
+            // Chỉ khi người dùng mở / tạo / lưu dự án thì mới ghi nhận (xem SwitchTo, SaveAs, SaveLocked, UseCurrent).
             _persistence.MarkProjectSaved();      // lúc khởi động bộ nhớ vừa nạp xong từ file: chưa có thay đổi nào
+        }
+    }
+
+    public bool IsProjectOpen => _opened;
+
+    public string? MissingLastProject => _opened ? null : _persistence.MissingLastProject;
+
+    public ProjectInfo UseCurrent()
+    {
+        lock (_gate)
+        {
+            if (!_opened)
+            {
+                if (!WriteManifest(_persistence.ProjectDirectory, _manifest))
+                    throw new InvalidOperationException("Không ghi được project.pgs.json vào thư mục dự án mặc định. Kiểm tra quyền ghi của thư mục.");
+                _opened = true;
+                RememberCurrent();
+            }
+            return Current;
         }
     }
 
@@ -51,10 +78,10 @@ public sealed class ProjectService : IProjectService
         get
         {
             var st = _persistence.Load<AppState>("app-state");
-            var cur = Path.GetFullPath(_persistence.ProjectDirectory);
+            var cur = _opened ? Path.GetFullPath(_persistence.ProjectDirectory) : null;   // chưa mở dự án nào: thư mục mặc định không phải "dự án đang mở" nên không loại khỏi danh sách
             return (st?.Recent ?? new())
                 .Where(r => !string.IsNullOrWhiteSpace(r.Path)
-                            && !string.Equals(SafeFull(r.Path), cur, StringComparison.OrdinalIgnoreCase)
+                            && (cur is null || !string.Equals(SafeFull(r.Path), cur, StringComparison.OrdinalIgnoreCase))
                             && File.Exists(Path.Combine(r.Path, ProjectFiles.Manifest)))
                 .ToList();
         }
@@ -86,7 +113,11 @@ public sealed class ProjectService : IProjectService
         _manifest.SavedUtc = DateTime.UtcNow;
         if (!WriteManifest(_persistence.ProjectDirectory, _manifest)) failed.Add("project.pgs.json");
 
-        if (failed.Count == 0) _persistence.MarkProjectSaved();
+        if (failed.Count == 0)
+        {
+            _persistence.MarkProjectSaved();
+            if (!_opened) { _opened = true; RememberCurrent(); }      // người dùng đã lưu: thư mục mặc định trở thành dự án đang mở
+        }
         if (failed.Count > 0)
             throw new InvalidOperationException("Không lưu được: " + string.Join(", ", failed) + ". Kiểm tra quyền ghi của thư mục dự án và dung lượng ổ đĩa.");
     }
@@ -161,6 +192,7 @@ public sealed class ProjectService : IProjectService
             finally { _persistence.PauseProjectWrites(false); }
 
             SaveLocked();
+            _opened = true;
             RememberCurrent();
         }
         Changed?.Invoke();
@@ -201,6 +233,7 @@ public sealed class ProjectService : IProjectService
 
         _manifest = ReadManifest(full) ?? NewManifest(full, null);
         _persistence.MarkProjectSaved();               // bộ nhớ vừa nạp từ dự án này: khớp với file
+        _opened = true;
         RememberCurrent();
     }
 

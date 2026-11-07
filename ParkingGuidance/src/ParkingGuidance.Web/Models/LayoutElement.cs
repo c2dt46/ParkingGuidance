@@ -30,7 +30,79 @@ public enum LayoutElementType
     /// Số (Number): hiển thị hoặc NHẬP giá trị của 1 biến dạng số — System tag / Project tag (Integer, Real), biến MS, biến MC.
     /// Số nguyên có thể "dời dấu chấm" (123 → 1.23). Chế độ nhập chỉ ghi được vào Project tag.
     /// </summary>
-    Number
+    Number,
+
+    /// <summary>Ngày giờ (DateTime): đồng hồ hiển thị ngày / giờ hiện tại, chạy liên tục. Tuỳ chọn: chỉ ngày / chỉ giờ / cả hai, định dạng ngày,
+    /// thứ trong tuần, 24h / 12h, giây, 1 dòng / 2 dòng, ngôn ngữ, múi giờ, mẫu tuỳ chọn (xem <see cref="DateTimeOptions"/>).</summary>
+    DateTime
+}
+
+/// <summary>Tuỳ chọn hiển thị của đối tượng Ngày giờ (DateTime). Mọi giá trị đều được máy chủ kiểm tra / ép về miền hợp lệ (<see cref="Clean"/>).</summary>
+public class DateTimeOptions
+{
+    /// <summary>"DateTime" (ngày + giờ) | "Date" (chỉ ngày) | "Time" (chỉ giờ).</summary>
+    public string Show { get; set; } = "DateTime";
+
+    /// <summary>Mẫu ngày, ký tự: yyyy yy MMMM MMM MM M dd d (vd "dd/MM/yyyy", "yyyy-MM-dd", "d MMMM, yyyy").</summary>
+    public string DateFormat { get; set; } = "dd/MM/yyyy";
+
+    /// <summary>"24h" | "12h" (SA/CH hoặc AM/PM).</summary>
+    public string TimeFormat { get; set; } = "24h";
+
+    public bool ShowSeconds { get; set; } = true;
+
+    /// <summary>Thứ trong tuần đứng trước ngày: "none" | "long" (Thứ Tư) | "short" (T4).</summary>
+    public string Weekday { get; set; } = "none";
+
+    /// <summary>"OneLine" (1 dòng) | "TwoLines" (ngày trên, giờ dưới).</summary>
+    public string Layout { get; set; } = "OneLine";
+
+    /// <summary>true = giờ đứng trước ngày.</summary>
+    public bool TimeFirst { get; set; }
+
+    /// <summary>Chữ ngăn cách ngày và giờ khi hiển thị 1 dòng.</summary>
+    public string Separator { get; set; } = "  ";
+
+    /// <summary>"vi" | "en" (tên thứ, tháng, SA/CH - AM/PM).</summary>
+    public string Language { get; set; } = "vi";
+
+    /// <summary>"local" (giờ máy tính) | "utc" | độ lệch "+07:00" / "-05:00".</summary>
+    public string TimeZone { get; set; } = "local";
+
+    /// <summary>Mẫu tuỳ chọn nâng cao (vd "dddd, dd/MM/yyyy HH:mm:ss"). Có giá trị thì thay cho các lựa chọn ngày / giờ ở trên.</summary>
+    public string? CustomPattern { get; set; }
+
+    private static readonly System.Text.RegularExpressions.Regex TzRegex = new("^(local|utc|[+-](0[0-9]|1[0-4]):[0-5][0-9])$");
+
+    private static string Pick(string? v, string def, params string[] allowed) => allowed.Contains(v) ? v! : def;
+
+    private static string Trim(string? v, int max, string def)
+    {
+        if (v is null) return def;
+        v = new string(v.Where(c => !char.IsControl(c)).ToArray());
+        return v.Length > max ? v[..max] : v;
+    }
+
+    /// <summary>Bản đã kiểm tra: liệt kê giá trị hợp lệ, cắt độ dài, bỏ ký tự điều khiển. null → mặc định.</summary>
+    public static DateTimeOptions Clean(DateTimeOptions? o)
+    {
+        o ??= new DateTimeOptions();
+        var custom = Trim(o.CustomPattern, 80, "").Trim();
+        return new DateTimeOptions
+        {
+            Show = Pick(o.Show, "DateTime", "DateTime", "Date", "Time"),
+            DateFormat = Trim(o.DateFormat, 40, "dd/MM/yyyy") is { Length: > 0 } df ? df : "dd/MM/yyyy",
+            TimeFormat = Pick(o.TimeFormat, "24h", "24h", "12h"),
+            ShowSeconds = o.ShowSeconds,
+            Weekday = Pick(o.Weekday, "none", "none", "long", "short"),
+            Layout = Pick(o.Layout, "OneLine", "OneLine", "TwoLines"),
+            TimeFirst = o.TimeFirst,
+            Separator = Trim(o.Separator, 8, "  "),
+            Language = Pick(o.Language, "vi", "vi", "en"),
+            TimeZone = o.TimeZone is not null && TzRegex.IsMatch(o.TimeZone) ? o.TimeZone : "local",
+            CustomPattern = custom.Length == 0 ? null : custom
+        };
+    }
 }
 
 /// <summary>
@@ -229,4 +301,10 @@ public class LayoutElement
     /// <summary>Number (chế độ nhập): giá trị nhỏ nhất / lớn nhất cho phép nhập, tính theo giá trị HIỂN THỊ (sau khi dời dấu chấm). null = không giới hạn.</summary>
     public double? MinValue { get; set; }
     public double? MaxValue { get; set; }
+
+    /// <summary>Ngày giờ (DateTime): tuỳ chọn hiển thị. Chữ trước / sau dùng <see cref="Prefix"/> / <see cref="Suffix"/>, căn lề dùng <see cref="TextAlign"/>.</summary>
+    public DateTimeOptions? DtOptions { get; set; }
+
+    /// <summary>Hiệu ứng động gắn biến (hiển thị / vị trí / màu sắc) — mọi loại đối tượng, chỉ chạy ở chế độ Chạy. null = không có.</summary>
+    public ElementAnimation? Animation { get; set; }
 }

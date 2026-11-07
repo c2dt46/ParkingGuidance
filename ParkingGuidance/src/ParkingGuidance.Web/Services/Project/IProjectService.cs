@@ -39,6 +39,16 @@ public interface IProjectService
     ProjectInfo Current { get; }
     IReadOnlyList<RecentProject> Recent { get; }
 
+    /// <summary>true = đã có dự án được mở / tạo / khôi phục từ lần chạy trước. false = chưa từng mở dự án nào (hoặc dự án gần nhất không còn dùng được):
+    /// chương trình đang chạy TẠM trên thư mục dự án mặc định và giao diện nên mời người dùng mở / tạo dự án.</summary>
+    bool IsProjectOpen { get; }
+
+    /// <summary>Dự án mở gần nhất nhưng không dùng được lúc khởi động (xem IPersistenceService.MissingLastProject). null nếu không có hoặc đã mở dự án khác.</summary>
+    string? MissingLastProject { get; }
+
+    /// <summary>Dùng luôn thư mục dự án đang chạy (mặc định) làm dự án đang mở: ghi project.pgs.json và nhớ làm dự án mở gần nhất.</summary>
+    ProjectInfo UseCurrent();
+
     /// <summary>Ghi toàn bộ dữ liệu dự án + cập nhật nhãn dự án. Ném InvalidOperationException (thông báo tiếng Việt) nếu có phần ghi lỗi.</summary>
     ProjectInfo Save();
 

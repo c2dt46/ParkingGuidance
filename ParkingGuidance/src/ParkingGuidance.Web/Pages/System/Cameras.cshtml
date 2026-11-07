@@ -1,13 +1,15 @@
 @page "/System/Cameras"
 @{
     ViewData["Title"] = "Quản lý Camera";
+    // Hai dòng chú thích kỹ thuật (thông số có hiệu lực ngay / đường dẫn thư mục dự án) chỉ hiện với tài khoản DEV
+    var isDev = ParkingGuidance.Web.Services.Licensing.AccessLevel.Of(User) == ParkingGuidance.Web.Services.Licensing.AccessLevel.Dev;
 }
 
 <div class="page-header">
     <h1><span data-i18n="nav.device">Thiết bị</span> — <span data-i18n="nav.cam">Camera</span></h1>
 </div>
 
-<div class="source-tabs">
+<div class="source-tabs tabs-stretch">
     <button class="tab-btn active" data-tab="list">📋 Danh sách</button>
     <button class="tab-btn" data-tab="zones">🎯 Vị trí đỗ</button>
     <button class="tab-btn" data-tab="config">⚙️ Cấu hình chung</button>
@@ -103,59 +105,74 @@
         <div id="zoneEditorEmpty" class="no-result">Chọn 1 camera ở trên để bắt đầu.</div>
 
         <div id="zoneEditor" style="display:none;">
-            <div class="camera-toolbar">
-                <div class="mode-toggle compact">
-                    <button id="srcCameraBtn" class="btn secondary btn-sm mode-btn">📷 Lấy từ Camera</button>
-                    <button id="srcPcBtn" class="btn secondary btn-sm mode-btn mode-active">📁 Chọn từ PC</button>
+            <div class="zone-controls">
+                <!-- Hàng 1: nguồn ảnh + thao tác vùng -->
+                <div class="zc-group">
+                    <span class="zc-cap">Nguồn ảnh</span>
+                    <div class="zc-row">
+                        <div class="mode-toggle compact">
+                            <button id="srcCameraBtn" class="btn secondary btn-sm mode-btn">📷 Camera</button>
+                            <button id="srcPcBtn" class="btn secondary btn-sm mode-btn mode-active">📁 Từ PC</button>
+                        </div>
+                        <label class="btn secondary btn-sm file-btn" id="chooseImageLabel">
+                            📁 Chọn ảnh mô phỏng
+                            <input type="file" id="zoneImageInput" accept="image/*" hidden />
+                        </label>
+                    </div>
+                    <div id="cameraSourceControls" class="zc-row" style="display:none;">
+                        <button id="captureNowBtn" class="btn secondary btn-sm">📸 Lấy ảnh ngay</button>
+                        <label class="prop-inline zc-inline">
+                            <span>Tự động mỗi</span>
+                            <input id="captureIntervalInput" type="number" min="2" max="600" value="10" style="width:58px;" />
+                            <span>giây</span>
+                        </label>
+                        <button id="toggleAutoCaptureBtn" class="btn secondary btn-sm">▶️ Bắt đầu tự động</button>
+                        <span id="captureStatus" class="hint small zc-status"></span>
+                    </div>
                 </div>
-                <span class="toolbar-sep"></span>
-                <label class="btn secondary btn-sm file-btn" id="chooseImageLabel">
-                    📁 Chọn ảnh mô phỏng
-                    <input type="file" id="zoneImageInput" accept="image/*" hidden />
-                </label>
-                <button id="drawZoneBtn" class="btn secondary btn-sm">➕ Vẽ vùng mới</button>
-                <button id="cancelZoneBtn" class="btn secondary btn-sm" style="display:none;">✕ Huỷ vẽ</button>
-                <button id="testDetectBtn" class="btn secondary btn-sm">🔍 Chạy thử nhận diện</button>
-                <button id="saveZonesBtn" hidden class="btn primary btn-sm">💾 Lưu vùng nhận diện</button>
-            </div>
 
-            <div id="cameraSourceControls" class="camera-toolbar" style="display:none;">
-                <button id="captureNowBtn" class="btn secondary btn-sm">📸 Lấy ảnh ngay</button>
-                <label class="prop-inline" style="margin-left:6px;">
-                    <span class="hint small" style="margin:0;">Tự động lấy mỗi</span>
-                    <input id="captureIntervalInput" type="number" min="2" max="600" value="10" style="width:60px;" />
-                    <span class="hint small" style="margin:0;">giây</span>
-                </label>
-                <button id="toggleAutoCaptureBtn" class="btn secondary btn-sm">▶️ Bắt đầu tự động</button>
-                <span id="captureStatus" class="hint small"></span>
-            </div>
-
-            <div class="camera-toolbar">
-                <label class="prop-inline" title="Chỉ áp dụng cho ảnh xem trước trên trang này (khi trang đang mở)">
-                    <input id="autoDetectChk" type="checkbox" checked />
-                    <span class="hint small" style="margin:0;">Tự động nhận diện khi ảnh mới thay đổi vượt ngưỡng</span>
-                </label>
-                <label class="prop-inline">
-                    <input id="registerChk" type="checkbox" checked />
-                    <span class="hint small" style="margin:0;">Ghi nhận kết quả vào bãi đỗ (cập nhật ô đỗ &amp; bản đồ Giám sát)</span>
-                </label>
-                <span id="autoDetectStatus" class="hint small"></span>
-            </div>
-
-            <div class="camera-toolbar">
-                <span class="hint small" style="margin:0;" title="Tự động: camera chạy nền liên tục theo vòng lặp (áp dụng ngưỡng bên cạnh), kể cả khi đóng trang này. Thủ công: KHÔNG chạy nền — chỉ nhận diện khi bấm &quot;Nhận diện ngay&quot;.">Chế độ chạy nền ⓘ</span>
-                <div class="mode-toggle compact">
-                    <button id="modeAutoBtn" class="btn secondary btn-sm mode-btn">🔁 Tự động</button>
-                    <button id="modeManualBtn" class="btn secondary btn-sm mode-btn">✋ Thủ công</button>
+                <div class="zc-group">
+                    <span class="zc-cap">Vùng nhận diện</span>
+                    <div class="zc-row">
+                        <button id="drawZoneBtn" class="btn secondary btn-sm">➕ Vẽ vùng mới</button>
+                        <button id="cancelZoneBtn" class="btn secondary btn-sm" style="display:none;">✕ Huỷ vẽ</button>
+                        <button id="testDetectBtn" class="btn secondary btn-sm">🔍 Chạy thử nhận diện</button>
+                        <button id="saveZonesBtn" hidden class="btn primary btn-sm">💾 Lưu vùng nhận diện</button>
+                    </div>
                 </div>
-                <button id="detectNowBtn" class="btn primary btn-sm" style="display:none;">▶️ Nhận diện ngay</button>
-                <span id="detectNowStatus" class="hint small"></span>
-                <span class="toolbar-sep"></span>
-                <label class="prop-inline" title="Camera ở chế độ Tự động chỉ chạy AI khi ảnh thay đổi từ mức này trở lên so với khung hình trước (giảm tải khi có nhiều camera). Để trống = dùng mặc định toàn hệ thống.">
-                    <span class="hint small" style="margin:0;">Ngưỡng thay đổi ảnh (%)</span>
-                    <input id="motionThresholdInput" type="number" min="0" max="100" step="0.5" placeholder="mặc định" style="width:90px;" />
-                </label>
-                <button id="saveMotionBtn" hidden class="btn secondary btn-sm">💾 Lưu ngưỡng</button>
+
+                <!-- Hàng 2: tuỳ chọn nhận diện + chạy nền -->
+                <div class="zc-group">
+                    <span class="zc-cap">Nhận diện ảnh xem trước</span>
+                    <div class="zc-checks">
+                        <label class="zc-check" title="Chỉ áp dụng cho ảnh xem trước trên trang này (khi trang đang mở)">
+                            <input id="autoDetectChk" type="checkbox" checked />
+                            <span>Tự nhận diện khi ảnh đổi vượt ngưỡng</span>
+                        </label>
+                        <label class="zc-check">
+                            <input id="registerChk" type="checkbox" checked />
+                            <span>Ghi kết quả vào bãi đỗ (ô đỗ &amp; bản đồ Giám sát)</span>
+                        </label>
+                    </div>
+                    <span id="autoDetectStatus" class="hint small zc-status"></span>
+                </div>
+
+                <div class="zc-group">
+                    <span class="zc-cap" title="Tự động: camera chạy nền liên tục theo vòng lặp (áp dụng ngưỡng bên cạnh), kể cả khi đóng trang này. Thủ công: KHÔNG chạy nền — chỉ nhận diện khi bấm &quot;Nhận diện ngay&quot;.">Chạy nền ⓘ</span>
+                    <div class="zc-row">
+                        <div class="mode-toggle compact">
+                            <button id="modeAutoBtn" class="btn secondary btn-sm mode-btn">🔁 Tự động</button>
+                            <button id="modeManualBtn" class="btn secondary btn-sm mode-btn">✋ Thủ công</button>
+                        </div>
+                        <button id="detectNowBtn" class="btn primary btn-sm" style="display:none;">▶️ Nhận diện ngay</button>
+                        <label class="prop-inline zc-inline" title="Camera ở chế độ Tự động chỉ chạy AI khi ảnh thay đổi từ mức này trở lên so với khung hình trước (giảm tải khi có nhiều camera). Để trống = dùng mặc định toàn hệ thống.">
+                            <span>Ngưỡng đổi ảnh (%)</span>
+                            <input id="motionThresholdInput" type="number" min="0" max="100" step="0.5" placeholder="0.5" style="width:84px;" />
+                        </label>
+                        <button id="saveMotionBtn" hidden class="btn secondary btn-sm">💾 Lưu ngưỡng</button>
+                        <span id="detectNowStatus" class="hint small zc-status"></span>
+                    </div>
+                </div>
             </div>
 
             <div id="drawHint" class="hint small" style="display:none;">
@@ -189,10 +206,13 @@
 </div>
 
 <div id="configTab" class="sys-tab-panel">
+    @if (isDev)
+    {
     <p class="hint small">
         Các thông số này được <strong>lưu lại</strong> và có hiệu lực ngay (không cần khởi động lại).
         Camera nào không đặt ngưỡng thay đổi ảnh riêng ở tab Vị trí đỗ sẽ dùng giá trị mặc định ở đây.
     </p>
+    }
 
     <!-- ===== CAMERA ===== -->
     <section class="panel">
@@ -272,9 +292,12 @@
         <button id="saveSettingsBtn" hidden class="btn primary save-idle">💾 Lưu cài đặt</button>
         <span id="settingsStatus" class="hint small"></span>
     </div>
-    <p class="hint small">Dữ liệu <b>dự án</b> (camera, vùng nhận diện, cảm biến, LED, layout, mặt bằng, bãi xe) nằm trong thư mục dự án: <code id="projectDirText">...</code> — bấm <b>💾 Lưu</b> ở đầu menu trái (Ctrl+S) để lưu tất cả. Dữ liệu <b>hệ thống</b> (bản quyền, train, cài đặt nhận diện) nằm cố định tại: <code id="dataDirText">...</code></p>
+    @if (isDev)
+    {
+        <p class="hint small">Dữ liệu <b>dự án</b> (camera, vùng nhận diện, cảm biến, LED, layout, mặt bằng, bãi xe) nằm trong thư mục dự án: <code id="projectDirText">...</code> — bấm <b>💾 Lưu</b> ở đầu menu trái (Ctrl+S) để lưu tất cả. Dữ liệu <b>hệ thống</b> (bản quyền, train, cài đặt nhận diện) nằm cố định tại: <code id="dataDirText">...</code></p>
+    }
 
-    <section class="panel">
+    <section class="panel" data-collapsible="cam-queue" data-collapsed-default="1">
         <h2>Hàng đợi nhận diện AI &amp; trạng thái camera chạy nền</h2>
         <p class="hint small">
             Mỗi camera đủ điều kiện (đã thêm vào hệ thống, có Nguồn video, chế độ Tự động, đã vẽ vùng) <strong>luôn chạy ngầm</strong>,

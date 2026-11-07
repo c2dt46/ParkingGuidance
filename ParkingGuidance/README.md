@@ -343,6 +343,13 @@ lượng dữ liệu lớn, nhiều người dùng cùng sửa layout, hoặc c�
 + SQL Server/PostgreSQL (kiến trúc đã tách interface sẵn, chỉ cần viết class triển khai mới, không
 phải sửa Controller/giao diện).
 
+### Đăng nhập ghi nhớ & tự chạy lại dự án gần nhất
+
+- **Đăng nhập ghi nhớ**: tài khoản **User** và **Megatech** (quản trị) được nhớ lâu (cookie lưu trên trình duyệt, khoá mã hoá lưu ở `%LOCALAPPDATA%\ParkingGuidance\keys` nên khởi động lại chương trình vẫn dùng được). Mở lại chương trình / trình duyệt là vào thẳng, không hỏi mật khẩu, cho tới khi bấm **Đăng xuất** hoặc hết hạn. Thời hạn chỉnh ở `appsettings.json`: `"Auth": { "RememberDays": 30 }` (1–365 ngày, tự gia hạn mỗi khi dùng). **DEV** nhớ 8 giờ; **Lic** không được nhớ.
+- **Dự án**: lúc khởi động, chương trình **tự chạy lại dự án mở gần nhất** (`app-state.json` → `LastProject`) nếu thư mục còn và có `project.pgs.json`. Sau khi đăng nhập không có hộp thoại nào hiện ra; chế độ Build/Chạy cũng được nhớ theo từng tài khoản.
+- **Chỉ khi chưa từng mở dự án nào** (hoặc dự án gần nhất không còn dùng được: ổ đĩa chưa sẵn sàng, thư mục bị xoá / đổi tên) thì sau khi đăng nhập (tài khoản Megatech / DEV / Lic) giao diện mới tự mời **Mở dự án** hoặc **Tạo dự án mới** (hoặc **Dùng dự án mặc định**; **Để sau** = không hỏi lại trong tab này). Khi đó chương trình chạy TẠM trên thư mục dự án mặc định và **không ghi đè** "dự án mở gần nhất": cắm lại ổ đĩa rồi khởi động lại là chạy lại đúng dự án cũ. Muốn mở dự án khác bất cứ lúc nào: bấm logo → **Mở dự án** (Ctrl+O).
+- API: `GET /api/project` trả thêm `needsProject` (chưa mở dự án nào) và `missingLastProject` (đường dẫn dự án gần nhất không còn dùng được); `POST /api/project/use-current` = dùng thư mục dự án đang chạy làm dự án đang mở.
+
 ## 10. Hệ thống — Quản lý Camera (`/System/Cameras`)
 
 Menu **"CÀI ĐẶT & HỆ THỐNG"** có nhóm con **"Hệ thống"** với 4 mục: **Camera** (đã làm), **Cảm

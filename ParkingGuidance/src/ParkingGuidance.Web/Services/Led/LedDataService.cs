@@ -11,6 +11,8 @@ public sealed class LedDataSnapshot
     public IReadOnlyDictionary<string, long> Ms { get; init; } = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
     public IReadOnlyDictionary<string, long> Mc { get; init; } = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
     public IReadOnlyDictionary<string, long> Tags { get; init; } = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Giá trị chuỗi của các project tag kiểu String (dùng cho vùng Chữ). Khoá = tên tag.</summary>
+    public IReadOnlyDictionary<string, string> Strings { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Giá trị theo tên; tên rỗng hoặc không có (biến/tag đã bị xoá, chưa tính được) = 0.</summary>
     public static long Lookup(IReadOnlyDictionary<string, long> map, string? name) =>
@@ -25,6 +27,8 @@ public sealed class LedDataSourceItem
     /// <summary>Chỉ có với project tag: Integer / Boolean / Real.</summary>
     public string? Type { get; init; }
     public long Value { get; init; }
+    /// <summary>Chỉ có với project tag kiểu String: giá trị chuỗi hiện tại.</summary>
+    public string? Text { get; init; }
 }
 
 public sealed class LedDataSources
@@ -32,6 +36,8 @@ public sealed class LedDataSources
     public List<LedDataSourceItem> Ms { get; init; } = new();
     public List<LedDataSourceItem> Mc { get; init; } = new();
     public List<LedDataSourceItem> Tags { get; init; } = new();
+    /// <summary>Project tag kiểu String để chọn trong vùng Chữ.</summary>
+    public List<LedDataSourceItem> Strings { get; init; } = new();
 }
 
 public interface ILedDataService
@@ -39,10 +45,10 @@ public interface ILedDataService
     /// <summary>Giá trị các biến/tag mà vùng Number của <paramref name="cards"/> đang tham chiếu (dùng khi gửi card).</summary>
     LedDataSnapshot GetSnapshot(IEnumerable<LedCard> cards);
 
-    /// <summary>Giá trị của TẤT CẢ biến MS, MC và project tag dạng số (cho giao diện xem trước).</summary>
+    /// <summary>Giá trị của TẤT CẢ biến MS, MC, project tag dạng số và project tag String (cho giao diện xem trước).</summary>
     LedDataSnapshot GetAll();
 
-    /// <summary>Danh sách để chọn trong giao diện: biến MS, biến MC, project tag kiểu Integer/Boolean/Real (kèm giá trị hiện tại).</summary>
+    /// <summary>Danh sách để chọn trong giao diện: biến MS, biến MC, project tag kiểu Integer/Boolean/Real, project tag kiểu String (kèm giá trị hiện tại).</summary>
     LedDataSources GetSources();
 }
 
@@ -69,35 +75,45 @@ public sealed class LedDataService : ILedDataService
         var ms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var mc = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var tags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var strs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var card in cards)
             foreach (var r in card.Areas)
             {
+                if (r.Type == LedAreaType.Text)
+                {
+                    if (!string.IsNullOrEmpty(r.TTag)) strs.Add(r.TTag);
+                    continue;
+                }
                 if (r.Type != LedAreaType.Number) continue;
                 if (!string.IsNullOrEmpty(r.NMs)) ms.Add(r.NMs);
                 if (!string.IsNullOrEmpty(r.NMc)) mc.Add(r.NMc);
                 if (!string.IsNullOrEmpty(r.NTag)) tags.Add(r.NTag);
             }
-        return Build(ms, mc, tags);
+        return Build(ms, mc, tags, strs);
     }
 
     public LedDataSnapshot GetAll() => Build(
         _ms.GetAll().Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase),
         _mc.GetAll().Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase),
-        _tags.GetAll().Where(t => t.Type != TagDataType.String).Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase));
+        _tags.GetAll().Where(t => t.Type != TagDataType.String).Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase),
+        _tags.GetAll().Where(t => t.Type == TagDataType.String).Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase));
 
     public LedDataSources GetSources() => new()
     {
         Ms = _ms.GetAll().Select(v => new LedDataSourceItem { Name = v.Name, Description = v.Description, Value = v.Value ?? 0 }).ToList(),
         Mc = _mc.GetAll().Select(v => new LedDataSourceItem { Name = v.Name, Description = v.Description, Value = v.Value ?? 0 }).ToList(),
         Tags = _tags.GetAll().Where(t => t.Type != TagDataType.String)
-            .Select(t => new LedDataSourceItem { Name = t.Name, Description = t.Description, Type = t.Type.ToString(), Value = TagToLong(t) }).ToList()
+            .Select(t => new LedDataSourceItem { Name = t.Name, Description = t.Description, Type = t.Type.ToString(), Value = TagToLong(t) }).ToList(),
+        Strings = _tags.GetAll().Where(t => t.Type == TagDataType.String)
+            .Select(t => new LedDataSourceItem { Name = t.Name, Description = t.Description, Type = t.Type.ToString(), Text = t.Value ?? "" }).ToList()
     };
 
-    private LedDataSnapshot Build(HashSet<string> ms, HashSet<string> mc, HashSet<string> tags)
+    private LedDataSnapshot Build(HashSet<string> ms, HashSet<string> mc, HashSet<string> tags, HashSet<string> strs)
     {
         var msValues = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         var mcValues = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         var tagValues = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var strValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         if (ms.Count > 0)
             foreach (var kv in _ms.GetValues(ms)) msValues[kv.Key] = kv.Value ?? 0;      // chua tinh duoc (null) -> 0
@@ -105,9 +121,13 @@ public sealed class LedDataService : ILedDataService
             foreach (var kv in _mc.GetValues(mc)) mcValues[kv.Key] = kv.Value ?? 0;
         if (tags.Count > 0)
             foreach (var t in _tags.GetAll())
-                if (tags.Contains(t.Name)) tagValues[t.Name] = TagToLong(t);
+                if (t.Type != TagDataType.String && tags.Contains(t.Name)) tagValues[t.Name] = TagToLong(t);
 
-        return new LedDataSnapshot { Ms = msValues, Mc = mcValues, Tags = tagValues };
+        if (strs.Count > 0)
+            foreach (var t in _tags.GetAll())
+                if (t.Type == TagDataType.String && strs.Contains(t.Name)) strValues[t.Name] = t.Value ?? "";
+
+        return new LedDataSnapshot { Ms = msValues, Mc = mcValues, Tags = tagValues, Strings = strValues };
     }
 
     /// <summary>Giá trị số nguyên của 1 tag: Integer nguyên giá trị, Boolean 0/1, Real làm tròn; không đọc được = 0.</summary>

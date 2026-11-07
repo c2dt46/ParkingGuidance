@@ -10,7 +10,7 @@ public class SystemSettings
     public double IntervalSeconds { get; set; } = 2;
 
     /// <summary>Ngưỡng % thay đổi ảnh mặc định để mới chạy AI (camera nào không đặt riêng thì dùng giá trị này).</summary>
-    public double DefaultMotionThresholdPercent { get; set; } = 4.0;
+    public double DefaultMotionThresholdPercent { get; set; } = 0.5;
 
     /// <summary>Độ tin cậy tối thiểu của YOLO để tính là có xe (0-1).</summary>
     public float ConfidenceThreshold { get; set; } = 0.25f;

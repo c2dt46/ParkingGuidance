@@ -54,6 +54,8 @@ public class ProjectApiController : ControllerBase
         current = _project.Current,
         recent = _project.Recent,
         unsaved = _persistence.HasUnsavedProjectChanges,
+        needsProject = !_project.IsProjectOpen,               // true = chưa mở dự án nào (hoặc dự án gần nhất không còn dùng được): giao diện mời mở / tạo dự án
+        missingLastProject = _project.MissingLastProject,
         systemDirectory = _persistence.DataDirectory,
         defaultParent = JsonPersistenceService.DefaultProjectsRoot(_persistence.DataDirectory)
     };
@@ -76,6 +78,10 @@ public class ProjectApiController : ControllerBase
     /// <summary>LƯU CHUNG: ghi toàn bộ dữ liệu dự án (cảm biến, camera, LED, layout, mặt bằng, biến, tag, Modbus, bãi xe).</summary>
     [HttpPost("save")]
     public IActionResult Save() => Run(() => { _project.Save(); return State(); });
+
+    /// <summary>Chưa có dự án nào được mở: dùng luôn thư mục dự án mặc định đang chạy làm dự án đang mở (không nạp lại gì, không mất dữ liệu đang chạy).</summary>
+    [HttpPost("use-current")]
+    public IActionResult UseCurrent() => Run(() => { _project.UseCurrent(); return State(); });
 
     [HttpPost("open")]
     public IActionResult Open([FromBody] PathDto dto) => Run(() => { if (dto?.SaveFirst == true) _project.Save(); _project.Open(dto?.Path ?? ""); return State(); });

@@ -39,7 +39,7 @@ public static class HdCardCatalog
     public static readonly (int R, int G, int B)[] TextRgb = { (255, 0, 0), (255, 255, 0), (0, 255, 0) };
 
     public const int MaxAreas = 20;       // "Quá 20 thông tin"
-    public const int CardCount = 100;     // PGS quản lý 100 card
+    public const int CardCount = 100;     // số card TỐI ĐA (giao diện mặc định 1 card, thêm dần bằng "Thêm card")
 
     public static string? CheckSize(int model, int width, int height)
     {
@@ -588,6 +588,7 @@ public static class HdCardCatalog
         }),
         effects = Effects, speeds = Speeds, stopovers = Stopovers, fontSizes = FontSizes, fontTypes = FontTypes,
         digitCounts = DigitCounts, textColors = TextColors,
-        maxAreas = MaxAreas
+        maxAreas = MaxAreas,
+        maxCards = CardCount
     };
 }

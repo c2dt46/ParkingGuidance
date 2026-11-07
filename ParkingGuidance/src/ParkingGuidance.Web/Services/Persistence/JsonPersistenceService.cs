@@ -52,6 +52,16 @@ public class JsonPersistenceService : IPersistenceService
 
     public bool IsProjectKey(string key) => ProjectKeys.Contains(key);
 
+    public bool StartedWithProject { get; private set; }
+    public string? MissingLastProject { get; private set; }
+
+    /// <summary>Thư mục có tồn tại và có file nhận diện dự án PGS (project.pgs.json) hay không. Lỗi truy cập (ổ đĩa ngắt...) coi như không có.</summary>
+    private static bool IsProjectDirectory(string dir)
+    {
+        try { return Directory.Exists(dir) && File.Exists(Path.Combine(dir, ProjectFiles.Manifest)); }
+        catch { return false; }
+    }
+
     public JsonPersistenceService(IConfiguration config, IWebHostEnvironment env, ILogger<JsonPersistenceService> logger)
     {
         _logger = logger;
@@ -89,18 +99,29 @@ public class JsonPersistenceService : IPersistenceService
                 "(mat khi restart server) cho den khi khac phuc quyen ghi thu muc.", _dataDir);
         }
 
-        // Chon thu muc DU AN: appsettings "Persistence:ProjectPath" > du an mo gan nhat (app-state.json) > mac dinh
+        // Chon thu muc DU AN: appsettings "Persistence:ProjectPath" > du an mo gan nhat (app-state.json) > mac dinh (chay TAM, cho nguoi dung mo / tao du an)
         string? chosen = null;
         var cfgProject = config["Persistence:ProjectPath"];
         if (!string.IsNullOrWhiteSpace(cfgProject))
         {
             chosen = Path.IsPathRooted(cfgProject) ? cfgProject : Path.Combine(AppContext.BaseDirectory, cfgProject);
+            StartedWithProject = true;
         }
         else
         {
             var st = LoadCore<AppState>("app-state", _dataDir);
-            if (!string.IsNullOrWhiteSpace(st?.LastProject) && Directory.Exists(st!.LastProject))
-                chosen = st.LastProject;
+            var last = st?.LastProject;
+            if (!string.IsNullOrWhiteSpace(last))
+            {
+                // Chi chay lai du an gan nhat khi no con NGUYEN VEN (co project.pgs.json). Neu khong (o dia / o mang chua san sang, thu muc bi xoa / doi ten)
+                // thi KHONG tu coi thu muc mac dinh la du an vua mo va KHONG ghi de con tro LastProject: khi o dia tro lai, lan khoi dong sau van chay lai dung du an cu.
+                if (IsProjectDirectory(last)) { chosen = last; StartedWithProject = true; }
+                else
+                {
+                    MissingLastProject = last;
+                    _logger.LogWarning("Khong tim thay du an mo gan nhat '{Path}' (thieu thu muc hoac project.pgs.json). Tam chay tren du an mac dinh, cho nguoi dung mo / tao du an.", last);
+                }
+            }
         }
         chosen ??= DefaultProjectDirectory();
 

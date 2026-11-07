@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using ParkingGuidance.Web.Models;
 using ParkingGuidance.Web.Services.CameraRegistry;
+using ParkingGuidance.Web.Services.Floor;
 using ParkingGuidance.Web.Services.Layout;
 using ParkingGuidance.Web.Services.Parking;
 using ParkingGuidance.Web.Services.Persistence;
@@ -20,9 +21,11 @@ public class LayoutApiController : ControllerBase
     private readonly IPersistenceService _persistence;
     private readonly ISensorService _sensors;
     private readonly ISensorVariableService _sensorVars;
+    private readonly IFloorService _floorSvc;
 
-    public LayoutApiController(ILayoutService layout, IParkingService parking, ICameraRegistryService registry, IWebHostEnvironment env, IPersistenceService persistence, ISensorService sensors, ISensorVariableService sensorVars)
+    public LayoutApiController(ILayoutService layout, IParkingService parking, ICameraRegistryService registry, IWebHostEnvironment env, IPersistenceService persistence, ISensorService sensors, ISensorVariableService sensorVars, IFloorService floorSvc)
     {
+        _floorSvc = floorSvc;
         _persistence = persistence;
         _sensors = sensors;
         _sensorVars = sensorVars;
@@ -135,6 +138,12 @@ public class LayoutApiController : ControllerBase
         public int? Decimals { get; set; }
         public double? MinValue { get; set; }
         public double? MaxValue { get; set; }
+
+        // Ngay gio (DateTime): tuy chon hien thi
+        public DateTimeOptions? DtOptions { get; set; }
+
+        // Hieu ung dong gan bien (hien thi / vi tri / mau sac)
+        public ElementAnimation? Animation { get; set; }
     }
 
     private static double? ClampOrNull(double? v, double min, double max) =>
@@ -151,6 +160,7 @@ public class LayoutApiController : ControllerBase
         e.TextColor = dto.TextColor is not null && Regex.IsMatch(dto.TextColor, "^#[0-9a-fA-F]{6}$") ? dto.TextColor : null;
         e.FontSize = ClampOrNull(dto.FontSize, 1, 200);
         e.LineArrow = dto.LineArrow is "none" or "start" or "end" or "both" ? dto.LineArrow : null;
+        e.Animation = ElementAnimation.Clean(dto.Animation);
     }
 
     /// <summary>Nút ấn: bật/tắt đổi màu khi đang ở mặt bằng đích + 2 màu tuỳ chọn (chỉ nhận #rrggbb). Loại khác: bỏ qua.</summary>
@@ -267,6 +277,19 @@ public class LayoutApiController : ControllerBase
         e.MaxValue = ClampOrNull(dto.MaxValue, -1e15, 1e15);
         e.SeparateWriteTag = e.ValueMode == "Input" && dto.SeparateWriteTag;
         e.WriteTag = e.SeparateWriteTag ? CleanTagName(dto.WriteTag) : null;
+    }
+
+    /// <summary>Ngày giờ (DateTime): tuỳ chọn hiển thị (đã kiểm tra), chữ trước / sau, căn lề, ghi chú. Loại khác: bỏ qua.</summary>
+    private static void ApplyDateTimeProps(LayoutElement e, ElementDto dto)
+    {
+        if (e.Type != LayoutElementType.DateTime) return;
+        e.DtOptions = DateTimeOptions.Clean(dto.DtOptions);
+        e.Comment = CleanText(dto.Comment, 200);
+        e.Prefix = string.IsNullOrEmpty(dto.Prefix) ? null : (dto.Prefix.Length > 32 ? dto.Prefix[..32] : dto.Prefix);
+        e.Suffix = string.IsNullOrEmpty(dto.Suffix) ? null : (dto.Suffix.Length > 32 ? dto.Suffix[..32] : dto.Suffix);
+        e.TextAlign = dto.TextAlign is "left" or "center" or "right" ? dto.TextAlign : null;
+        e.FontBold = dto.FontBold == true ? true : null;           // chi luu khi bat dam (mac dinh khong dam)
+        e.FontItalic = dto.FontItalic == true ? true : null;
     }
 
     private static readonly HashSet<string> ImageExts = new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp" };
@@ -686,6 +709,8 @@ public class LayoutApiController : ControllerBase
             e.Decimals,
             e.MinValue,
             e.MaxValue,
+            e.DtOptions,
+            e.Animation,
             Stats = e.Type == LayoutElementType.SlotStats ? ComputeStats(floor, e, camCount) : null,
             Slot = e.Type == LayoutElementType.ParkingSlot && e.SlotId is not null &&
                    slotsById.TryGetValue(e.SlotId, out var slot)
@@ -714,6 +739,10 @@ public class LayoutApiController : ControllerBase
     [HttpPost]
     public IActionResult Add([FromBody] ElementDto dto)
     {
+        // Màn hình Header / Navigation: không có cảm biến / camera / ô đỗ -> không cho thêm các đối tượng này
+        if (_floorSvc.GetFloors().FirstOrDefault(f => string.Equals(f.Id, dto.Floor, StringComparison.OrdinalIgnoreCase)) is { IsPanel: true }
+            && (dto.Type == LayoutElementType.ParkingSlot || dto.Type == LayoutElementType.SlotStats))
+            return BadRequest(new { message = "Màn hình Header / Navigation không dùng ô đỗ, thống kê chỗ trống, cảm biến hay camera." });
         if (dto.Type == LayoutElementType.ParkingSlot)
         {
             // Giao dien gui SO THU TU vi tri (1, 2, 3...) va ZONE; khoa o "{tang}-{zone}-{so}" do may chu tao
@@ -773,6 +802,7 @@ public class LayoutApiController : ControllerBase
         ApplyValueProps(element, dto);
         ApplyStatProps(element, dto);
         ApplyButtonProps(element, dto);
+        ApplyDateTimeProps(element, dto);
 
         if (element.Type == LayoutElementType.ParkingSlot)
             _parking.EnsureSlot(dto.SlotId!, dto.Floor, dto.Zone);
@@ -813,6 +843,7 @@ public class LayoutApiController : ControllerBase
             ApplyValueProps(e, dto);
             ApplyStatProps(e, dto);
             ApplyButtonProps(e, dto);
+            ApplyDateTimeProps(e, dto);
         });
 
         return updated is null

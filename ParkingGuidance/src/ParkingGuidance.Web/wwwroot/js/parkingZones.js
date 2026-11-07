@@ -125,7 +125,7 @@ document.getElementById('zoneCameraSelect').addEventListener('change', async (e)
 
     zones = JSON.parse(JSON.stringify(zoneCamera.zones || []));
     loadUsedSlotIds(all);
-    document.getElementById('motionThresholdInput').value = zoneCamera.motionThreshold ?? '';
+    document.getElementById('motionThresholdInput').value = zoneCamera.motionThreshold ?? 0.5;   // chua dat rieng: hien mac dinh 0.5
     zonesBaseline = JSON.stringify(zones);
     motionBaseline = document.getElementById('motionThresholdInput').value;
     applyModeUi(zoneCamera.detectionMode || 'Automatic');
@@ -197,10 +197,27 @@ document.getElementById('autoDetectChk').addEventListener('change', saveUiSettin
 document.getElementById('registerChk').addEventListener('change', saveUiSettings);
 
 // Khung anh co theo chieu cao man hinh (CSS dung bien --ar = rong/cao cua anh) de luon nhin thay tron ven
+// Anh vua khung hinh: chieu cao toi da = phan man hinh con lai tu dinh vung lam viec (ngay duoi thanh dieu khien),
+// nen khong phai cuon trang de thay het anh. Tinh lai khi doi kich thuoc cua so / thanh dieu khien / mo "Huong dan".
+function fitZoneStage() {
+    const ws = document.querySelector('.zone-workspace');
+    if (!ws || !ws.offsetParent) return;                 // tab dang an
+    const top = ws.getBoundingClientRect().top + window.scrollY;
+    const h = Math.max(220, Math.round(window.innerHeight - top - 16)) + 'px';
+    if (ws.style.getPropertyValue('--zone-h') !== h) ws.style.setProperty('--zone-h', h);
+}
+window.addEventListener('resize', fitZoneStage);
+if (window.ResizeObserver) {
+    const ro = new ResizeObserver(fitZoneStage);
+    ['.zone-controls', '.zone-workspace'].forEach(q => { const n = document.querySelector(q); if (n) ro.observe(n); });
+}
+document.querySelector('#zonesTab .hint-fold')?.addEventListener('toggle', fitZoneStage);
+
 function setStageRatio(w, h) {
     zoneStage.style.aspectRatio = `${w} / ${h}`;
     zoneStage.style.setProperty('--ar', (w / h).toFixed(4));
     zoneStage.closest('.zone-main')?.style.setProperty('--ar', (w / h).toFixed(4));   // de khung thong tin xe rong bang anh
+    fitZoneStage();
 }
 
 // Danh sach vung luon hien ben phai anh.
@@ -403,8 +420,15 @@ async function autoDetectIfChanged() {
             lastTestResult = result;
             drawTestResults(result);
             renderTestSummary(result);
+            // Dòng xác nhận những gì ĐÃ LƯU vào bãi đỗ (đọc lại từ server sau khi ghi): vị trí, biển số, giờ vào
+            const savedText = (result.saved || []).map(x => {
+                const plate = !x.plateNumber || String(x.plateNumber).toUpperCase() === 'UNKNOWN' ? 'chưa đọc được biển' : x.plateNumber;
+                const at = x.parkedAt ? new Date(x.parkedAt).toLocaleTimeString('vi-VN') : '';
+                return `vị trí ${x.position}: ${plate}${at ? ' (vào ' + at + ')' : ''}`;
+            }).join(' · ');
             status.textContent = `✅ ${time} — ảnh thay đổi vượt ngưỡng, đã nhận diện` +
-                (result.registered || result.vacated ? ` · đã cập nhật bãi đỗ (${result.registered} ô có xe, ${result.vacated} ô trống)` : '') + '.';
+                (result.registered || result.vacated ? ` · đã cập nhật bãi đỗ (${result.registered} ô có xe, ${result.vacated} ô trống)` : '') +
+                (savedText ? ` · đã lưu → ${savedText}` : '') + '.';
         }
     } catch (err) {
         status.textContent = err.name === 'AbortError'

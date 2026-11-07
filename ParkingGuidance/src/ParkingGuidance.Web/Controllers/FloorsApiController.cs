@@ -37,8 +37,41 @@ public class FloorsApiController : ControllerBase
         public string Name { get; set; } = "";
     }
 
+    public class FloorColorDto
+    {
+        public string? Color { get; set; }
+    }
+
+    public class FloorPanelDto
+    {
+        public bool? Enabled { get; set; }
+        public int? Width { get; set; }
+        public int? Height { get; set; }
+        public bool? ShowAccount { get; set; }
+        public bool? FullSize { get; set; }
+    }
+
     [HttpGet]
     public IActionResult GetAll() => Ok(_floors.GetFloors());
+
+    // Mặt bằng đang được chọn để xem: giữ TRONG BỘ NHỚ của chương trình, nên chuyển sang mục khác rồi quay lại trang Giám sát vẫn đúng
+    // mặt bằng đã chọn; chỉ khi khởi động lại ứng dụng mới trở về mặt bằng khởi động (không ghi xuống đĩa).
+    private static volatile string? _selectedFloor;
+
+    [HttpGet("session/selected")]
+    public IActionResult GetSelected()
+    {
+        var id = _selectedFloor;
+        return Ok(new { id = id is not null && _floors.GetFloors().Any(f => f.Id == id) ? id : null });
+    }
+
+    [HttpPut("session/selected")]
+    public IActionResult SetSelected([FromBody] FloorDto dto)
+    {
+        if (!_floors.GetFloors().Any(f => f.Id == dto.Id)) return NotFound(new { message = "Khong tim thay mat bang." });
+        _selectedFloor = dto.Id;
+        return Ok(new { id = dto.Id });
+    }
 
     [HttpPost]
     public IActionResult Add([FromBody] FloorDto dto)
@@ -54,7 +87,29 @@ public class FloorsApiController : ControllerBase
     [HttpPut("{id}")]
     public IActionResult Rename(string id, [FromBody] FloorDto dto)
     {
+        if (_floors.GetFloors().Any(f => f.Id == id && f.IsPanel))
+            return Conflict(new { message = "Header / Navigation là màn hình mặc định, tên cố định." });
         var floor = _floors.RenameFloor(id, string.IsNullOrWhiteSpace(dto.Name) ? id : dto.Name.Trim());
+        return floor is null ? NotFound(new { message = "Khong tim thay mat bang." }) : Ok(floor);
+    }
+
+    /// <summary>Thiết lập màn hình Header / Navigation (luôn có sẵn): dùng / không dùng, kích thước pixel rộng × cao, toàn kích thước, tài khoản (Navigation).</summary>
+    [HttpPut("{id}/panel")]
+    public IActionResult UpdatePanel(string id, [FromBody] FloorPanelDto dto)
+    {
+        var (floor, error) = _floors.UpdatePanel(id, dto.Enabled, dto.Width, dto.Height, dto.ShowAccount, dto.FullSize);
+        if (floor is null)
+            return error is not null && error.StartsWith("Không tìm") ? NotFound(new { message = error }) : Conflict(new { message = error });
+        return Ok(floor);
+    }
+
+    /// <summary>Đặt màu nền (#RRGGBB) của mặt bằng / Header / Navigation. Color rỗng = màu mặc định.</summary>
+    [HttpPut("{id}/color")]
+    public IActionResult SetColor(string id, [FromBody] FloorColorDto dto)
+    {
+        if (!string.IsNullOrWhiteSpace(dto.Color) && !Regex.IsMatch(dto.Color.Trim(), "^#[0-9A-Fa-f]{6}$"))
+            return BadRequest(new { message = "Màu phải có dạng #RRGGBB." });
+        var floor = _floors.SetBackgroundColor(id, dto.Color);
         return floor is null ? NotFound(new { message = "Khong tim thay mat bang." }) : Ok(floor);
     }
 
@@ -71,6 +126,8 @@ public class FloorsApiController : ControllerBase
     [HttpDelete("{id}")]
     public IActionResult Delete(string id)
     {
+        if (_floors.GetFloors().Any(f => f.Id == id && f.IsPanel))
+            return Conflict(new { message = "Header / Navigation là màn hình mặc định, không xoá được (chỉ có thể chọn không dùng)." });
         if (!_floors.DeleteFloor(id))
             return NotFound(new { message = "Khong tim thay mat bang." });
 

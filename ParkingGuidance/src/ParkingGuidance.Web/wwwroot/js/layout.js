@@ -42,8 +42,9 @@ window.addEventListener('floorchange', (e) => {
 const DEFAULT_ASPECT = 16 / 9;
 let bgAspectToken = 0;
 
-function setCanvasAspect(ratio) {
-    const r = Number.isFinite(ratio) && ratio > 0 ? Math.min(4, Math.max(0.5, ratio)) : DEFAULT_ASPECT;
+function setCanvasAspect(ratio, wide) {
+    const lo = wide ? 0.0005 : 0.5, hi = wide ? 2000 : 4;   // wide: Header / Navigation (khung có thể rất dẹt hoặc rất cao)
+    const r = Number.isFinite(ratio) && ratio > 0 ? Math.min(hi, Math.max(lo, ratio)) : DEFAULT_ASPECT;
     canvas.style.setProperty('--ar', r.toFixed(4));
     updateCanvasFit();
 }
@@ -115,25 +116,50 @@ viewport.addEventListener('wheel', (e) => {
 new ResizeObserver(updateCanvasFit).observe(viewport);
 window.addEventListener('resize', updateCanvasFit);
 
+const isPanelFloor = (f) => !!f && (f.kind === 'Header' || f.kind === 'Navigation');
+
+// Vùng mặt bằng thực tế khi CHẠY toàn màn hình = màn hình trừ Header (trên) và Navigation / thanh bên (trái).
+// Build dùng đúng tỉ lệ này nên Build và Chạy khớp nhau, không bị méo.
+const SIDEBAR_RUN_W = 260;
+function areaAspect() {
+    const sw = (window.screen && screen.width) || window.innerWidth || 1920;
+    const sh = (window.screen && screen.height) || window.innerHeight || 1080;
+    const list = window.floorList || [];
+    const hdr = list.find(f => f.kind === 'Header' && f.enabled !== false);
+    const nav = list.find(f => f.kind === 'Navigation' && f.enabled !== false);
+    const hdrH = hdr ? Math.max(5, hdr.panelHeight || 0) : 0;
+    const navW = nav ? Math.max(5, nav.panelWidth || 0) : (document.documentElement.classList.contains('sidebar-hidden') ? 0 : SIDEBAR_RUN_W);
+    const w = sw - navW, h = sh - hdrH;
+    return w > 100 && h > 100 ? w / h : DEFAULT_ASPECT;
+}
+function refreshFloorAspect() {
+    if (window.PG_PANEL || isPanelFloor(window.currentFloorData)) return;
+    setCanvasAspect(areaAspect());
+}
+window.addEventListener('resize', refreshFloorAspect);
+window.addEventListener('floorlistchange', refreshFloorAspect);
+
 function applyFloorBackground(floor) {
     const token = ++bgAspectToken;
-    if (floor?.backgroundImageUrl) {
-        canvas.style.backgroundImage = `url('${floor.backgroundImageUrl}')`;
-        canvas.style.backgroundSize = 'contain';
+    canvas.style.backgroundColor = floor?.backgroundColor || '';   // màu nền riêng của mặt bằng / Header / Navigation (rỗng = mặc định)
+    if (isPanelFloor(floor)) {
+        // Header / Navigation: khung đúng tỉ lệ rộng × cao đã thiết lập; ảnh nền (nếu có) kéo vừa khung
+        const w = floor.panelWidth || 1920, h = floor.panelHeight || 100;
+        setCanvasAspect(w / h, true);
+        canvas.style.backgroundImage = floor.backgroundImageUrl ? `url('${floor.backgroundImageUrl}')` : '';
+        canvas.style.backgroundSize = '100% 100%';
         canvas.style.backgroundPosition = 'center';
         canvas.style.backgroundRepeat = 'no-repeat';
-
-        const probe = new Image();
-        probe.onload = () => { if (token === bgAspectToken) setCanvasAspect(probe.naturalWidth / probe.naturalHeight); };
-        probe.onerror = () => { if (token === bgAspectToken) setCanvasAspect(DEFAULT_ASPECT); };
-        probe.src = floor.backgroundImageUrl;
-    } else {
-        canvas.style.backgroundImage = '';
-        canvas.style.backgroundSize = '';
-        canvas.style.backgroundPosition = '';
-        canvas.style.backgroundRepeat = '';
-        setCanvasAspect(DEFAULT_ASPECT);
+        return;
     }
+    // Mặt bằng thường: khung = vùng mặt bằng THỰC TẾ trên màn hình (areaAspect), không phụ thuộc tỉ lệ ảnh.
+    // Ảnh nền luôn bắt đầu từ điểm (0,0) của khung và được kéo VỪA KHÍT cả khung (chế độ "zoom": thừa hay thiếu đều khớp);
+    // toạ độ % của đối tượng nên luôn trùng đúng điểm trên ảnh, ở cả Build lẫn Chạy.
+    canvas.style.backgroundImage = floor?.backgroundImageUrl ? `url('${floor.backgroundImageUrl}')` : '';
+    canvas.style.backgroundSize = floor?.backgroundImageUrl ? '100% 100%' : '';
+    canvas.style.backgroundPosition = floor?.backgroundImageUrl ? '0 0' : '';
+    canvas.style.backgroundRepeat = floor?.backgroundImageUrl ? 'no-repeat' : '';
+    setCanvasAspect(areaAspect());
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +235,10 @@ function buildElementNode(el) {
             renderValueNode(div, el);      // Text (co the gan bien) / Number: gia tri bien cap nhat gan realtime
             break;
 
+        case 'DateTime':
+            renderDateTimeNode(div, el);   // Ngay gio: dong ho cap nhat moi giay (tickDateTimes)
+            break;
+
         case 'Rectangle':
         case 'Circle':
             div.classList.add('as-shape');
@@ -236,6 +266,7 @@ function buildElementNode(el) {
     applyCommonStyle(div, el);
     div.addEventListener('mousedown', onElementMouseDown);
     div.addEventListener('dblclick', onElementDblClick);
+    applyAnimToNode(div, el);          // hieu ung dong (chi o che do Chay)
     return div;
 }
 
@@ -495,7 +526,19 @@ async function pollLampStates() {
 // ---- Thong tin vi tri do khi bam vao den Cam bien / Vi tri do camera (che do Chay) ----
 // Cam bien: loai + so thiet bi, Line/ID (MGT200) hoac so cam bien (Keytop), ket noi, lan cuoi nhan du lieu.
 // Camera: Zone + vi tri, trang thai, bien so dang do / bien so chi dinh + ket qua doi chieu, gio vao, camera phu trach, xe roi gan nhat, loi.
+// clientX/clientY và getBoundingClientRect() tính theo px MÀN HÌNH, còn left/top/width trong style tính theo px CSS. Hai hệ này lệch nhau đúng bằng
+// "Kích thước giao diện" (root.style.zoom trong prefs.js) khác 100%: khung/cửa sổ vẽ sai chỗ so với con trỏ. Đo trực tiếp bằng 1 phần tử thử.
+function cssPerScreenPx() {
+    const p = document.createElement('div');
+    p.style.cssText = 'position:fixed;left:0;top:0;width:100px;height:1px;visibility:hidden;pointer-events:none';
+    document.body.appendChild(p);
+    const w = p.getBoundingClientRect().width;
+    p.remove();
+    return w > 0 ? 100 / w : 1;
+}
+
 let lampPop = null;       // { id, pop, timer }
+let lampPopPos = null;    // vị trí cửa sổ do người dùng kéo tới ({left, top}); giữ nguyên cho mọi lần mở sau cho tới khi tải lại trang
 function closeLampInfo() {
     if (!lampPop) return;
     clearInterval(lampPop.timer);
@@ -530,22 +573,24 @@ function lampInfoHtml(d) {
         if (s.declared) {
             const parked = s.status === 'Occupied';
             const unknownPlate = !s.plateNumber || String(s.plateNumber).toUpperCase() === 'UNKNOWN';
-            if (parked) rows += row('Biển số đang đỗ', unknownPlate ? 'Chưa đọc được biển' : escHtml(s.plateNumber));
-            rows += row('Biển số chỉ định', s.assignedPlate ? escHtml(s.assignedPlate) : 'Không chỉ định (xe nào cũng được)');
+            const plateText = (p, unknownText) => !p || String(p).toUpperCase() === 'UNKNOWN' ? unknownText : escHtml(p);
+            rows += row('Biển số đang đỗ', parked ? plateText(s.plateNumber, 'Chưa đọc được biển') : '—');
+            rows += row('Giờ vào', parked && s.parkedAt ? `${escHtml(fmtDateTime(s.parkedAt))} (đã đỗ ${escHtml(fmtSince(s.parkedAt))})` : '—');
+            rows += row('Biển số chỉ định', s.assignedPlate ? escHtml(s.assignedPlate) : 'Không chỉ định');
             if (parked && s.assignedPlate) {
                 const chk = { Valid: '<span class="li-ok">Đỗ đúng</span>', Invalid: '<span class="li-bad">Đỗ sai biển chỉ định</span>', Pending: 'Đang kiểm tra' }[s.plateCheck];
                 if (chk) rows += row('Đối chiếu', chk);
             }
-            if (parked && s.parkedAt) rows += row('Giờ vào', `${escHtml(fmtDateTime(s.parkedAt))} (đã đỗ ${escHtml(fmtSince(s.parkedAt))})`);
             const cams = (s.cameras || []).map(c => escHtml(c.ip + (c.brand || c.model ? ` (${[c.brand, c.model].filter(Boolean).join(' ')})` : ''))).join('<br>');
             rows += row('Camera', cams || '—');
-            if (s.lastExitTime) rows += row('Xe rời gần nhất', `${escHtml(s.lastExitPlate && s.lastExitPlate !== 'UNKNOWN' ? s.lastExitPlate : 'Chưa rõ biển')} · ${escHtml(fmtDateTime(s.lastExitTime))}`);
+            rows += row('Biển số xe gần nhất ra', s.lastExitTime || s.lastExitPlate ? plateText(s.lastExitPlate, 'Chưa rõ biển') : '—');
+            rows += row('Giờ ra', s.lastExitTime ? escHtml(fmtDateTime(s.lastExitTime)) : '—');
         }
     }
     if (d.reason) rows += row(st === 'Error' ? 'Lỗi' : 'Ghi chú trạng thái', `<span class="${st === 'Error' ? 'li-bad' : ''}">${escHtml(d.reason)}</span>`);
     if (d.comment) rows += row('Ghi chú', escHtml(d.comment));
 
-    return `<div class="lamp-info-head"><span class="lamp-info-dot bit-s-${st.toLowerCase()}"></span>
+    return `<div class="lamp-info-head" title="Kéo để di chuyển"><span class="lamp-info-grip">⠿</span><span class="lamp-info-dot bit-s-${st.toLowerCase()}"></span>
             <div class="lamp-info-title">${title}</div>
             <button type="button" class="lamp-info-x" title="Đóng (Esc)">✕</button></div>
         <div class="lamp-info-state li-${st.toLowerCase()}">${LAMP_LABEL[st]}</div>
@@ -558,15 +603,50 @@ async function showLampInfo(el, div) {
     pop.className = 'lamp-info-pop';
     pop.innerHTML = '<div class="lamp-info-body">Đang tải…</div>';
     document.body.appendChild(pop);
-    const me = { id: el.id, pop, timer: null };
+    const me = { id: el.id, pop, timer: null, moved: !!lampPopPos, html: '' };
     lampPop = me;
 
+    // Đặt cửa sổ theo px MÀN HÌNH (kẹp trong màn hình), tự đổi sang px CSS khi ghi style -> đúng vị trí dù "Kích thước giao diện" ≠ 100%
+    const setPos = (left, top) => {
+        const pr = pop.getBoundingClientRect();
+        const L = Math.max(4, Math.min(left, window.innerWidth - pr.width - 4));
+        const T = Math.max(4, Math.min(top, window.innerHeight - pr.height - 4));
+        const k = cssPerScreenPx();
+        pop.style.left = `${L * k}px`; pop.style.top = `${T * k}px`;
+        return { left: L, top: T };
+    };
+
+    // Kéo thanh tiêu đề để di chuyển cửa sổ (gắn trên pop vì nội dung bên trong được dựng lại mỗi giây)
+    pop.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 || !e.target.closest('.lamp-info-head') || e.target.closest('.lamp-info-x')) return;
+        e.preventDefault();
+        const sx = e.clientX, sy = e.clientY, r0 = pop.getBoundingClientRect();
+        pop.setPointerCapture(e.pointerId);
+        pop.classList.add('dragging');
+        const onEnd = () => {
+            pop.classList.remove('dragging');
+            pop.removeEventListener('pointermove', onMove);
+            pop.removeEventListener('pointerup', onEnd);
+            pop.removeEventListener('pointercancel', onEnd);
+            pop.removeEventListener('lostpointercapture', onEnd);
+        };
+        function onMove(ev) {
+            if (ev.buttons === 0) { onEnd(); return; }         // đã nhả chuột mà không nhận được pointerup: dừng kéo, không để cửa sổ bám theo chuột
+            lampPopPos = setPos(r0.left + ev.clientX - sx, r0.top + ev.clientY - sy);   // nhớ vị trí (px màn hình): popup luôn ở đúng chỗ người dùng đã đặt
+            me.moved = true;
+        }
+        pop.addEventListener('pointermove', onMove);
+        pop.addEventListener('pointerup', onEnd);
+        pop.addEventListener('pointercancel', onEnd);
+        pop.addEventListener('lostpointercapture', onEnd);
+    });
+
     const place = () => {       // dat canh den; tran man hinh thi chuyen sang ben trai / keo vao trong
-        const r = div.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+        if (me.moved && lampPopPos) { setPos(lampPopPos.left, lampPopPos.top); return; }   // nguoi dung da keo di noi khac: giu dung cho do
+        const r = div.getBoundingClientRect(), pr = pop.getBoundingClientRect();
         let left = r.right + 10;
-        if (left + w > window.innerWidth - 8) left = Math.max(8, r.left - w - 10);
-        const top = Math.max(8, Math.min(r.top, window.innerHeight - h - 8));
-        pop.style.left = `${left}px`; pop.style.top = `${top}px`;
+        if (left + pr.width > window.innerWidth - 8) left = Math.max(8, r.left - pr.width - 10);
+        setPos(left, Math.max(8, Math.min(r.top, window.innerHeight - pr.height - 8)));
     };
     const load = async () => {
         if (editMode) { closeLampInfo(); return; }
@@ -575,10 +655,15 @@ async function showLampInfo(el, div) {
             if (!r.ok) throw new Error('lamp-info ' + r.status);
             const d = await r.json();
             if (lampPop !== me) return;
-            pop.innerHTML = lampInfoHtml(d);
-            pop.querySelector('.lamp-info-x').addEventListener('click', closeLampInfo);
+            const html = lampInfoHtml(d);
+            if (html !== me.html) {
+                me.html = html;
+                pop.innerHTML = html;
+                pop.querySelector('.lamp-info-x').addEventListener('click', closeLampInfo);
+            }
         } catch {
             if (lampPop !== me) return;
+            me.html = '';
             pop.innerHTML = '<div class="lamp-info-body">Không tải được thông tin vị trí đỗ.</div>';
         }
         place();
@@ -861,10 +946,202 @@ function updateValueNodes(force) {
     });
 }
 
+// ===========================================================================
+// HIEU UNG DONG gan bien (Animation): Hien thi / Vi tri / Mau sac theo gia tri bien. CHI chay o che do Chay.
+//   el.animation = { visibilityTag, visibilityInvert,
+//                    horizontal / vertical: { tag, valueMin, valueMax, posMin, posMax, reference: start|center|end },
+//                    sliderEnabled, sliderDisableTag,
+//                    colors: { tag, fill, border, text, stops: [{ limit, color, blink: none|slow|fast }] } }
+// ===========================================================================
+let animTick = 0;                                  // nhip 200 ms de nhap nhay
+const animHas = (el) => { const a = el.animation; return !!a && !!(a.visibilityTag || a.horizontal?.tag || a.vertical?.tag || a.colors?.tag); };
+const isAnimVar = (v) => v.type === 'Integer' || v.type === 'Real' || v.type === 'Boolean';
+
+function animTagsOf(el) {
+    const a = el.animation;
+    if (!a) return [];
+    return [a.visibilityTag, a.horizontal?.tag, a.vertical?.tag, a.colors?.tag, a.sliderEnabled ? a.sliderDisableTag : null].filter(Boolean);
+}
+
+// Gia tri so cua bien (Boolean: 1/0); null = chua doc duoc / khong ton tai / khong phai so
+function animValue(tag) {
+    const st = valStates[valKey(tag)];
+    if (!st) return null;
+    const raw = String(st.v ?? '').trim();
+    if (st.t === 'Boolean' || /^(true|false)$/i.test(raw)) return /^(1|true|on)$/i.test(raw) ? 1 : 0;
+    const n = parseFloat(raw.replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
+}
+
+// Gia tri bien -> vi tri (%) cua canh trai / tren cua doi tuong
+function animAxisPos(ax, v, size) {
+    let r = (v - ax.valueMin) / ((ax.valueMax - ax.valueMin) || 1);
+    r = Math.max(0, Math.min(1, r));
+    const pos = ax.posMin + r * (ax.posMax - ax.posMin);
+    return ax.reference === 'center' ? pos - size / 2 : ax.reference === 'end' ? pos - size : pos;
+}
+// Nguoc lai: vi tri diem tham chieu (%) -> gia tri bien (dung cho Slider)
+function animPosToValue(ax, refPos) {
+    let r = (refPos - ax.posMin) / ((ax.posMax - ax.posMin) || 1);
+    r = Math.max(0, Math.min(1, r));
+    return ax.valueMin + r * (ax.valueMax - ax.valueMin);
+}
+
+// "By Limit": gia tri >= nguong lon nhat thoa man -> mau cua nguong do; nho hon moi nguong -> khong doi mau
+function animStopFor(c, v) {
+    let best = null;
+    (c.stops || []).forEach(s => { if (v >= s.limit && (!best || s.limit >= best.limit)) best = s; });
+    return best;
+}
+function animBlinkOn(stop) {
+    if (!stop || !stop.blink || stop.blink === 'none') return true;
+    return stop.blink === 'fast' ? Math.floor(animTick / 2) % 2 === 0 : Math.floor(animTick / 5) % 2 === 0;
+}
+
+// Ghi de style (!important) nhung nho gia tri goc de khoi phuc khi het hieu ung / pha tat cua nhap nhay
+function animSet(root, node, prop, value) {
+    node._ab = node._ab || {};
+    if (!(prop in node._ab)) node._ab[prop] = [node.style.getPropertyValue(prop), node.style.getPropertyPriority(prop)];
+    node.style.setProperty(prop, value, 'important');
+    (root._abNodes = root._abNodes || new Set()).add(node);
+}
+function animRestore(root) {
+    (root._abNodes || []).forEach(n => {
+        Object.entries(n._ab || {}).forEach(([p, [v, pr]]) => { if (v) n.style.setProperty(p, v, pr); else n.style.removeProperty(p); });
+        n._ab = null;
+    });
+    root._abNodes = null;
+}
+
+function animPaint(div, el, c, color) {
+    if (el.type === 'Line') {                      // duong thang: doi mau net ve + dau mui ten
+        div.querySelectorAll('.line-stroke').forEach(n => animSet(div, n, 'border-top-color', color));
+        div.querySelectorAll('.line-head.end').forEach(n => animSet(div, n, 'border-left-color', color));
+        div.querySelectorAll('.line-head.start').forEach(n => animSet(div, n, 'border-right-color', color));
+        return;
+    }
+    if (c.fill) { animSet(div, div, 'background-color', color); animSet(div, div, 'background-image', 'none'); }
+    if (c.border) {
+        const cs = getComputedStyle(div);
+        if (cs.borderTopStyle === 'none' || parseFloat(cs.borderTopWidth) === 0) {
+            animSet(div, div, 'border-style', 'solid');
+            animSet(div, div, 'border-width', 'max(2px, calc(2 * var(--px)))');
+        }
+        animSet(div, div, 'border-color', color);
+    }
+    if (c.text) animSet(div, div, 'color', color);
+}
+
+function applyAnimToNode(div, el) {
+    if (!div) return;
+    animRestore(div);
+    if (editMode || !el.animation) return;
+    const a = el.animation;
+    if (a.visibilityTag) {
+        const v = animValue(a.visibilityTag);
+        if (v !== null) div.style.visibility = ((v !== 0) !== !!a.visibilityInvert) ? '' : 'hidden';
+    }
+    if (a.horizontal?.tag) {
+        const v = animValue(a.horizontal.tag);
+        if (v !== null) div.style.left = `${animAxisPos(a.horizontal, v, el.width)}%`;
+    }
+    if (a.vertical?.tag) {
+        const v = animValue(a.vertical.tag);
+        if (v !== null) div.style.top = `${animAxisPos(a.vertical, v, el.height)}%`;
+    }
+    if (a.colors?.tag) {
+        const v = animValue(a.colors.tag);
+        const stop = v === null ? null : animStopFor(a.colors, v);
+        if (stop && animBlinkOn(stop)) animPaint(div, el, a.colors, stop.color);
+    }
+    div.classList.toggle('anim-slider', !!a.sliderEnabled);
+}
+
+function updateAnimNodes() {
+    if (editMode) return;
+    elements.forEach(el => { if (animHas(el)) applyAnimToNode(canvas.querySelector(`.layout-el[data-id="${el.id}"]`), el); });
+}
+
+// Nhap nhay: chi ve lai doi tuong co nguong nhap nhay
+setInterval(() => {
+    animTick++;
+    if (editMode) return;
+    elements.forEach(el => {
+        const c = el.animation?.colors;
+        if (c && (c.stops || []).some(s => s.blink && s.blink !== 'none')) applyAnimToNode(canvas.querySelector(`.layout-el[data-id="${el.id}"]`), el);
+    });
+}, 200);
+
+// ---- Slider / Gestures: keo doi tuong o che do Chay de ghi gia tri nguoc ve bien (Project tag) ----
+let sliderDrag = null;
+const animWriteTimer = {}, animWriteRaw = {};
+
+function animWriteValue(el, tag, v) {
+    const type = varInfo(tag)?.type || valStates[valKey(tag)]?.t || 'Real';
+    if (type === 'Boolean') return;
+    const raw = type === 'Integer' ? String(Math.round(v)) : String(Math.round(v * 1e4) / 1e4);
+    const k = valKey(tag);
+    const st = { v: raw, t: type };
+    valStates[k] = st;                                        // hien ngay, khong cho vong doc ke tiep
+    valLocal[k] = { st, until: Date.now() + 800 };
+    updateAnimNodes();
+    animWriteRaw[k] = raw;
+    if (animWriteTimer[k]) return;                            // gop: toi da ~12 lan ghi / giay
+    animWriteTimer[k] = setTimeout(async () => {
+        animWriteTimer[k] = null;
+        const val = animWriteRaw[k];
+        try {
+            const r = await sendBit(tag, val);
+            if (!r.ok) { const err = await r.json().catch(() => ({})); bitFlashError(el.id, err.message || `Không ghi được ${tag}`); }
+            else valLocal[k] = { st: { v: val, t: type }, until: Date.now() + 300 };
+        } catch { bitFlashError(el.id, `Không ghi được ${tag} (mất kết nối)`); }
+    }, 80);
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+    if (editMode || e.button !== 0) return;
+    const node = e.target.closest('.layout-el');
+    if (!node) return;
+    const el = elements.find(x => x.id === node.dataset.id);
+    const a = el?.animation;
+    if (!a?.sliderEnabled) return;
+    if (a.sliderDisableTag && animValue(a.sliderDisableTag)) return;          // dang bi vo hieu hoa
+    const axes = [['horizontal', el.width], ['vertical', el.height]].filter(([k]) => a[k]?.tag);
+    if (!axes.length) return;
+    const bad = axes.find(([k]) => !varInfo(a[k].tag)?.writable);
+    if (bad) { bitFlashError(el.id, `Biến "${a[bad[0]].tag}" không ghi được (chỉ Project tag)`); return; }
+
+    const rect = canvas.getBoundingClientRect();
+    const cx = (e.clientX - rect.left) / rect.width * 100, cy = (e.clientY - rect.top) / rect.height * 100;
+    sliderDrag = {
+        el, rect, node,
+        axes: axes.map(([k, size]) => {
+            const ax = a[k];
+            const start = parseFloat(node.style[k === 'horizontal' ? 'left' : 'top']) || 0;
+            const ref = start + (ax.reference === 'center' ? size / 2 : ax.reference === 'end' ? size : 0);
+            return { k, ax, off: (k === 'horizontal' ? cx : cy) - ref };      // giu nguyen do lech luc bat dau keo
+        })
+    };
+    try { node.setPointerCapture(e.pointerId); } catch { /* bo qua */ }
+    e.preventDefault();
+});
+canvas.addEventListener('pointermove', (e) => {
+    if (!sliderDrag) return;
+    const { rect, el, axes } = sliderDrag;
+    const cx = (e.clientX - rect.left) / rect.width * 100, cy = (e.clientY - rect.top) / rect.height * 100;
+    axes.forEach(({ k, ax, off }) => animWriteValue(el, ax.tag, animPosToValue(ax, (k === 'horizontal' ? cx : cy) - off)));
+});
+const endSliderDrag = () => { sliderDrag = null; };
+canvas.addEventListener('pointerup', endSliderDrag);
+canvas.addEventListener('pointercancel', endSliderDrag);
+
 async function pollValues() {
     try {
         if (!document.hidden) {
-            const names = [...new Set(elements.filter(isValueEl).filter(e => e.readTag).map(e => e.readTag))];
+            const names = [...new Set([
+                ...elements.filter(isValueEl).filter(e => e.readTag).map(e => e.readTag),
+                ...(editMode ? [] : elements.flatMap(animTagsOf))      // bien cua hieu ung dong (chi o che do Chay)
+            ])];
             if (names.length) {
                 const next = {};
                 for (let i = 0; i < names.length; i += 64) {
@@ -877,6 +1154,7 @@ async function pollValues() {
                 Object.entries(valLocal).forEach(([k, l]) => { if (l.until > now) next[k] = l.st; else delete valLocal[k]; });
                 valStates = next;
                 updateValueNodes();
+                updateAnimNodes();
             }
         }
     } catch { /* mat ket noi tam thoi: giu gia tri cu, lan sau thu lai */ }
@@ -930,37 +1208,266 @@ function applyFontFromForm(el, defColor = '#e6ebf5') {
 const clampInt = (v, lo, hi) => Math.max(lo, Math.min(hi, parseInt(v, 10) || 0));
 const numOrNull = (id) => { const x = parseFloat(document.getElementById(id).value); return Number.isFinite(x) ? x : null; };
 
+
+// ---------------------------------------------------------------------------
+// Ngay gio (DateTime): dong ho hien thi ngay / gio hien tai, chay lien tuc (ca Build lan Chay).
+// Tuy chon (el.dtOptions): show, dateFormat, timeFormat, showSeconds, weekday, layout, timeFirst, separator, language, timeZone, customPattern.
+// Mau dinh dang: yyyy yy | MMMM MMM MM M | dddd ddd dd d | HH H hh h | mm m | ss s | fff | tt t ; chu trong 'nhay don' giu nguyen.
+// ---------------------------------------------------------------------------
+const DT_DEFAULTS = {
+    show: 'DateTime', dateFormat: 'dd/MM/yyyy', timeFormat: '24h', showSeconds: true, weekday: 'none',
+    layout: 'OneLine', timeFirst: false, separator: '  ', language: 'vi', timeZone: 'local', customPattern: null
+};
+const DT_NAMES = {
+    vi: {
+        weekLong: ['Chủ nhật', 'Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ sáu', 'Thứ bảy'],
+        weekShort: ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'],
+        monLong: Array.from({ length: 12 }, (_, i) => `tháng ${i + 1}`),
+        monShort: Array.from({ length: 12 }, (_, i) => `Th${i + 1}`),
+        am: 'SA', pm: 'CH'
+    },
+    en: {
+        weekLong: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+        weekShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+        monLong: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+        monShort: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+        am: 'AM', pm: 'PM'
+    }
+};
+const DT_DATE_PRESETS = ['dd/MM/yyyy', 'dd-MM-yyyy', 'dd.MM.yyyy', 'dd/MM/yy', 'd/M/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd', 'yyyy/MM/dd', 'dd MMM yyyy', 'd MMMM yyyy', 'MMMM d, yyyy'];
+const DT_ZONES = [['local', 'Giờ máy tính (mặc định)'], ['utc', 'UTC'], ['+07:00', 'UTC+07:00 — Việt Nam, Thái Lan']]
+    .concat(['-12:00', '-11:00', '-10:00', '-09:00', '-08:00', '-07:00', '-06:00', '-05:00', '-04:00', '-03:00', '-02:00', '-01:00',
+        '+01:00', '+02:00', '+03:00', '+03:30', '+04:00', '+04:30', '+05:00', '+05:30', '+05:45', '+06:00', '+06:30',
+        '+08:00', '+09:00', '+09:30', '+10:00', '+11:00', '+12:00', '+13:00', '+14:00'].map(z => [z, `UTC${z}`]));
+
+const dtOpts = (el) => Object.assign({}, DT_DEFAULTS, el?.dtOptions || {});
+
+// Cac thanh phan ngay / gio theo muoi gio da chon (de doc bang getUTC*)
+function dtNowParts(tz, now = new Date()) {
+    let d;
+    if (tz === 'local') d = { y: now.getFullYear(), M: now.getMonth() + 1, d: now.getDate(), H: now.getHours(), m: now.getMinutes(), s: now.getSeconds(), ms: now.getMilliseconds(), dow: now.getDay() };
+    else {
+        let off = 0;
+        const m = /^([+-])(\d\d):(\d\d)$/.exec(tz || '');
+        if (m) off = (m[1] === '-' ? -1 : 1) * (parseInt(m[2], 10) * 60 + parseInt(m[3], 10)) * 60000;
+        const u = new Date(now.getTime() + off);
+        d = { y: u.getUTCFullYear(), M: u.getUTCMonth() + 1, d: u.getUTCDate(), H: u.getUTCHours(), m: u.getUTCMinutes(), s: u.getUTCSeconds(), ms: u.getUTCMilliseconds(), dow: u.getUTCDay() };
+    }
+    return d;
+}
+
+function dtFormat(pattern, p, lang) {
+    const nm = DT_NAMES[lang] || DT_NAMES.vi;
+    const pad = (n, w = 2) => String(n).padStart(w, '0');
+    const h12 = p.H % 12 === 0 ? 12 : p.H % 12;
+    let out = '';
+    for (let i = 0; i < pattern.length;) {
+        const c = pattern[i];
+        if (c === "'") {                                  // chu nguyen van trong 'nhay don'
+            const j = pattern.indexOf("'", i + 1);
+            if (j < 0) { out += pattern.slice(i + 1); break; }
+            out += j === i + 1 ? "'" : pattern.slice(i + 1, j);
+            i = j + 1;
+            continue;
+        }
+        if (!'yMdHhmsft'.includes(c)) { out += c; i++; continue; }
+        let n = 1;
+        while (pattern[i + n] === c) n++;
+        i += n;
+        switch (c) {
+            case 'y': out += n === 2 ? pad(p.y % 100) : n === 1 ? String(p.y) : pad(p.y, 4); break;
+            case 'M': out += n >= 4 ? nm.monLong[p.M - 1] : n === 3 ? nm.monShort[p.M - 1] : n === 2 ? pad(p.M) : String(p.M); break;
+            case 'd': out += n >= 4 ? nm.weekLong[p.dow] : n === 3 ? nm.weekShort[p.dow] : n === 2 ? pad(p.d) : String(p.d); break;
+            case 'H': out += n >= 2 ? pad(p.H) : String(p.H); break;
+            case 'h': out += n >= 2 ? pad(h12) : String(h12); break;
+            case 'm': out += n >= 2 ? pad(p.m) : String(p.m); break;
+            case 's': out += n >= 2 ? pad(p.s) : String(p.s); break;
+            case 'f': out += pad(p.ms, 3).slice(0, Math.min(n, 3)); break;
+            case 't': { const t = p.H < 12 ? nm.am : nm.pm; out += n >= 2 ? t : t[0]; break; }
+        }
+    }
+    return out;
+}
+
+// Danh sach dong chu cua doi tuong tai thoi diem hien tai (1 hoac 2 dong)
+function dtLines(el, now = new Date()) {
+    const o = dtOpts(el);
+    const p = dtNowParts(o.timeZone, now);
+    const f = (pat) => dtFormat(pat, p, o.language);
+    if (o.customPattern) return [f(o.customPattern)];
+    const wk = o.weekday === 'long' ? 'dddd, ' : o.weekday === 'short' ? 'ddd, ' : '';
+    const datePat = wk + (o.dateFormat || DT_DEFAULTS.dateFormat);
+    const sec = o.showSeconds ? ':ss' : '';
+    const timePat = o.timeFormat === '12h' ? `hh:mm${sec} tt` : `HH:mm${sec}`;
+    if (o.show === 'Date') return [f(datePat)];
+    if (o.show === 'Time') return [f(timePat)];
+    const parts = o.timeFirst ? [f(timePat), f(datePat)] : [f(datePat), f(timePat)];
+    return o.layout === 'TwoLines' ? parts : [parts.join(o.separator ?? '  ')];
+}
+
+function renderDateTimeNode(div, el) {
+    div.classList.add('as-datetime');
+    const jc = { left: 'flex-start', right: 'flex-end', center: 'center' }[el.textAlign];
+    div.style.alignItems = jc || 'center';
+    div.style.textAlign = el.textAlign || 'center';
+    const lines = dtLines(el);
+    const last = lines.length - 1;
+    div.innerHTML = lines.map((t, i) =>
+        `<span class="dt-line">${i === 0 && el.prefix ? escHtml(el.prefix) : ''}${escHtml(t)}${i === last && el.suffix ? escHtml(el.suffix) : ''}</span>`).join('');
+    div.dataset.dtSig = lines.join('|');
+    div.title = el.comment || '';
+}
+
+// Cap nhat dong ho (4 lan / giay; chi sua node khi chu doi)
+function tickDateTimes() {
+    if (!elements.some(e => e.type === 'DateTime')) return;
+    const now = new Date();
+    elements.forEach(el => {
+        if (el.type !== 'DateTime') return;
+        const node = canvas.querySelector(`.layout-el[data-id="${el.id}"]`);
+        if (!node) return;
+        const lines = dtLines(el, now);
+        if (node.dataset.dtSig === lines.join('|')) return;
+        const spans = node.querySelectorAll('.dt-line');
+        if (spans.length !== lines.length) { renderDateTimeNode(node, el); return; }
+        const last = lines.length - 1;
+        lines.forEach((t, i) => { spans[i].textContent = (i === 0 && el.prefix ? el.prefix : '') + t + (i === last && el.suffix ? el.suffix : ''); });
+        node.dataset.dtSig = lines.join('|');
+    });
+}
+setInterval(tickDateTimes, 250);
+
+async function renderDateTimeProps(el) {
+    const o = dtOpts(el);
+    const sel = (id, cur, opts) => `<select id="${id}">${opts.map(([v, t]) => `<option value="${escHtml(v)}" ${String(cur) === String(v) ? 'selected' : ''}>${escHtml(t)}</option>`).join('')}</select>`;
+    const now = new Date();
+    const ex = (pat) => dtFormat(pat, dtNowParts(o.timeZone, now), o.language);
+    const datePresets = DT_DATE_PRESETS.includes(o.dateFormat) ? DT_DATE_PRESETS : [o.dateFormat, ...DT_DATE_PRESETS];
+    propsPanel.innerHTML = ppTabs(el.type, [
+        { id: 'show', label: 'Hiển thị', html:
+            ppCard('Nội dung hiển thị', `
+                <div class="prop-field"><label>Nội dung</label>
+                    ${sel('dtShow', o.show, [['DateTime', 'Ngày + giờ'], ['Date', 'Chỉ ngày'], ['Time', 'Chỉ giờ']])}</div>
+                <div id="dtDateBox">
+                    <div class="prop-field"><label>Định dạng ngày</label>
+                        ${sel('dtDateFormat', o.dateFormat, datePresets.map(p => [p, `${p}   →   ${ex(p)}`]))}</div>
+                    <div class="prop-field"><label>Thứ trong tuần (đứng trước ngày)</label>
+                        ${sel('dtWeekday', o.weekday, [['none', 'Không hiện'], ['long', 'Đầy đủ (Thứ tư / Wednesday)'], ['short', 'Viết tắt (T4 / Wed)']])}</div>
+                </div>
+                <div id="dtTimeBox">
+                    <div class="prop-grid-2">
+                        <div class="prop-field"><label>Định dạng giờ</label>
+                            ${sel('dtTimeFormat', o.timeFormat, [['24h', '24 giờ (13:45)'], ['12h', '12 giờ (01:45 CH)']])}</div>
+                        <div class="prop-field"><label>&nbsp;</label>
+                            <label class="checkbox-label"><input type="checkbox" id="dtSeconds" ${o.showSeconds ? 'checked' : ''} /> Hiện giây</label></div>
+                    </div>
+                </div>`)
+            + ppCard('Bố cục, ngôn ngữ & múi giờ', `
+                <div id="dtBothBox">
+                    <div class="prop-grid-2">
+                        <div class="prop-field"><label>Bố cục</label>
+                            ${sel('dtLayout', o.layout, [['OneLine', '1 dòng'], ['TwoLines', '2 dòng (trên / dưới)']])}</div>
+                        <div class="prop-field"><label>Thứ tự</label>
+                            ${sel('dtOrder', o.timeFirst ? '1' : '0', [['0', 'Ngày trước, giờ sau'], ['1', 'Giờ trước, ngày sau']])}</div>
+                    </div>
+                    <div class="prop-field" id="dtSepBox"><label>Chữ ngăn cách ngày và giờ (khi 1 dòng)</label>
+                        <input id="dtSeparator" type="text" maxlength="8" value="${escHtml(o.separator)}" /></div>
+                </div>
+                <div class="prop-grid-2">
+                    <div class="prop-field"><label>Ngôn ngữ</label>
+                        ${sel('dtLang', o.language, [['vi', 'Tiếng Việt'], ['en', 'English']])}</div>
+                    <div class="prop-field"><label>Múi giờ</label>
+                        ${sel('dtZone', o.timeZone, DT_ZONES)}</div>
+                </div>`)
+            + ppCard('Mẫu tuỳ chọn (nâng cao)', `
+                <div class="prop-field"><label>Mẫu thay cho các lựa chọn ngày / giờ ở trên</label>
+                    <input id="dtCustom" type="text" maxlength="80" placeholder="vd: dddd, dd/MM/yyyy HH:mm:ss" value="${escHtml(o.customPattern || '')}" /></div>
+                ${ppHint("Ký tự mẫu: <b>yyyy</b> năm · <b>MM / MMM / MMMM</b> tháng · <b>dd</b> ngày · <b>ddd / dddd</b> thứ · <b>HH</b> giờ 24 · <b>hh</b> giờ 12 · <b>mm</b> phút · <b>ss</b> giây · <b>fff</b> mili giây · <b>tt</b> SA/CH (AM/PM). Chữ nguyên văn đặt trong 'nháy đơn'.")}`, 'wide') },
+        { id: 'font', label: 'Chữ', html:
+            ppCard('Chữ kèm theo', `
+                <div class="prop-grid-2">
+                    <div class="prop-field"><label>Chữ đứng trước</label>
+                        <input id="propPrefix" type="text" maxlength="32" value="${escHtml(el.prefix)}" /></div>
+                    <div class="prop-field"><label>Chữ đứng sau</label>
+                        <input id="propSuffix" type="text" maxlength="32" value="${escHtml(el.suffix)}" /></div>
+                </div>`)
+            + ppCard('Định dạng chữ', `
+                <div class="prop-field"><label>Căn lề</label>${alignSelectHtml(el, 'center')}</div>
+                ${fontFieldsHtml(el)}
+                <div class="prop-inline">
+                    <label class="checkbox-label"><input type="checkbox" id="dtBold" ${el.fontBold === true ? 'checked' : ''} /> In đậm</label>
+                    <label class="checkbox-label"><input type="checkbox" id="dtItalic" ${el.fontItalic ? 'checked' : ''} /> In nghiêng</label>
+                </div>`)
+            + ppCard('Ghi chú', `
+                <div class="prop-field"><label>Ghi chú (chỉ để nhận biết, không hiển thị)</label>
+                    <input id="propComment" type="text" maxlength="200" value="${escHtml(el.comment)}" /></div>`, 'wide') },
+        { id: 'style', label: 'Kiểu dáng', html: styleFieldsHtml(el) + effectsFieldsHtml(el) }
+    ]) + ppFooter();
+
+    // Chi hien cac o co y nghia theo "Nội dung" / "Bố cục" / mau tuy chon
+    const $d = (id) => document.getElementById(id);
+    const syncVisibility = () => {
+        const custom = $d('dtCustom').value.trim() !== '';
+        const show = $d('dtShow').value;
+        $d('dtShow').disabled = custom;
+        $d('dtDateBox').hidden = custom || show === 'Time';
+        $d('dtTimeBox').hidden = custom || show === 'Date';
+        $d('dtBothBox').hidden = custom || show !== 'DateTime';
+        $d('dtSepBox').hidden = $d('dtLayout').value === 'TwoLines';
+    };
+    ['dtShow', 'dtLayout'].forEach(id => $d(id).addEventListener('change', syncVisibility));
+    $d('dtCustom').addEventListener('input', syncVisibility);
+    syncVisibility();
+
+    const applyForm = (el) => {
+        el.dtOptions = {
+            show: $d('dtShow').value, dateFormat: $d('dtDateFormat').value, timeFormat: $d('dtTimeFormat').value,
+            showSeconds: $d('dtSeconds').checked, weekday: $d('dtWeekday').value, layout: $d('dtLayout').value,
+            timeFirst: $d('dtOrder').value === '1', separator: $d('dtSeparator').value,
+            language: $d('dtLang').value, timeZone: $d('dtZone').value, customPattern: $d('dtCustom').value.trim() || null
+        };
+        el.prefix = $d('propPrefix').value || null;
+        el.suffix = $d('propSuffix').value || null;
+        el.textAlign = $d('propAlign').value || null;
+        el.comment = $d('propComment').value || null;
+        el.fontBold = $d('dtBold').checked ? true : null;
+        el.fontItalic = $d('dtItalic').checked ? true : null;
+        applyFontFromForm(el);
+        applyStyleFieldsFromForm(el);
+        applyEffectsFromForm(el);
+    };
+    bindLivePreview(el, applyForm);
+    $d('savePropsBtn').addEventListener('click', async () => { applyForm(el); await persistAndRefresh(el); });
+    $d('deleteElBtn').addEventListener('click', () => deleteElement(el.id));
+    fitPropsDialog();
+}
+
 async function renderTextProps(el) {
     await loadVarCatalog();
     if (selectedId !== el.id) return;
-    propsPanel.innerHTML = `
-        <h3>${typeLabel(el.type)}</h3>
-        <div class="prop-section-title">Biến hiển thị (tuỳ chọn)</div>
-        <div class="prop-field"><label>Biến — String / char / số… (System, Project, MS, MC)</label>
-            ${varSelectHtml('propReadTag', el.readTag, () => true, '— không gắn biến (chữ cố định) —')}</div>
-        <p class="hint small">Gắn biến thì Text hiển thị giá trị hiện tại của biến (cập nhật liên tục). Biến dạng String/char hiển thị nguyên văn; biến số hiển thị dạng chữ. "Nội dung" bên dưới chỉ dùng khi không gắn biến.</p>
-        <div class="prop-field"><label>Nội dung (khi không gắn biến)</label>
-            <textarea id="propContent" rows="2">${escHtml(el.content)}</textarea></div>
-        <div class="prop-grid-2">
-            <div class="prop-field"><label>Chữ đứng trước giá trị</label>
-                <input id="propPrefix" type="text" maxlength="32" value="${escHtml(el.prefix)}" /></div>
-            <div class="prop-field"><label>Chữ đứng sau giá trị</label>
-                <input id="propSuffix" type="text" maxlength="32" value="${escHtml(el.suffix)}" /></div>
-        </div>
-        <div class="prop-field"><label>Căn lề</label>${alignSelectHtml(el, 'center')}</div>
-        ${fontFieldsHtml(el)}
-        <div class="prop-field"><label>Ghi chú (chỉ để nhận biết, không hiển thị)</label>
-            <input id="propComment" type="text" maxlength="200" value="${escHtml(el.comment)}" /></div>
-        ${positionFieldsHtml(el)}
-        ${styleFieldsHtml(el)}
-        ${effectsFieldsHtml(el)}
-        ${DIRTY_NOTE_HTML}
-        <div class="prop-actions">
-            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
-            <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
-        </div>
-    `;
-    bindEffectsButtons();
+    propsPanel.innerHTML = ppTabs(el.type, [
+        { id: 'content', label: 'Nội dung', html:
+            ppCard('Biến hiển thị (tuỳ chọn)', `
+                <div class="prop-field"><label>Biến — String / char / số… (System, Project, MS, MC)</label>
+                    ${varSelectHtml('propReadTag', el.readTag, () => true, '— không gắn biến (chữ cố định) —')}</div>
+                ${ppHint('Gắn biến thì Text hiển thị giá trị hiện tại của biến (cập nhật liên tục). Biến dạng String/char hiển thị nguyên văn; biến số hiển thị dạng chữ. "Nội dung" chỉ dùng khi không gắn biến.')}`)
+            + ppCard('Nội dung & chữ kèm theo', `
+                <div class="prop-field"><label>Nội dung (khi không gắn biến)</label>
+                    <textarea id="propContent" rows="2">${escHtml(el.content)}</textarea></div>
+                <div class="prop-grid-2">
+                    <div class="prop-field"><label>Chữ đứng trước giá trị</label>
+                        <input id="propPrefix" type="text" maxlength="32" value="${escHtml(el.prefix)}" /></div>
+                    <div class="prop-field"><label>Chữ đứng sau giá trị</label>
+                        <input id="propSuffix" type="text" maxlength="32" value="${escHtml(el.suffix)}" /></div>
+                </div>`) },
+        { id: 'font', label: 'Chữ', html: ppCard('Định dạng chữ', `
+                <div class="prop-field"><label>Căn lề</label>${alignSelectHtml(el, 'center')}</div>
+                ${fontFieldsHtml(el)}`)
+            + ppCard('Ghi chú', `
+                <div class="prop-field"><label>Ghi chú (chỉ để nhận biết, không hiển thị)</label>
+                    <input id="propComment" type="text" maxlength="200" value="${escHtml(el.comment)}" /></div>`) },
+        { id: 'style', label: 'Kiểu dáng', html: styleFieldsHtml(el) + effectsFieldsHtml(el) }
+    ]) + ppFooter();
 
     const applyForm = (el) => {
         el.readTag = document.getElementById('propReadTag').value || null;
@@ -970,7 +1477,6 @@ async function renderTextProps(el) {
         el.textAlign = document.getElementById('propAlign').value || null;
         el.comment = document.getElementById('propComment').value || null;
         applyFontFromForm(el);
-        applyPositionFieldsFromForm(el);
         applyStyleFieldsFromForm(el);
         applyEffectsFromForm(el);
     };
@@ -984,60 +1490,53 @@ async function renderNumberProps(el) {
     await loadVarCatalog();
     if (selectedId !== el.id) return;
     const mode = numModeOf(el);
-    propsPanel.innerHTML = `
-        <h3>${typeLabel(el.type)}</h3>
-        <div class="prop-section-title">Biến</div>
-        <div class="prop-field"><label>Biến số (Integer / Real — System, Project, MS, MC)</label>
-            ${varSelectHtml('propReadTag', el.readTag, isNumericVar, '— chọn biến —')}</div>
-        <div class="prop-field"><label>Chế độ</label>
-            <select id="propValueMode">
-                <option value="Display" ${mode === 'Display' ? 'selected' : ''}>Chỉ hiển thị</option>
-                <option value="Input" ${mode === 'Input' ? 'selected' : ''}>Cho phép nhập (ở chế độ Chạy)</option>
-            </select></div>
-        <div id="numInputBox" ${mode === 'Input' ? '' : 'hidden'}>
-            <label class="checkbox-label" style="margin:2px 0 8px;">
-                <input type="checkbox" id="propSepWrite" ${el.separateWriteTag ? 'checked' : ''} />
-                Ghi vào biến khác (không ghi vào chính biến hiển thị)
-            </label>
-            <div class="prop-field" id="numWriteBox" ${el.separateWriteTag ? '' : 'hidden'}><label>Biến để ghi (chỉ Project tag)</label>
-                ${varSelectHtml('propWriteTag', el.writeTag, v => v.writable && isNumericVar(v), '— chọn biến —')}</div>
-            <div class="prop-grid-2">
-                <div class="prop-field"><label>Nhỏ nhất cho phép</label>
-                    <input id="propMin" type="number" step="any" placeholder="không giới hạn" value="${el.minValue ?? ''}" /></div>
-                <div class="prop-field"><label>Lớn nhất cho phép</label>
-                    <input id="propMax" type="number" step="any" placeholder="không giới hạn" value="${el.maxValue ?? ''}" /></div>
-            </div>
-            <p class="hint small" id="numWriteHint">Chỉ Project tag mới ghi được; System tag, biến MS, MC chỉ đọc. Giới hạn tính theo giá trị đang HIỂN THỊ (sau khi dời dấu chấm).</p>
-        </div>
-
-        <div class="prop-section-title">Định dạng số</div>
-        <div class="prop-grid-2">
-            <div class="prop-field"><label>Dời dấu chấm (lần)</label>
-                <input id="propShift" type="number" min="0" max="9" step="1" value="${el.decimalShift ?? 0}" /></div>
-            <div class="prop-field"><label>Số chữ số sau dấu chấm</label>
-                <input id="propDecimals" type="number" min="0" max="9" step="1" placeholder="tự động" value="${el.decimals ?? ''}" /></div>
-        </div>
-        <p class="hint small" id="numShiftHint"></p>
-        <div class="prop-grid-2">
-            <div class="prop-field"><label>Chữ đứng trước</label>
-                <input id="propPrefix" type="text" maxlength="32" value="${escHtml(el.prefix)}" /></div>
-            <div class="prop-field"><label>Đơn vị / chữ đứng sau</label>
-                <input id="propSuffix" type="text" maxlength="32" placeholder="vd  °C" value="${escHtml(el.suffix)}" /></div>
-        </div>
-        <div class="prop-field"><label>Căn lề</label>${alignSelectHtml(el, 'center')}</div>
-        ${fontFieldsHtml(el)}
-        <div class="prop-field"><label>Ghi chú (chỉ để nhận biết, không hiển thị)</label>
-            <input id="propComment" type="text" maxlength="200" value="${escHtml(el.comment)}" /></div>
-        ${positionFieldsHtml(el)}
-        ${styleFieldsHtml(el)}
-        ${effectsFieldsHtml(el)}
-        ${DIRTY_NOTE_HTML}
-        <div class="prop-actions">
-            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
-            <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
-        </div>
-    `;
-    bindEffectsButtons();
+    propsPanel.innerHTML = ppTabs(el.type, [
+        { id: 'var', label: 'Biến & chế độ', html:
+            ppCard('Biến', `
+                <div class="prop-field"><label>Biến số (Integer / Real — System, Project, MS, MC)</label>
+                    ${varSelectHtml('propReadTag', el.readTag, isNumericVar, '— chọn biến —')}</div>
+                <div class="prop-field"><label>Chế độ</label>
+                    <select id="propValueMode">
+                        <option value="Display" ${mode === 'Display' ? 'selected' : ''}>Chỉ hiển thị</option>
+                        <option value="Input" ${mode === 'Input' ? 'selected' : ''}>Cho phép nhập (ở chế độ Chạy)</option>
+                    </select></div>`)
+            + `<div id="numInputBox" class="pp-contents" ${mode === 'Input' ? '' : 'hidden'}>` + ppCard('Nhập giá trị', `
+                <label class="checkbox-label" style="margin-bottom:10px;">
+                    <input type="checkbox" id="propSepWrite" ${el.separateWriteTag ? 'checked' : ''} />
+                    Ghi vào biến khác (không ghi vào chính biến hiển thị)
+                </label>
+                <div class="prop-field" id="numWriteBox" ${el.separateWriteTag ? '' : 'hidden'}><label>Biến để ghi (chỉ Project tag)</label>
+                    ${varSelectHtml('propWriteTag', el.writeTag, v => v.writable && isNumericVar(v), '— chọn biến —')}</div>
+                <div class="prop-grid-2">
+                    <div class="prop-field"><label>Nhỏ nhất cho phép</label>
+                        <input id="propMin" type="number" step="any" placeholder="không giới hạn" value="${el.minValue ?? ''}" /></div>
+                    <div class="prop-field"><label>Lớn nhất cho phép</label>
+                        <input id="propMax" type="number" step="any" placeholder="không giới hạn" value="${el.maxValue ?? ''}" /></div>
+                </div>
+                <p class="hint small pp-hint" id="numWriteHint">Chỉ Project tag mới ghi được; System tag, biến MS, MC chỉ đọc. Giới hạn tính theo giá trị đang HIỂN THỊ (sau khi dời dấu chấm).</p>`) + `</div>` },
+        { id: 'format', label: 'Định dạng', html:
+            ppCard('Định dạng số', `
+                <div class="prop-grid-2">
+                    <div class="prop-field"><label>Dời dấu chấm (lần)</label>
+                        <input id="propShift" type="number" min="0" max="9" step="1" value="${el.decimalShift ?? 0}" /></div>
+                    <div class="prop-field"><label>Số chữ số sau dấu chấm</label>
+                        <input id="propDecimals" type="number" min="0" max="9" step="1" placeholder="tự động" value="${el.decimals ?? ''}" /></div>
+                </div>
+                <p class="hint small pp-hint" id="numShiftHint"></p>
+                <div class="prop-grid-2" style="margin-top:10px;">
+                    <div class="prop-field"><label>Chữ đứng trước</label>
+                        <input id="propPrefix" type="text" maxlength="32" value="${escHtml(el.prefix)}" /></div>
+                    <div class="prop-field"><label>Đơn vị / chữ đứng sau</label>
+                        <input id="propSuffix" type="text" maxlength="32" placeholder="vd  °C" value="${escHtml(el.suffix)}" /></div>
+                </div>`)
+            + ppCard('Định dạng chữ', `
+                <div class="prop-field"><label>Căn lề</label>${alignSelectHtml(el, 'center')}</div>
+                ${fontFieldsHtml(el)}`)
+            + ppCard('Ghi chú', `
+                <div class="prop-field"><label>Ghi chú (chỉ để nhận biết, không hiển thị)</label>
+                    <input id="propComment" type="text" maxlength="200" value="${escHtml(el.comment)}" /></div>`, 'wide') },
+        { id: 'style', label: 'Kiểu dáng', html: styleFieldsHtml(el) + effectsFieldsHtml(el) }
+    ]) + ppFooter();
 
     const $p = (id) => document.getElementById(id);
     const syncUi = () => {
@@ -1077,7 +1576,6 @@ async function renderNumberProps(el) {
         el.textAlign = $p('propAlign').value || null;
         el.comment = $p('propComment').value || null;
         applyFontFromForm(el);
-        applyPositionFieldsFromForm(el);
         applyStyleFieldsFromForm(el);
         applyEffectsFromForm(el);
     };
@@ -1159,18 +1657,32 @@ function renderLineStroke(div, el) {
 
 // Nut chuyen mat bang: to mau khi mat bang DANG XEM chinh la mat bang dich cua nut (de nhan biet dang o dau)
 const BTN_ACTIVE_BG = '#16a34a', BTN_ACTIVE_FG = '#ffffff';
+// Mặt bằng ĐANG XEM: bình thường là mặt bằng đang mở; trong iframe Header / Navigation là mặt bằng đỗ xe đang hiện ở khung chính
+function viewedFloor() {
+    if (!window.PG_PANEL) return CURRENT_FLOOR;
+    if (window.pgViewedFloor) return window.pgViewedFloor;
+    try { return window.parent.currentFloor || CURRENT_FLOOR; } catch { return CURRENT_FLOOR; }
+}
 function isButtonActive(el) {
     return el.type === 'Button' && el.buttonActiveEnabled !== false && !!el.targetFloorId
-        && String(el.targetFloorId).toLowerCase() === String(CURRENT_FLOOR).toLowerCase();
+        && String(el.targetFloorId).toLowerCase() === String(viewedFloor()).toLowerCase();
 }
 function applyButtonActiveStyle(div, el) {
     const on = isButtonActive(el);
     div.classList.toggle('is-active', on);
     if (!on) return;
-    const bg = el.activeBackgroundColor || BTN_ACTIVE_BG;
-    div.style.backgroundColor = bg;
-    div.style.color = el.activeTextColor || BTN_ACTIVE_FG;
-    div.style.boxShadow = `0 0 0 max(2px, calc(3 * var(--px))) ${bg}66`;      // vong sang quanh nut (cung mau nen, trong suot ~40%)
+    if (el.backgroundColor === 'transparent') {
+        // Nut "Khong to nen": trong suot o MOI mat bang (ke ca mat bang dich) - khong to nen, khong vong sang.
+        // Chi doi mau chu khi nguoi dung chu dong chon "Mau chu khi dang o do".
+        div.style.backgroundColor = 'transparent';
+        div.style.boxShadow = 'none';
+        if (el.activeTextColor) div.style.color = el.activeTextColor;
+    } else {
+        const bg = el.activeBackgroundColor || BTN_ACTIVE_BG;
+        div.style.backgroundColor = bg;
+        div.style.color = el.activeTextColor || BTN_ACTIVE_FG;
+        div.style.boxShadow = `0 0 0 max(2px, calc(3 * var(--px))) ${bg}66`;      // vong sang quanh nut (cung mau nen, trong suot ~40%)
+    }
     div.title = (el.label ? el.label + ' — ' : '') + 'đang ở mặt bằng này';
 }
 
@@ -1193,11 +1705,12 @@ function applyCommonStyle(div, el) {
     }
 
     // Bo goc (hinh chu nhat), mau chu / co chu ben trong hinh — theo thang do cua khung (--px)
-    if (el.type === 'Rectangle' && el.cornerRadius !== null && el.cornerRadius !== undefined)
+    if ((el.type === 'Rectangle' || el.type === 'Button' || el.type === 'Image') && el.cornerRadius !== null && el.cornerRadius !== undefined)
         div.style.borderRadius = `calc(${Number(el.cornerRadius)} * var(--px))`;
     if (el.textColor) div.style.color = el.textColor;
     if (el.fontSize) div.style.fontSize = `calc(${Number(el.fontSize)} * var(--px))`;
     if (el.fontBold === false) div.style.fontWeight = '400';
+    if (el.type === 'DateTime' && el.fontBold === true) div.style.fontWeight = '700';
     if (el.fontItalic) div.style.fontStyle = 'italic';
     if (el.type === 'Button') applyButtonActiveStyle(div, el);
 }
@@ -1215,6 +1728,7 @@ function canvasAspect() {
 }
 
 async function addElement(type) {
+    if (isPanelFloor(window.currentFloorData) && (type === 'ParkingSlot' || type === 'SlotStats')) return;   // không có cảm biến / camera / ô đỗ
     if (type === 'ParkingSlot') { openZonePicker(); return; } // vung nhan dien: chon tu danh sach vung da ve
     const payload = {
         type,
@@ -1252,6 +1766,14 @@ async function addElement(type) {
         Object.assign(payload, {
             width: 10, height: 6, valueMode: 'Display', decimalShift: 0, textAlign: 'center', fontSize: 16,
             backgroundColor: '#1a2540', borderColor: '#3b82f6', borderStyle: 'solid', borderWidth: 1
+        });
+    }
+
+    if (type === 'DateTime') {
+        Object.assign(payload, {
+            width: 18, height: 8, textAlign: 'center', fontSize: 20,
+            backgroundColor: '#1a2540', borderColor: '#3b82f6', borderStyle: 'solid', borderWidth: 1,
+            dtOptions: Object.assign({}, DT_DEFAULTS)
         });
     }
 
@@ -1551,21 +2073,30 @@ canvas.addEventListener('mousedown', (e) => {
     let box = null, moved = false;
 
     const rectOf = (ev) => ({ l: Math.min(x0, ev.clientX), t: Math.min(y0, ev.clientY), r: Math.max(x0, ev.clientX), b: Math.max(y0, ev.clientY) });
+    // Chọn đối tượng có TÂM nằm trong khung quét (chạm mép không tính) -> vùng chọn đúng bằng vùng nhìn thấy trong khung
     const hitsOf = (q) => [...canvas.querySelectorAll('.layout-el')].filter(n => {
         const r = n.getBoundingClientRect();
-        return r.right >= q.l && r.left <= q.r && r.bottom >= q.t && r.top <= q.b;
+        const cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+        return cx >= q.l && cx <= q.r && cy >= q.t && cy <= q.b;
     }).map(n => n.dataset.id);
+    const clearPreview = () => canvas.querySelectorAll('.layout-el.marquee-pre').forEach(n => n.classList.remove('marquee-pre'));
 
     const move = (ev) => {
         if (!moved && Math.abs(ev.clientX - x0) < 4 && Math.abs(ev.clientY - y0) < 4) return;
+        // Khung vẽ bằng PHẦN TRĂM của canvas: tỉ lệ không có đơn vị nên không lệch dù "Kích thước giao diện" (zoom toàn trang) khác 100%
         if (!moved) { moved = true; box = document.createElement('div'); box.className = 'layout-marquee'; canvas.appendChild(box); }
         const q = rectOf(ev), cr = canvas.getBoundingClientRect();
-        Object.assign(box.style, { left: `${q.l - cr.left}px`, top: `${q.t - cr.top}px`, width: `${q.r - q.l}px`, height: `${q.b - q.t}px` });
+        const pc = (v, total) => `${(v / (total || 1)) * 100}%`;
+        Object.assign(box.style, { left: pc(q.l - cr.left, cr.width), top: pc(q.t - cr.top, cr.height), width: pc(q.r - q.l, cr.width), height: pc(q.b - q.t, cr.height) });
+        // Xem trước: đối tượng sẽ được chọn sáng viền ngay trong lúc quét
+        const ids = new Set(hitsOf(q));
+        canvas.querySelectorAll('.layout-el').forEach(n => n.classList.toggle('marquee-pre', ids.has(n.dataset.id)));
     };
     const up = (ev) => {
         document.removeEventListener('mousemove', move);
         document.removeEventListener('mouseup', up);
         box?.remove();
+        clearPreview();
         if (!moved) { if (!additive) clearSelection(); return; }   // nhap vao vung trong: bo chon
         setSelection([...base, ...hitsOf(rectOf(ev))]);
     };
@@ -1772,6 +2303,45 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+// ---- Di chuyen bang phim mui ten (che do Build): moi lan nhan = 1 don vi (0.1 % khung, dung buoc cua o X / Y trong bang thuoc tinh);
+//      giu Shift = 10 don vi. Ap dung cho doi tuong / nhom dang chon. Ve ngay, luu (gop) sau khi ngung nhan ~0.25 s. ----
+const NUDGE_UNIT = 0.1;
+const nudgePending = new Set();
+let nudgeTimer = null;
+
+function flushNudge() {
+    nudgeTimer = null;
+    const list = [...nudgePending].map(id => elements.find(x => x.id === id)).filter(Boolean);
+    nudgePending.clear();
+    list.forEach(el => persistElement(el).catch(() => { /* loi mang: bo qua */ }));
+}
+
+document.addEventListener('keydown', (e) => {
+    const dir = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!dir || !editMode || e.ctrlKey || e.metaKey || e.altKey || drag || rsz) return;
+    if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;   // dang go chu / chon: mui ten dung cho o do
+    const zm = document.getElementById('zonePickModal');
+    if (zm && getComputedStyle(zm).display !== 'none') return;
+    const sel = selectedElements();
+    if (!sel.length) return;
+    e.preventDefault();
+
+    const step = NUDGE_UNIT * (e.shiftKey ? 10 : 1);
+    const r3 = (v) => Math.round(v * 1000) / 1000;
+    sel.forEach(el => {
+        const w = Number(el.width) || 0, h = Number(el.height) || 0;
+        const nx = r3(Math.min(Math.max(0, 100 - w), Math.max(0, Number(el.x) + dir[0] * step)));
+        const ny = r3(Math.min(Math.max(0, 100 - h), Math.max(0, Number(el.y) + dir[1] * step)));
+        if (nx === el.x && ny === el.y) return;
+        el.x = nx; el.y = ny;
+        refreshNode(el);
+        nudgePending.add(el.id);
+    });
+    updateResizeFrame();
+    clearTimeout(nudgeTimer);
+    nudgeTimer = setTimeout(flushNudge, 250);
+});
+
 // ---- Menu chuot phai ----
 let ctxMenu = null;
 function closeCtxMenu() { if (ctxMenu) { ctxMenu.remove(); ctxMenu = null; } }
@@ -1902,7 +2472,9 @@ function ensureResizeFrame() {
 }
 
 // Dat khung theo dung vi tri / kich thuoc / goc xoay hien tai cua doi tuong dang chon (doc tu style cua node).
-function updateResizeFrame() {
+function updateResizeFrame() { updateResizeFrameCore(); syncFormatTab(); }   // khung co gian + dong bo tab ribbon "Dinh dang"
+
+function updateResizeFrameCore() {
     const frame = ensureResizeFrame();
     const div = editMode && selectedId && selectedIds.size <= 1 ? canvas.querySelector(`.layout-el[data-id="${selectedId}"]`) : null;
     if (!div) { frame.hidden = true; return; }
@@ -2163,6 +2735,8 @@ function selectElement(id) {
         renderNumberProps(el);
     } else if (el.type === 'Text') {
         renderTextProps(el);
+    } else if (el.type === 'DateTime') {
+        renderDateTimeProps(el);
     } else {
         renderGenericProps(el);
     }
@@ -2172,6 +2746,10 @@ function selectElement(id) {
 // Chuyen sang mat bang khac bang cach dung lai bo chon mat bang cua floors.js
 // (dat gia tri roi phat su kien 'change' de floors.js tu cap nhat + phat 'floorchange').
 function navigateToFloor(floorId) {
+    // Iframe Header / Navigation: nút ấn điều khiển khung chính (trang cha)
+    if (window.PG_PANEL) { try { window.parent.navigateToFloor(floorId); } catch { /* khác nguồn: bỏ qua */ } return; }
+    const tgt = (window.floorList || []).find(f => f.id === floorId);
+    if (!editMode && tgt && tgt.kind && tgt.kind !== 'Normal') return;   // chạy: Header / Navigation có khung riêng, không mở như mặt bằng
     const sel = document.getElementById('floorSelect');
     if (!sel) return;
     if ([...sel.options].some(o => o.value === floorId)) {
@@ -2209,7 +2787,7 @@ function flushPending() {
 
 function bindLivePreview(el, applyForm) {
     if (live) clearTimeout(live.timer);
-    live = { el, applyForm, timer: null };
+    live = { el, applyForm: (e) => { applyForm(e); applyAnimFromForm(e); }, timer: null };
 }
 
 function onPropsEdit(e) {
@@ -2234,6 +2812,130 @@ function onPropsEdit(e) {
 propsPanel.addEventListener('input', onPropsEdit);
 propsPanel.addEventListener('change', onPropsEdit);
 
+// ---------------------------------------------------------------------------
+// Tab "Hiển thị / Vị trí" và "Màu sắc" (hiệu ứng động gắn biến) — có ở mọi loại đối tượng
+// ---------------------------------------------------------------------------
+const ANIM_BLINK = [['none', 'Không'], ['slow', 'Chậm'], ['fast', 'Nhanh']];
+const ANIM_STOP_DEFAULT_COLORS = ['#ef4444', '#22c55e', '#eab308', '#3b82f6'];
+
+function animStopRowHtml(s, i) {
+    return `<div class="anim-stop-row">
+        <input class="anim-limit" type="number" step="any" placeholder="ngưỡng ≥" value="${s?.limit ?? ''}" />
+        <input class="anim-color" type="color" value="${escHtml(s?.color || ANIM_STOP_DEFAULT_COLORS[i % 4])}" />
+        <select class="anim-blink">${ANIM_BLINK.map(([v, t]) => `<option value="${v}" ${(s?.blink || 'none') === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
+    </div>`;
+}
+
+function animAxisCard(p, title, refs, ax) {
+    const n = (id, v, d) => `<input id="anim${p}${id}" type="number" step="any" value="${v ?? d}" />`;
+    const ref = ax?.reference || 'start';
+    return ppCard(title, `
+        <div class="prop-field"><label>Biến / giá trị điều khiển vị trí</label>
+            ${varSelectHtml(`anim${p}Tag`, ax?.tag, isAnimVar, '— không dùng —')}</div>
+        <div class="prop-grid-2">
+            <div class="prop-field"><label>Giá trị từ</label>${n('VMin', ax?.valueMin, 0)}</div>
+            <div class="prop-field"><label>đến</label>${n('VMax', ax?.valueMax, 100)}</div>
+            <div class="prop-field"><label>Vị trí từ (%)</label>${n('PMin', ax?.posMin, 0)}</div>
+            <div class="prop-field"><label>đến (%)</label>${n('PMax', ax?.posMax, 100)}</div>
+        </div>
+        <div class="prop-field"><label>Điểm tham chiếu của đối tượng</label>
+            <select id="anim${p}Ref">${refs.map(([v, t]) => `<option value="${v}" ${ref === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>`);
+}
+
+function animTabs(el) {
+    const a = el.animation || {};
+    const c = a.colors || {};
+    const stops = (c.stops || []).slice().sort((x, y) => x.limit - y.limit);
+    const rows = Math.max(4, stops.length);
+    return [
+        { id: 'anim-pos', label: 'Hiển thị / Vị trí', html:
+            ppCard('Hiển thị (Visibility)', `
+                <div class="prop-field"><label>Biến điều khiển ẩn / hiện</label>
+                    ${varSelectHtml('animVisTag', a.visibilityTag, isAnimVar, '— luôn hiển thị —')}</div>
+                <label class="checkbox-label"><input type="checkbox" id="animVisInv" ${a.visibilityInvert ? 'checked' : ''} /> Đảo: ẩn khi biến khác 0</label>
+                ${ppHint('Biến khác 0 (hoặc true) → hiện đối tượng; bằng 0 → ẩn. Hiệu ứng chỉ chạy ở chế độ ▶️ Chạy.')}`, 'wide')
+            + animAxisCard('H', 'Vị trí ngang (Horizontal)', [['start', 'TRÁI (Left)'], ['center', 'GIỮA (Center)'], ['end', 'PHẢI (Right)']], a.horizontal)
+            + animAxisCard('V', 'Vị trí dọc (Vertical)', [['start', 'TRÊN (Top)'], ['center', 'GIỮA (Center)'], ['end', 'DƯỚI (Bottom)']], a.vertical)
+            + ppCard('Slider / Gestures', `
+                <label class="checkbox-label" style="margin-bottom:10px;"><input type="checkbox" id="animSlider" ${a.sliderEnabled ? 'checked' : ''} /> Cho kéo đối tượng ở chế độ Chạy (ghi giá trị về biến)</label>
+                <div class="prop-field"><label>Vô hiệu hoá khi biến khác 0</label>
+                    ${varSelectHtml('animSliderDis', a.sliderDisableTag, isAnimVar, '— luôn cho kéo —')}</div>
+                ${ppHint('Slider cần chọn biến ở Vị trí ngang và / hoặc dọc, và biến đó phải là <b>Project tag</b> (System tag, biến MS, MC chỉ đọc). Kéo trong dải Vị trí thì giá trị biến chạy trong dải Giá trị.')}`, 'wide') },
+        { id: 'anim-color', label: 'Màu sắc', html:
+            ppCard('Đổi màu theo ngưỡng (By Limit)', `
+                <div class="prop-field"><label>Biến / giá trị điều khiển màu</label>
+                    ${varSelectHtml('animCTag', c.tag, isAnimVar, '— không đổi màu —')}</div>
+                <div class="prop-field"><label>Áp dụng màu cho</label>
+                    <div class="prop-inline">
+                        <label class="checkbox-label"><input type="checkbox" id="animCFill" ${c.fill === false ? '' : 'checked'} /> Nền</label>
+                        <label class="checkbox-label"><input type="checkbox" id="animCBorder" ${c.border ? 'checked' : ''} /> Viền</label>
+                        <label class="checkbox-label"><input type="checkbox" id="animCText" ${c.text ? 'checked' : ''} /> Chữ</label>
+                    </div></div>
+                ${ppHint('Giá trị biến ≥ ngưỡng nào (lấy ngưỡng lớn nhất thoả mãn) thì dùng màu của ngưỡng đó; nhỏ hơn mọi ngưỡng thì giữ màu gốc. Dòng để trống ngưỡng sẽ bị bỏ qua. Đường thẳng đổi màu nét vẽ.')}`)
+            + ppCard('Bảng ngưỡng màu', `
+                <div class="anim-stop-row anim-stop-head"><span>Ngưỡng (≥)</span><span>Màu</span><span>Nhấp nháy</span></div>
+                <div id="animStops">${Array.from({ length: rows }, (_, i) => animStopRowHtml(stops[i], i)).join('')}</div>
+                <button type="button" class="btn secondary btn-sm" id="animAddStop" style="margin-top:8px;">＋ Thêm ngưỡng</button>`) }
+    ];
+}
+
+// Doc 2 tab hieu ung dong tu form -> el.animation (null khi khong dung hieu ung nao)
+function applyAnimFromForm(el) {
+    const $a = (id) => document.getElementById(id);
+    if (!$a('animVisTag')) return;                         // hop thoai khong co tab hieu ung
+    const num = (id, d) => { const v = parseFloat(String($a(id).value).replace(',', '.')); return Number.isFinite(v) ? v : d; };
+    const axis = (p) => {
+        const tag = $a(`anim${p}Tag`).value || null;
+        if (!tag) return null;
+        return { tag, valueMin: num(`anim${p}VMin`, 0), valueMax: num(`anim${p}VMax`, 100), posMin: num(`anim${p}PMin`, 0), posMax: num(`anim${p}PMax`, 100), reference: $a(`anim${p}Ref`).value };
+    };
+    const stops = [];
+    document.querySelectorAll('#animStops .anim-stop-row').forEach(r => {
+        const lim = parseFloat(String(r.querySelector('.anim-limit').value).replace(',', '.'));
+        if (Number.isFinite(lim)) stops.push({ limit: lim, color: r.querySelector('.anim-color').value, blink: r.querySelector('.anim-blink').value });
+    });
+    stops.sort((x, y) => x.limit - y.limit);
+    const ctag = $a('animCTag').value || null;
+    const a = {
+        visibilityTag: $a('animVisTag').value || null,
+        visibilityInvert: $a('animVisInv').checked,
+        horizontal: axis('H'),
+        vertical: axis('V'),
+        sliderEnabled: $a('animSlider').checked,
+        sliderDisableTag: $a('animSliderDis').value || null,
+        colors: ctag && stops.length ? { tag: ctag, fill: $a('animCFill').checked, border: $a('animCBorder').checked, text: $a('animCText').checked, stops } : null
+    };
+    if (!a.visibilityTag) a.visibilityInvert = false;
+    if (!a.horizontal && !a.vertical) { a.sliderEnabled = false; }
+    if (!a.sliderEnabled) a.sliderDisableTag = null;
+    el.animation = (a.visibilityTag || a.horizontal || a.vertical || a.colors) ? a : null;
+}
+
+// "＋ Thêm ngưỡng": them 1 dong vao bang (toi da 8)
+propsPanel.addEventListener('click', (e) => {
+    if (e.target.id !== 'animAddStop') return;
+    const box = document.getElementById('animStops');
+    const n = box.querySelectorAll('.anim-stop-row').length;
+    if (n >= 8) { e.target.disabled = true; return; }
+    box.insertAdjacentHTML('beforeend', animStopRowHtml(null, n));
+    if (n + 1 >= 8) e.target.disabled = true;
+    fitPropsDialog();
+});
+
+// Chuyen tab trong hop thoai thuoc tinh (nho tab dang xem theo loai doi tuong)
+propsPanel.addEventListener('click', (e) => {
+    const tab = e.target.closest('.pp-tab');
+    if (!tab) return;
+    propsPanel.querySelectorAll('.pp-tab').forEach(t => { const on = t === tab; t.classList.toggle('active', on); t.setAttribute('aria-selected', on ? 'true' : 'false'); });
+    propsPanel.querySelectorAll('.pp-pane').forEach(p => { p.hidden = p.dataset.pane !== tab.dataset.pane; });
+    const cur = elements.find(x => x.id === selectedId);
+    if (cur) PP_TAB_MEMORY[cur.type] = tab.dataset.pane;
+    fitPropsDialog();
+});
+
+// Bo chon mau kieu Office (propUi.js): thay moi <input type="color"> trong hop thoai bang bang mau Theme / Standard / RGB
+if (window.PgColor) PgColor.autoEnhance(propsPanel);
+
 const DIRTY_NOTE_HTML = '<p id="propDirtyNote" class="prop-dirty-note" hidden>● Đã thay đổi — sẽ tự lưu khi bạn chọn đối tượng khác (hoặc bấm 💾 Lưu ngay).</p>';
 
 async function persistAndRefresh(el) {
@@ -2247,47 +2949,108 @@ async function persistAndRefresh(el) {
 // ---------------------------------------------------------------------------
 // Cac o nhap dung chung cho MOI loai doi tuong: vi tri, kich thuoc, mau sac, vien
 // ---------------------------------------------------------------------------
-function positionFieldsHtml(el, opts = {}) {
-    const wLabel = opts.line ? 'Chiều dài' : 'Rộng';
-    const hLabel = opts.line ? 'Vùng chọn (cao)' : 'Cao';
-    return `
-        <div class="prop-section-title">Vị trí &amp; kích thước (%)</div>
-        <div class="prop-grid-2">
-            <div class="prop-field"><label>X</label><input id="propX" type="number" step="0.1" value="${Number(el.x).toFixed(1)}" /></div>
-            <div class="prop-field"><label>Y</label><input id="propY" type="number" step="0.1" value="${Number(el.y).toFixed(1)}" /></div>
-            <div class="prop-field"><label>${wLabel}</label><input id="propWidth" type="number" step="0.1" min="1" value="${Number(el.width).toFixed(1)}" /></div>
-            <div class="prop-field"><label>${hLabel}</label><input id="propHeight" type="number" step="0.1" min="1" value="${Number(el.height).toFixed(1)}" /></div>
-        </div>
-    `;
+// --- Bố cục hộp thuộc tính: tab + thẻ (card). Vị trí / kích thước / xoay / lớp KHÔNG nằm ở đây
+//     mà ở tab ribbon "Định dạng" (xem phần FORMAT TAB bên dưới). ---
+const PP_TAB_MEMORY = {};   // nhớ tab đang xem theo loại đối tượng
+const ppCard = (title, body, cls = '', attrs = '') =>
+    `<section class="pp-card ${cls}" ${attrs}>${title ? `<header class="pp-card-h">${title}</header>` : ''}<div class="pp-card-b">${body}</div></section>`;
+const ppHint = (t) => `<p class="hint small pp-hint">${t}</p>`;
+
+// tabs: [{ id, label, html }] — nhiều tab thì hiện dải tab, 1 tab thì chỉ hiện nội dung
+function ppTabs(type, tabs) {
+    const cur = elements.find(x => x.id === selectedId);
+    if (cur && !tabs.some(t => t.id === 'anim-pos')) tabs = [...tabs, ...animTabs(cur)];   // moi loai doi tuong deu co hieu ung dong
+    let act = PP_TAB_MEMORY[type];
+    if (!tabs.some(t => t.id === act)) act = tabs[0].id;
+    const strip = tabs.length > 1
+        ? `<div class="pp-tabs" role="tablist">${tabs.map(t =>
+            `<button type="button" class="pp-tab ${t.id === act ? 'active' : ''}" role="tab" aria-selected="${t.id === act}" data-pane="${t.id}">${t.label}</button>`).join('')}</div>`
+        : '';
+    return strip + tabs.map(t => `<div class="pp-pane" data-pane="${t.id}" ${t.id === act ? '' : 'hidden'}>${t.html}</div>`).join('');
 }
 
-function applyPositionFieldsFromForm(el) {
-    const num = (id, fallback) => {
-        const v = parseFloat(document.getElementById(id).value);
-        return Number.isFinite(v) ? v : fallback;
-    };
-    el.width = Math.min(100, Math.max(1, num('propWidth', el.width)));
-    el.height = Math.min(100, Math.max(1, num('propHeight', el.height)));
-    el.x = Math.min(100 - el.width, Math.max(0, num('propX', el.x)));
-    el.y = Math.min(100 - el.height, Math.max(0, num('propY', el.y)));
+const ppFooter = (delLabel = '🗑️ Xoá', saveId = 'savePropsBtn') => `
+    ${DIRTY_NOTE_HTML}
+    <div class="pp-footer">
+        <button id="deleteElBtn" class="btn secondary">${delLabel}</button>
+        <button id="${saveId}" class="btn primary">✓ Áp dụng</button>
+    </div>`;
+
+// Vùng xem ảnh + chọn / tải / bỏ ảnh (dùng cho Hình ảnh và các ảnh trạng thái của Đèn / Công tắc)
+// p: { urlId, upId, clrId, fileId, viewId, value, placeholder, small, emptyHtml }
+function imgPickHtml(p) {
+    return `
+        <div class="pp-img ${p.small ? 'sm' : ''}">
+            <div class="pp-img-view" id="${p.viewId}" title="Vùng xem trước ảnh"></div>
+            <div class="pp-img-ctrl">
+                <input id="${p.urlId}" type="text" placeholder="${escHtml(p.placeholder || 'Dán URL ảnh hoặc tải lên…')}" value="${escHtml(p.value)}" />
+                <div class="prop-inline">
+                    <button type="button" class="btn secondary" id="${p.upId}">📁 Tải ảnh lên</button>
+                    <button type="button" class="btn secondary" id="${p.clrId}">✕ Bỏ ảnh</button>
+                </div>
+                <input type="file" id="${p.fileId}" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp" hidden />
+                <div class="pp-img-meta" id="${p.viewId}Meta"></div>
+            </div>
+        </div>`;
 }
+
+// emptyHtml: nội dung vùng xem khi chưa có ảnh (vd chấm màu mặc định của đèn)
+function bindImgPick(p) {
+    const q = (id) => document.getElementById(id);
+    const inp = q(p.urlId), view = q(p.viewId), meta = q(p.viewId + 'Meta'), file = q(p.fileId);
+    const show = () => {
+        const v = inp.value.trim();
+        view.textContent = ''; meta.textContent = ''; meta.classList.remove('err');
+        if (!v) {
+            const e = document.createElement('div');
+            e.className = 'pp-img-empty';
+            e.innerHTML = p.emptyHtml || '<span>🖼️</span><span>Chưa có ảnh</span>';
+            view.appendChild(e);
+            return;
+        }
+        const img = document.createElement('img');
+        img.alt = ''; img.draggable = false;
+        img.onload = () => { meta.textContent = `${img.naturalWidth} × ${img.naturalHeight} px`; };
+        img.onerror = () => { meta.textContent = 'Không tải được ảnh — kiểm tra lại URL.'; meta.classList.add('err'); };
+        img.src = v;
+        view.appendChild(img);
+    };
+    show();
+    inp.addEventListener('input', show);
+    q(p.upId).addEventListener('click', () => file.click());
+    q(p.clrId).addEventListener('click', () => { inp.value = ''; inp.dispatchEvent(new Event('input', { bubbles: true })); });
+    file.addEventListener('change', async () => {
+        const f = file.files[0];
+        if (!f) return;
+        const fd = new FormData();
+        fd.append('image', f);
+        try {
+            const r = await fetch('/api/layout/upload-image', { method: 'POST', body: fd });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.message || 'Không tải được ảnh.');
+            inp.value = d.url;
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+        } catch (err) { alert(err.message || 'Không tải được ảnh.'); }
+        file.value = '';
+    });
+}
+
+// Tương thích mã cũ: vị trí / kích thước nay chỉnh ở tab ribbon "Định dạng" nên hộp thuộc tính không còn ô nhập
+function applyPositionFieldsFromForm() { /* không còn dùng */ }
 
 function styleFieldsHtml(el, opts = {}) {
     const style = el.borderStyle || 'solid';
     const hasBg = !!el.backgroundColor && el.backgroundColor !== 'transparent';
     const shapeFill = opts.shape ? `
-        <div class="prop-field">
-            <label class="checkbox-label">
-                <input type="checkbox" id="propNoFill" ${el.backgroundColor === 'transparent' ? 'checked' : ''} />
-                Không tô nền (trong suốt)
-            </label>
-        </div>
-        <div class="prop-field">
+        <label class="checkbox-label" style="margin-top:10px;">
+            <input type="checkbox" id="propNoFill" ${el.backgroundColor === 'transparent' ? 'checked' : ''} />
+            Không tô nền (trong suốt)
+        </label>
+        <div class="prop-field" style="margin-top:10px;">
             <label>Độ đậm màu nền: <span id="propFillOpacityVal">${el.fillOpacity ?? 100}</span>%</label>
             <input id="propFillOpacity" type="range" min="0" max="100" step="5" value="${el.fillOpacity ?? 100}" />
         </div>` : '';
-    return `
-        <div class="prop-section-title">Màu sắc &amp; viền</div>
+    const bg = ppCard('Màu nền', `
         <div class="prop-field">
             <label>Màu nền</label>
             <div class="prop-inline">
@@ -2298,7 +3061,8 @@ function styleFieldsHtml(el, opts = {}) {
                 </label>
             </div>
         </div>
-        ${shapeFill}
+        ${shapeFill}`);
+    const border = ppCard('Đường viền', `
         <div class="prop-field">
             <label>Loại đường viền</label>
             <select id="propBorderStyle">
@@ -2319,8 +3083,8 @@ function styleFieldsHtml(el, opts = {}) {
                        placeholder="mặc định" value="${el.borderWidth ?? ''}" />
             </div>
         </div>
-        <p class="hint small">Để trống "Độ dày viền" = giữ kiểu viền mặc định của loại đối tượng.</p>
-    `;
+        ${ppHint('Để trống "Độ dày viền" = giữ kiểu viền mặc định của loại đối tượng.')}`);
+    return (opts.corner ? cornerFieldsHtml(el) : '') + bg + border;
 }
 
 function applyStyleFieldsFromForm(el) {
@@ -2339,10 +3103,59 @@ function applyStyleFieldsFromForm(el) {
     el.borderWidth = bw === '' ? null : Math.max(0, parseFloat(bw) || 0);
     el.borderStyle = document.getElementById('propBorderStyle').value;
     el.borderColor = document.getElementById('propBorderColor').value;
+    applyEffectsFromForm(el);
+}
+
+// ---------------------------------------------------------------------------
+// Bo goc cho Nut an / Hinh anh
+//   cornerRadius: null = mac dinh theo loai | 0 = vuong goc | N = N "px thiet ke" | 500 = bo tron het co
+//   (nut -> vien thuoc, anh vuong -> hinh tron). Phong theo khung giong chu / vien (--px).
+// ---------------------------------------------------------------------------
+const CORNER_FULL = 500;
+
+function cornerFieldsHtml(el) {
+    const r = el.cornerRadius;
+    const mode = r === null || r === undefined ? 'default' : r <= 0 ? 'square' : r >= CORNER_FULL ? 'full' : 'custom';
+    const opt = (v, t) => `<option value="${v}" ${mode === v ? 'selected' : ''}>${t}</option>`;
+    return ppCard('Góc bo tròn', `
+        <div class="prop-grid-2">
+            <div class="prop-field"><label>Kiểu bo góc</label>
+                <select id="propCornerMode">
+                    ${opt('default', 'Mặc định')}
+                    ${opt('square', 'Vuông góc (không bo)')}
+                    ${opt('custom', 'Tuỳ chọn (px)')}
+                    ${opt('full', 'Bo tròn hết cỡ')}
+                </select></div>
+            <div class="prop-field" id="propCornerPxBox" style="${mode === 'custom' ? '' : 'display:none;'}">
+                <label>Bán kính (px)</label>
+                <input id="propCornerPx" type="number" min="1" max="${CORNER_FULL - 1}" step="1" value="${mode === 'custom' ? r : 12}" /></div>
+        </div>
+        ${ppHint('"Bo tròn hết cỡ": nút thành hình viên thuốc, ảnh vuông thành hình tròn.')}`);
+}
+
+function applyCornerFromForm(el) {
+    const modeEl = document.getElementById('propCornerMode');
+    if (!modeEl) return;
+    const mode = modeEl.value;
+    if (mode === 'square') el.cornerRadius = 0;
+    else if (mode === 'full') el.cornerRadius = CORNER_FULL;
+    else if (mode === 'custom') {
+        const v = parseFloat(document.getElementById('propCornerPx').value);
+        el.cornerRadius = Number.isFinite(v) && v > 0 ? Math.min(v, CORNER_FULL - 1) : null;
+    } else el.cornerRadius = null;
+}
+
+function bindCornerFields() {
+    const m = document.getElementById('propCornerMode'), box = document.getElementById('propCornerPxBox');
+    if (m && box) m.addEventListener('change', () => { box.style.display = m.value === 'custom' ? '' : 'none'; });
+}
+
+function bindFillOpacityLabel() {
+    const fo = document.getElementById('propFillOpacity');
+    if (fo) fo.addEventListener('input', () => { document.getElementById('propFillOpacityVal').textContent = fo.value; });
 }
 
 async function saveCommonAndRefresh(el) {
-    applyPositionFieldsFromForm(el);
     applyStyleFieldsFromForm(el);
     await persistAndRefresh(el);
 }
@@ -2383,38 +3196,27 @@ async function renderStatsProps(el) {
             </div>
         </div>`;
 
-    propsPanel.innerHTML = `
-        <h3>Thống kê chỗ đỗ · tầng ${escHtml(CURRENT_FLOOR)}</h3>
-        <p class="hint small" style="margin-top:0;">
-            Hiện: <strong>${st.free}</strong> trống · <strong>${st.occupied}</strong> có xe · <strong>${st.error}</strong> lỗi
-            (camera: ${st.cameraFree ?? st.free} / ${st.cameraOccupied ?? st.occupied} / ${st.cameraError ?? st.error}
-            · cảm biến: ${st.sensorFree ?? 0} / ${st.sensorOccupied ?? 0} / ${st.sensorError ?? 0};
-            ${st.camerasError} camera không lấy được ảnh). Số liệu = camera + tổng các biến MS đã thêm, cập nhật realtime.
-        </p>
-
-        <div class="prop-section-title">Số liệu hiển thị</div>
-        ${STAT_DEFS.map(defBlock).join('')}
-        <p class="hint small">Chỉ liệt kê biến MS đếm đúng trạng thái của số liệu (tạo ở Hệ thống › Cảm biến › Dữ liệu). Bỏ chọn "Tính từ camera" nếu chỉ muốn dùng cảm biến.</p>
-
-        <div class="prop-section-title">Cách hiển thị</div>
-        <div class="prop-field"><label>Hướng sắp xếp</label>
-            <select id="propStatOrient">
-                <option value="Vertical" ${orient === 'Vertical' ? 'selected' : ''}>Dọc (xếp từ trên xuống)</option>
-                <option value="Horizontal" ${orient === 'Horizontal' ? 'selected' : ''}>Ngang (xếp từ trái sang phải)</option>
-            </select></div>
-        <div class="prop-grid-2">
-            <div class="prop-field"><label>Cỡ chữ số (px)</label><input id="propStatNumSize" type="number" min="1" max="200" step="1" placeholder="mặc định 30" value="${el.fontSize ?? ''}" /></div>
-            <div class="prop-field"><label>Cỡ chữ nhãn (px)</label><input id="propStatLblSize" type="number" min="1" max="200" step="1" placeholder="mặc định 12" value="${el.labelFontSize ?? ''}" /></div>
-        </div>
-
-        ${positionFieldsHtml(el)}
-        ${styleFieldsHtml(el)}
-        ${DIRTY_NOTE_HTML}
-        <div class="prop-actions">
-            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
-            <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
-        </div>
-    `;
+    propsPanel.innerHTML = ppTabs(el.type, [
+        { id: 'values', label: 'Số liệu', html:
+            ppCard(`Thống kê chỗ đỗ · tầng ${escHtml(CURRENT_FLOOR)}`, `
+                <p class="hint small pp-hint">Hiện: <strong>${st.free}</strong> trống · <strong>${st.occupied}</strong> có xe · <strong>${st.error}</strong> lỗi
+                (camera: ${st.cameraFree ?? st.free} / ${st.cameraOccupied ?? st.occupied} / ${st.cameraError ?? st.error}
+                · cảm biến: ${st.sensorFree ?? 0} / ${st.sensorOccupied ?? 0} / ${st.sensorError ?? 0};
+                ${st.camerasError} camera không lấy được ảnh). Số liệu = camera + tổng các biến MS đã thêm, cập nhật realtime.</p>`, 'wide')
+            + STAT_DEFS.map(d => ppCard('', defBlock(d))).join('')
+            + ppCard('', ppHint('Chỉ liệt kê biến MS đếm đúng trạng thái của số liệu (tạo ở Hệ thống › Cảm biến › Dữ liệu). Bỏ chọn "Tính từ camera" nếu chỉ muốn dùng cảm biến.'), 'wide') },
+        { id: 'display', label: 'Cách hiển thị', html: ppCard('Cách hiển thị', `
+            <div class="prop-field"><label>Hướng sắp xếp</label>
+                <select id="propStatOrient">
+                    <option value="Vertical" ${orient === 'Vertical' ? 'selected' : ''}>Dọc (xếp từ trên xuống)</option>
+                    <option value="Horizontal" ${orient === 'Horizontal' ? 'selected' : ''}>Ngang (xếp từ trái sang phải)</option>
+                </select></div>
+            <div class="prop-grid-2">
+                <div class="prop-field"><label>Cỡ chữ số (px)</label><input id="propStatNumSize" type="number" min="1" max="200" step="1" placeholder="mặc định 30" value="${el.fontSize ?? ''}" /></div>
+                <div class="prop-field"><label>Cỡ chữ nhãn (px)</label><input id="propStatLblSize" type="number" min="1" max="200" step="1" placeholder="mặc định 12" value="${el.labelFontSize ?? ''}" /></div>
+            </div>`, 'wide') },
+        { id: 'style', label: 'Kiểu dáng', html: styleFieldsHtml(el) + effectsFieldsHtml(el) }
+    ]) + ppFooter();
 
     const q = (id) => document.getElementById(id);
     const lower = (n) => String(n).toLowerCase();
@@ -2466,7 +3268,6 @@ async function renderStatsProps(el) {
         const fs = parseFloat(q('propStatNumSize').value), ls = parseFloat(q('propStatLblSize').value);
         el.fontSize = Number.isFinite(fs) && fs > 0 ? fs : null;
         el.labelFontSize = Number.isFinite(ls) && ls > 0 ? ls : null;
-        applyPositionFieldsFromForm(el);
         applyStyleFieldsFromForm(el);
     };
     bindLivePreview(el, applyForm);
@@ -2483,65 +3284,27 @@ async function renderStatsProps(el) {
 // ---------------------------------------------------------------------------
 // Chon anh tu may: tai len /api/layout/upload-image roi dien URL tra ve vao o (kich hoat xem truoc truc tiep)
 function bindImageUpload() {
-    const inp = document.getElementById('propImageUrl'), file = document.getElementById('propImgFile');
     const fo = document.getElementById('propFillOpacity');
     if (fo) fo.addEventListener('input', () => { document.getElementById('propFillOpacityVal').textContent = fo.value; });
-    document.getElementById('propImgUp').addEventListener('click', () => file.click());
-    document.getElementById('propImgClr').addEventListener('click', () => {
-        inp.value = '';
-        inp.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    file.addEventListener('change', async () => {
-        const f = file.files[0];
-        if (!f) return;
-        const fd = new FormData();
-        fd.append('image', f);
-        try {
-            const r = await fetch('/api/layout/upload-image', { method: 'POST', body: fd });
-            const d = await r.json().catch(() => ({}));
-            if (!r.ok) throw new Error(d.message || 'Không tải được ảnh.');
-            inp.value = d.url;
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-        } catch (err) { alert(err.message || 'Không tải được ảnh.'); }
-        file.value = '';
-    });
+    bindImgPick({ urlId: 'propImageUrl', upId: 'propImgUp', clrId: 'propImgClr', fileId: 'propImgFile', viewId: 'propImgView' });
 }
 
 function renderGenericProps(el) {
-    let fieldHtml = '';
-    if (el.type === 'Text') {
-        fieldHtml = `<div class="prop-field"><label>Nội dung</label><textarea id="propContent" rows="3">${escHtml(el.content)}</textarea></div>`;
-    } else if (el.type === 'Image') {
-        fieldHtml = `
-            <div class="prop-field"><label>Hình ảnh</label>
-                <input id="propImageUrl" type="text" placeholder="Chọn ảnh từ máy hoặc dán URL (https://...)" value="${escHtml(el.imageUrl)}" />
-                <div class="prop-inline" style="margin-top:6px;">
-                    <button type="button" class="btn secondary" id="propImgUp" style="padding:6px;">📁 Chọn ảnh từ máy…</button>
-                    <button type="button" class="btn secondary" id="propImgClr" style="padding:6px;">✕ Bỏ ảnh</button>
-                </div>
-                <input type="file" id="propImgFile" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp" hidden />
-                <p class="hint small" style="margin:4px 0 0;">PNG/JPG/GIF/WEBP/BMP, tối đa 5 MB. Ảnh PNG/WEBP nền trong suốt nên tích "Không tô nền (trong suốt)" bên dưới.</p>
-            </div>`;
-    }
+    // Hiện chỉ còn loại Hình ảnh đi qua đây (Text có hàm riêng)
+    const imageTab = ppCard('Ảnh hiển thị', imgPickHtml({
+        urlId: 'propImageUrl', upId: 'propImgUp', clrId: 'propImgClr', fileId: 'propImgFile', viewId: 'propImgView', value: el.imageUrl
+    }) + ppHint('PNG/JPG/GIF/WEBP/BMP, tối đa 5 MB. Ảnh PNG/WEBP nền trong suốt nên tích "Không tô nền (trong suốt)" ở tab Kiểu dáng.'), 'wide');
 
-    propsPanel.innerHTML = `
-        <h3>${typeLabel(el.type)}</h3>
-        ${fieldHtml}
-        ${positionFieldsHtml(el)}
-        ${styleFieldsHtml(el, { shape: el.type === 'Image' })}
-        ${DIRTY_NOTE_HTML}
-        <div class="prop-actions">
-            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
-            <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
-        </div>
-    `;
+    propsPanel.innerHTML = ppTabs(el.type, [
+        { id: 'image', label: 'Hình ảnh', html: imageTab },
+        { id: 'style', label: 'Kiểu dáng', html: styleFieldsHtml(el, { shape: true, corner: true }) + effectsFieldsHtml(el) }
+    ]) + ppFooter();
 
-    if (el.type === 'Image') bindImageUpload();
+    bindImageUpload(); bindCornerFields(); bindFillOpacityLabel();
 
     const applyForm = (el) => {
-        if (el.type === 'Text') el.content = document.getElementById('propContent').value;
-        if (el.type === 'Image') el.imageUrl = document.getElementById('propImageUrl').value;
-        applyPositionFieldsFromForm(el);
+        el.imageUrl = document.getElementById('propImageUrl').value;
+        applyCornerFromForm(el);
         applyStyleFieldsFromForm(el);
     };
     bindLivePreview(el, applyForm);
@@ -2554,47 +3317,22 @@ function renderGenericProps(el) {
 }
 
 // ---------------------------------------------------------------------------
-// Xoay / do mo / lop — dung chung cho Hinh chu nhat, Hinh tron, Duong thang
+// Độ mờ chung (xoay / lớp nằm ở tab ribbon "Định dạng")
 // ---------------------------------------------------------------------------
 function effectsFieldsHtml(el) {
-    return `
-        <div class="prop-section-title">Xoay, độ mờ &amp; lớp</div>
-        <div class="prop-grid-2">
-            <div class="prop-field"><label>Góc xoay (°)</label>
-                <input id="propRotation" type="number" min="-360" max="360" step="1" value="${Number(el.rotation ?? 0)}" /></div>
-            <div class="prop-field"><label>Độ mờ chung (%)</label>
-                <input id="propOpacity" type="number" min="0" max="100" step="5" value="${el.opacity ?? 100}" /></div>
-            <div class="prop-field"><label>Lớp (z-index)</label>
-                <input id="propZIndex" type="number" step="1" value="${el.zIndex ?? 0}" /></div>
-            <div class="prop-field"><label>Thứ tự lớp</label>
-                <div class="prop-inline">
-                    <button type="button" id="sendBackBtn" class="btn secondary" style="padding:6px;" title="Đưa ra sau cùng (dưới các đối tượng khác)">⬇ Sau</button>
-                    <button type="button" id="bringFrontBtn" class="btn secondary" style="padding:6px;" title="Đưa lên trên cùng">⬆ Trước</button>
-                </div></div>
-        </div>
-        <p class="hint small">Số lớp lớn nằm trên. Đưa hình xuống "Sau" để làm nền cho các ô đỗ / nút.</p>
-    `;
+    return ppCard('Độ mờ', `
+        <div class="prop-field"><label>Độ mờ chung của đối tượng (%)</label>
+            <input id="propOpacity" type="number" min="0" max="100" step="5" value="${el.opacity ?? 100}" /></div>
+        ${ppHint('100% = rõ nét, 0% = trong suốt hoàn toàn.')}`);
 }
 
-function bindEffectsButtons() {
-    const z = document.getElementById('propZIndex');
-    document.getElementById('sendBackBtn').addEventListener('click', () => {
-        z.value = Math.min(0, ...elements.map(e => e.zIndex || 0)) - 1;
-    });
-    document.getElementById('bringFrontBtn').addEventListener('click', () => {
-        z.value = Math.max(0, ...elements.map(e => e.zIndex || 0)) + 1;
-    });
-}
+function bindEffectsButtons() { /* không còn dùng: Xoay / Lớp nằm ở tab ribbon "Định dạng" */ }
 
 function applyEffectsFromForm(el) {
-    const rot = parseFloat(document.getElementById('propRotation').value);
-    el.rotation = Number.isFinite(rot) && rot !== 0 ? Math.max(-360, Math.min(360, rot)) : null;
-
-    const op = parseFloat(document.getElementById('propOpacity').value);
+    const o = document.getElementById('propOpacity');
+    if (!o) return;
+    const op = parseFloat(o.value);
     el.opacity = Number.isFinite(op) && op < 100 ? Math.max(0, op) : null;
-
-    const z = parseInt(document.getElementById('propZIndex').value, 10);
-    el.zIndex = Number.isFinite(z) ? Math.max(-1000, Math.min(1000, z)) : 0;
 }
 
 function clampIntoCanvas(el) {
@@ -2607,80 +3345,29 @@ function clampIntoCanvas(el) {
 // ---------------------------------------------------------------------------
 function renderShapeProps(el) {
     const isCircle = el.type === 'Circle';
-    const ar = canvasAspect();
-    const isRound = isCircle && Math.abs(el.height - el.width * ar) < 0.3;
 
-    const cornerField = isCircle ? '' : `
+    const shapeCard = isCircle ? '' : ppCard('Hình dạng', `
         <div class="prop-field"><label>Bo góc (px)</label>
-            <input id="propCorner" type="number" min="0" max="500" step="1" placeholder="vuông góc" value="${el.cornerRadius ?? ''}" /></div>`;
-    const roundField = isCircle ? `
-        <label class="checkbox-label" style="margin:2px 0 8px;">
-            <input type="checkbox" id="propKeepRound" ${isRound ? 'checked' : ''} />
-            Giữ hình tròn đều (tự tính chiều cao theo chiều rộng)
-        </label>` : '';
+            <input id="propCorner" type="number" min="0" max="500" step="1" placeholder="vuông góc" value="${el.cornerRadius ?? ''}" /></div>`);
 
-    propsPanel.innerHTML = `
-        <h3>${typeLabel(el.type)}</h3>
+    propsPanel.innerHTML = ppTabs(el.type, [
+        { id: 'content', label: 'Chữ trong hình', html: ppCard('Chữ trong hình (tuỳ chọn)', `
+            <div class="prop-field"><label>Nội dung</label>
+                <textarea id="propContent" rows="3">${escHtml(el.content)}</textarea></div>
+            ${fontFieldsHtml(el)}`, 'wide') },
+        { id: 'style', label: 'Kiểu dáng', html: shapeCard + styleFieldsHtml(el, { shape: true }) + effectsFieldsHtml(el) }
+    ]) + ppFooter();
 
-        <div class="prop-section-title">Chữ trong hình (tuỳ chọn)</div>
-        <div class="prop-field"><label>Nội dung</label>
-            <textarea id="propContent" rows="2">${escHtml(el.content)}</textarea></div>
-        <div class="prop-grid-2">
-            <div class="prop-field"><label>Màu chữ</label>
-                <input id="propTextColor" type="color" value="${escHtml(el.textColor || '#e6ebf5')}" /></div>
-            <div class="prop-field"><label>Cỡ chữ (px)</label>
-                <input id="propFontSize" type="number" min="1" max="200" step="1" placeholder="mặc định" value="${el.fontSize ?? ''}" /></div>
-        </div>
-
-        ${positionFieldsHtml(el)}
-        ${roundField}
-        ${cornerField ? `<div class="prop-grid-2">${cornerField}</div>` : ''}
-        ${styleFieldsHtml(el, { shape: true })}
-        ${effectsFieldsHtml(el)}
-
-        ${DIRTY_NOTE_HTML}
-        <div class="prop-actions">
-            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
-            <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
-        </div>
-    `;
-
-    bindEffectsButtons();
-    const fo = document.getElementById('propFillOpacity');
-    fo.addEventListener('input', () => { document.getElementById('propFillOpacityVal').textContent = fo.value; });
-
-    if (isCircle) {
-        const keep = document.getElementById('propKeepRound');
-        const syncHeight = () => {
-            if (!keep.checked) return;
-            const w = parseFloat(document.getElementById('propWidth').value) || el.width;
-            document.getElementById('propHeight').value = Math.min(100, w * ar).toFixed(1);
-        };
-        keep.addEventListener('change', syncHeight);
-        document.getElementById('propWidth').addEventListener('input', syncHeight);
-    }
+    bindFillOpacityLabel();
 
     const applyForm = (el) => {
         el.content = document.getElementById('propContent').value || null;
-
-        const tc = document.getElementById('propTextColor').value;
-        el.textColor = (tc.toLowerCase() !== '#e6ebf5' || el.textColor) ? tc : null;
-        const fs = parseFloat(document.getElementById('propFontSize').value);
-        el.fontSize = Number.isFinite(fs) && fs > 0 ? fs : null;
-
+        applyFontFromForm(el);
         if (!isCircle) {
             const cr = parseFloat(document.getElementById('propCorner').value);
             el.cornerRadius = Number.isFinite(cr) && cr > 0 ? cr : null;
         }
-
-        applyPositionFieldsFromForm(el);
-        if (isCircle && document.getElementById('propKeepRound').checked) {
-            el.height = el.width * ar;
-            if (el.height > 100) { el.height = 100; el.width = 100 / ar; }
-            clampIntoCanvas(el);
-        }
         applyStyleFieldsFromForm(el);
-        applyEffectsFromForm(el);
     };
     bindLivePreview(el, applyForm);
     document.getElementById('savePropsBtn').addEventListener('click', async () => {
@@ -2698,38 +3385,26 @@ function renderLineProps(el) {
     const arrow = el.lineArrow || 'none';
     const opt = (v, cur, text) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${text}</option>`;
 
-    propsPanel.innerHTML = `
-        <h3>Đường thẳng</h3>
-
-        <div class="prop-section-title">Nét vẽ</div>
-        <div class="prop-grid-2">
-            <div class="prop-field"><label>Màu đường</label>
-                <input id="propLineColor" type="color" value="${escHtml(el.borderColor || '#e6ebf5')}" /></div>
-            <div class="prop-field"><label>Độ dày (px)</label>
-                <input id="propLineWidth" type="number" min="1" max="30" step="1" value="${el.borderWidth ?? 3}" /></div>
-        </div>
-        <div class="prop-field"><label>Kiểu nét</label>
-            <select id="propLineStyle">
-                ${opt('solid', dash, 'Liền nét')}${opt('dashed', dash, 'Nét đứt')}${opt('dotted', dash, 'Nét chấm')}
-            </select></div>
-        <div class="prop-field"><label>Mũi tên</label>
-            <select id="propLineArrow">
-                ${opt('none', arrow, 'Không có')}${opt('end', arrow, 'Ở đầu cuối →')}
-                ${opt('start', arrow, 'Ở đầu đầu ←')}${opt('both', arrow, 'Cả hai đầu ↔')}
-            </select></div>
-
-        ${positionFieldsHtml(el, { line: true })}
-        <p class="hint small">Chiều dài tính theo % chiều rộng bản đồ. Dùng "Góc xoay" để vẽ đường đứng (90°) hoặc chéo; "Vùng chọn" chỉ là độ cao khung để dễ bấm chọn.</p>
-        ${effectsFieldsHtml(el)}
-
-        ${DIRTY_NOTE_HTML}
-        <div class="prop-actions">
-            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
-            <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
-        </div>
-    `;
-
-    bindEffectsButtons();
+    propsPanel.innerHTML = ppTabs(el.type, [
+        { id: 'stroke', label: 'Nét vẽ', html: ppCard('Nét vẽ', `
+            <div class="prop-grid-2">
+                <div class="prop-field"><label>Màu đường</label>
+                    <input id="propLineColor" type="color" value="${escHtml(el.borderColor || '#e6ebf5')}" /></div>
+                <div class="prop-field"><label>Độ dày (px)</label>
+                    <input id="propLineWidth" type="number" min="1" max="30" step="1" value="${el.borderWidth ?? 3}" /></div>
+            </div>
+            <div class="prop-field"><label>Kiểu nét</label>
+                <select id="propLineStyle">
+                    ${opt('solid', dash, 'Liền nét')}${opt('dashed', dash, 'Nét đứt')}${opt('dotted', dash, 'Nét chấm')}
+                </select></div>
+            <div class="prop-field"><label>Mũi tên</label>
+                <select id="propLineArrow">
+                    ${opt('none', arrow, 'Không có')}${opt('end', arrow, 'Ở đầu cuối →')}
+                    ${opt('start', arrow, 'Ở đầu đầu ←')}${opt('both', arrow, 'Cả hai đầu ↔')}
+                </select></div>`)
+            + effectsFieldsHtml(el)
+            + ppCard('Gợi ý', ppHint('Chiều dài, vị trí và <b>góc xoay</b> chỉnh ở tab <b>Định dạng</b> trên thanh công cụ. Dùng góc 90° để vẽ đường đứng; "Cao" chỉ là độ cao vùng chọn để dễ bấm chọn.'), 'wide') }
+    ]) + ppFooter();
 
     const applyForm = (el) => {
         el.borderColor = document.getElementById('propLineColor').value;
@@ -2737,8 +3412,6 @@ function renderLineProps(el) {
         el.borderStyle = document.getElementById('propLineStyle').value;
         el.lineArrow = document.getElementById('propLineArrow').value;
         el.backgroundColor = null;
-
-        applyPositionFieldsFromForm(el);
         applyEffectsFromForm(el);
     };
     bindLivePreview(el, applyForm);
@@ -2760,43 +3433,41 @@ async function renderButtonProps(el) {
     if (selectedId !== el.id) return;   // da chon doi tuong khac trong luc cho tai danh sach mat bang
 
     const floorOptions = ['<option value="">— Không có hành động —</option>']
-        .concat(floors.map(f =>
+        .concat(floors.filter(f => !isPanelFloor(f)).map(f =>   // nút chỉ chuyển tới mặt bằng đỗ xe (Header / Navigation luôn hiển thị)
             `<option value="${f.id}" ${el.targetFloorId === f.id ? 'selected' : ''}>${f.id} — ${f.name}</option>`))
         .join('');
 
-    propsPanel.innerHTML = `
-        <h3>Nút ấn</h3>
-        <div class="prop-field">
-            <label>Nhãn nút</label>
-            <input id="propLabel" type="text" value="${escHtml(el.label)}" />
-        </div>
-        <div class="prop-field">
-            <label>Hành động khi bấm: chuyển đến mặt bằng</label>
-            <select id="propTargetFloor">${floorOptions}</select>
-        </div>
-        <p class="hint small">Hành động chỉ hoạt động ở chế độ "▶️ Chạy". Ở chế độ Build, bấm vào nút để chỉnh sửa.</p>
-        <div class="prop-section-title">Chữ trên nút</div>
-        <div class="prop-field"><label>Căn lề</label>${alignSelectHtml(el, 'center')}</div>
-        ${fontFieldsHtml(el, '#ffffff')}
-        <div class="prop-inline">
-            <label class="checkbox-label"><input type="checkbox" id="propBtnBold" ${el.fontBold === false ? '' : 'checked'} /> In đậm</label>
-            <label class="checkbox-label"><input type="checkbox" id="propBtnItalic" ${el.fontItalic ? 'checked' : ''} /> In nghiêng</label>
-        </div>
-        <div class="prop-section-title">Nhận biết mặt bằng đang xem</div>
-        <label class="checkbox-label"><input type="checkbox" id="propBtnActiveOn" ${el.buttonActiveEnabled === false ? '' : 'checked'} /> Đổi màu nút khi đang ở mặt bằng đích</label>
-        <div class="prop-grid-2">
-            <div class="prop-field"><label>Màu nền khi đang ở đó</label><input id="propBtnActiveBg" type="color" value="${el.activeBackgroundColor || BTN_ACTIVE_BG}" /></div>
-            <div class="prop-field"><label>Màu chữ khi đang ở đó</label><input id="propBtnActiveFg" type="color" value="${el.activeTextColor || BTN_ACTIVE_FG}" /></div>
-        </div>
-        <p class="hint small">Nút được tô màu (kèm vòng sáng) khi mặt bằng đang xem chính là mặt bằng đích của nút. Xem thử: chọn mặt bằng đích trùng với tầng đang thiết kế.</p>
-        ${positionFieldsHtml(el)}
-        ${styleFieldsHtml(el)}
-        ${DIRTY_NOTE_HTML}
-        <div class="prop-actions">
-            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
-            <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
-        </div>
-    `;
+    propsPanel.innerHTML = ppTabs(el.type, [
+        { id: 'button', label: 'Nút ấn', html:
+            ppCard('Nhãn & hành động', `
+                <div class="prop-field">
+                    <label>Nhãn nút</label>
+                    <input id="propLabel" type="text" value="${escHtml(el.label)}" />
+                </div>
+                <div class="prop-field">
+                    <label>Hành động khi bấm: chuyển đến mặt bằng</label>
+                    <select id="propTargetFloor">${floorOptions}</select>
+                </div>
+                ${ppHint('Hành động chỉ hoạt động ở chế độ "▶️ Chạy". Ở chế độ Build, bấm vào nút để chỉnh sửa.')}`)
+            + ppCard('Nhận biết mặt bằng đang xem', `
+                <label class="checkbox-label" style="margin-bottom:10px;"><input type="checkbox" id="propBtnActiveOn" ${el.buttonActiveEnabled === false ? '' : 'checked'} /> Đổi màu nút khi đang ở mặt bằng đích</label>
+                <div class="prop-grid-2">
+                    <div class="prop-field"><label>Màu nền khi đang ở đó</label><input id="propBtnActiveBg" type="color" value="${el.activeBackgroundColor || BTN_ACTIVE_BG}" /></div>
+                    <div class="prop-field"><label>Màu chữ khi đang ở đó</label><input id="propBtnActiveFg" type="color" value="${el.activeTextColor || BTN_ACTIVE_FG}" /></div>
+                </div>
+                ${ppHint('Nút được tô màu (kèm vòng sáng) khi mặt bằng đang xem chính là mặt bằng đích của nút. Nếu nút đang chọn "Không tô nền" thì luôn trong suốt ở mọi mặt bằng. Xem thử: chọn mặt bằng đích trùng với tầng đang thiết kế.')}`) },
+        { id: 'text', label: 'Chữ', html: ppCard('Chữ trên nút', `
+                <div class="prop-field"><label>Căn lề</label>${alignSelectHtml(el, 'center')}</div>
+                ${fontFieldsHtml(el, '#ffffff')}
+                <div class="prop-inline">
+                    <label class="checkbox-label"><input type="checkbox" id="propBtnBold" ${el.fontBold === false ? '' : 'checked'} /> In đậm</label>
+                    <label class="checkbox-label"><input type="checkbox" id="propBtnItalic" ${el.fontItalic ? 'checked' : ''} /> In nghiêng</label>
+                </div>`, 'wide') },
+        { id: 'style', label: 'Kiểu dáng', html: styleFieldsHtml(el, { shape: true, corner: true }) + effectsFieldsHtml(el) }
+    ]) + ppFooter();
+
+    bindCornerFields();
+    bindFillOpacityLabel();
 
     const applyForm = (el) => {
         el.label = document.getElementById('propLabel').value;
@@ -2809,7 +3480,7 @@ async function renderButtonProps(el) {
         const abg = document.getElementById('propBtnActiveBg').value, afg = document.getElementById('propBtnActiveFg').value;
         el.activeBackgroundColor = abg && abg.toLowerCase() !== BTN_ACTIVE_BG ? abg : null;      // = mac dinh thi khong luu
         el.activeTextColor = afg && afg.toLowerCase() !== BTN_ACTIVE_FG ? afg : null;
-        applyPositionFieldsFromForm(el);
+        applyCornerFromForm(el);
         applyStyleFieldsFromForm(el);
     };
     bindLivePreview(el, applyForm);
@@ -2828,62 +3499,44 @@ function renderSlotProps(el) {
     const slot = el.slot ?? { status: 'Empty', plateNumber: null, parkedAt: null, errorMessage: null };
     const parkedAtLocal = slot.parkedAt ? toLocalDateTimeInputValue(slot.parkedAt) : '';
 
-    propsPanel.innerHTML = `
-        <h3>Vị trí nhận diện${floorZoneCount > 1 ? ' · Zone ' + escHtml(slotZoneOf(el) || '—') : ''} · số ${escHtml(slotNumberOf(el))}</h3>
-        <div class="slot-live-status ${SLOT_STATUS_CLASS[slot.status]}">${SLOT_STATUS_LABEL[slot.status]}</div>
+    const LBL = { showStatusColor: 'Màu trạng thái (đỏ = có xe, vàng = lỗi camera, xanh = trống)', showStatusText: 'Chữ trạng thái (Lỗi / Đã đỗ / Còn trống)',
+        showPlate: 'Biển số xe đang đỗ', showEntryTime: 'Thời gian xe vào', showLastExitPlate: 'Biển xe gần nhất ra khỏi vị trí', showExitTime: 'Thời gian ra' };
 
-        <div class="prop-field">
-            <label>Trạng thái</label>
-            <select id="slotStatusSelect">
-                <option value="Empty" ${slot.status === 'Empty' ? 'selected' : ''}>Còn trống</option>
-                <option value="Occupied" ${slot.status === 'Occupied' ? 'selected' : ''}>Đã đỗ</option>
-                <option value="Error" ${slot.status === 'Error' ? 'selected' : ''}>Lỗi</option>
-            </select>
-        </div>
-
-        <div id="occupiedFields" class="prop-field" style="display:${slot.status === 'Occupied' ? 'block' : 'none'}">
-            <label>Biển số xe đã đỗ</label>
-            <input id="slotPlate" type="text" value="${slot.plateNumber ?? ''}" placeholder="51K-207.69" />
-            <label>Thời điểm đỗ</label>
-            <input id="slotParkedAt" type="datetime-local" value="${parkedAtLocal}" />
-        </div>
-
-        <div id="errorFields" class="prop-field" style="display:${slot.status === 'Error' ? 'block' : 'none'}">
-            <label>Mô tả lỗi</label>
-            <textarea id="slotError" rows="2" placeholder="Ví dụ: Camera mất kết nối">${slot.errorMessage ?? ''}</textarea>
-        </div>
-
-        <div class="slot-last-exit">
-            Xe ra gần nhất: <strong>${escHtml(fmtPlate(slot.lastExitPlate))}</strong> · lúc ${escHtml(fmtDateTime(slot.lastExitTime))}
-        </div>
-
-        <div class="prop-section-title">Hiển thị trên bản đồ</div>
-        ${DISPLAY_FIELDS.map(f => `
-        <label class="checkbox-label" style="margin-bottom:6px;">
-            <input type="checkbox" class="slot-display-chk" data-field="${f}" ${el[f] === false ? '' : 'checked'} />
-            ${{ showStatusColor: 'Màu trạng thái (đỏ = có xe, vàng = lỗi camera, xanh = trống)', showStatusText: 'Chữ trạng thái (Lỗi / Đã đỗ / Còn trống)',
-                showPlate: 'Biển số xe đang đỗ', showEntryTime: 'Thời gian xe vào', showLastExitPlate: 'Biển xe gần nhất ra khỏi vị trí',
-                showExitTime: 'Thời gian ra' }[f]}
-        </label>`).join('')}
-
-        ${positionFieldsHtml(el)}
-        ${styleFieldsHtml(el)}
-
-        ${DIRTY_NOTE_HTML}
-        <div class="prop-actions">
-            <button id="saveSlotBtn" class="btn primary">✓ Áp dụng</button>
-            <button id="deleteElBtn" class="btn secondary">🗑️ Gỡ khỏi bản đồ</button>
-        </div>
-        <p class="hint small">
-            Chỉnh tay trạng thái ở đây để test giao diện khi chưa có camera/model AI thật.
-            Khi AI hoạt động, trạng thái sẽ tự cập nhật realtime và ghi đè giá trị chỉnh tay.
-            Màu nền/viền mặc định của ô đỗ đổi theo trạng thái; chỉ đặt màu tuỳ chỉnh nếu muốn cố định.
-        </p>
-    `;
+    propsPanel.innerHTML = ppTabs(el.type, [
+        { id: 'status', label: 'Trạng thái', html:
+            ppCard(`Vị trí nhận diện${floorZoneCount > 1 ? ' · Zone ' + escHtml(slotZoneOf(el) || '—') : ''} · số ${escHtml(slotNumberOf(el))}`, `
+                <div class="slot-live-status ${SLOT_STATUS_CLASS[slot.status]}">${SLOT_STATUS_LABEL[slot.status]}</div>
+                <div class="prop-field">
+                    <label>Trạng thái</label>
+                    <select id="slotStatusSelect">
+                        <option value="Empty" ${slot.status === 'Empty' ? 'selected' : ''}>Còn trống</option>
+                        <option value="Occupied" ${slot.status === 'Occupied' ? 'selected' : ''}>Đã đỗ</option>
+                        <option value="Error" ${slot.status === 'Error' ? 'selected' : ''}>Lỗi</option>
+                    </select>
+                </div>
+                <div id="occupiedFields" style="display:${slot.status === 'Occupied' ? 'block' : 'none'}">
+                    <div class="prop-field"><label>Biển số xe đã đỗ</label>
+                        <input id="slotPlate" type="text" value="${slot.plateNumber ?? ''}" placeholder="51K-207.69" /></div>
+                    <div class="prop-field"><label>Thời điểm đỗ</label>
+                        <input id="slotParkedAt" type="datetime-local" value="${parkedAtLocal}" /></div>
+                </div>
+                <div id="errorFields" class="prop-field" style="display:${slot.status === 'Error' ? 'block' : 'none'}">
+                    <label>Mô tả lỗi</label>
+                    <textarea id="slotError" rows="2" placeholder="Ví dụ: Camera mất kết nối">${slot.errorMessage ?? ''}</textarea>
+                </div>`)
+            + ppCard('Lịch sử gần nhất', `
+                <div class="slot-last-exit" style="margin:0;">Xe ra gần nhất: <strong>${escHtml(fmtPlate(slot.lastExitPlate))}</strong><br>Lúc ${escHtml(fmtDateTime(slot.lastExitTime))}</div>
+                ${ppHint('Chỉnh tay trạng thái để test giao diện khi chưa có camera / model AI thật. Khi AI hoạt động, trạng thái tự cập nhật realtime và ghi đè giá trị chỉnh tay.')}`) },
+        { id: 'display', label: 'Hiển thị', html: ppCard('Hiển thị trên bản đồ', DISPLAY_FIELDS.map(f => `
+            <label class="checkbox-label">
+                <input type="checkbox" class="slot-display-chk" data-field="${f}" ${el[f] === false ? '' : 'checked'} /> ${LBL[f]}
+            </label>`).join(''), 'wide') },
+        { id: 'style', label: 'Kiểu dáng', html: styleFieldsHtml(el) + effectsFieldsHtml(el)
+            + ppCard('Gợi ý', ppHint('Màu nền / viền mặc định của ô đỗ đổi theo trạng thái; chỉ đặt màu tuỳ chỉnh nếu muốn cố định.'), 'wide') }
+    ]) + ppFooter('🗑️ Gỡ khỏi bản đồ', 'saveSlotBtn');
 
     const applyForm = (el) => {
         document.querySelectorAll('.slot-display-chk').forEach(c => { el[c.dataset.field] = c.checked; });
-        applyPositionFieldsFromForm(el);
         applyStyleFieldsFromForm(el);
     };
     bindLivePreview(el, applyForm);
@@ -2965,21 +3618,12 @@ async function renderBitProps(el) {
 
     const mode = bitModeOf(el), style = bitStyleOf(el);
     // key: '0' | '1' (tag bit) hoac 'Parked' | 'Free' | 'Error' | 'Unused' (den cam bien / vi tri do camera)
-    const imgBlock = (key, title, grp) => `
-        <div class="bit-img-block" data-grp="${grp}">
-        <div class="prop-section-title">${title}</div>
-        <div class="bit-shape-row">
-            <div class="bit-shape-preview" id="propBitPrev${key}"></div>
-            <div class="bit-shape-ctrl">
-                <input id="propBitImg${key}" type="text" placeholder="URL ảnh hoặc tải lên…" value="${escHtml(el['stateImage' + key])}" />
-                <div class="prop-inline">
-                    <button type="button" class="btn secondary" id="propBitUp${key}" style="padding:6px;">📁 Tải ảnh lên</button>
-                    <button type="button" class="btn secondary" id="propBitClr${key}" style="padding:6px;">✕ Bỏ ảnh</button>
-                </div>
-                <input type="file" id="propBitFile${key}" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp" hidden />
-            </div>
-        </div>
-        </div>`;
+    // Mỗi trạng thái 1 thẻ có vùng xem ảnh (nền ô vuông); chưa chọn ảnh thì vùng xem hiện hình mặc định
+    const DEF_DOT = { '0': '#64748b', '1': '#22c55e', Parked: '#ef4444', Free: '#22c55e', Error: '#eab308', Unused: '#334155' };
+    const imgBlock = (key, title, grp) => ppCard(title, imgPickHtml({
+        urlId: `propBitImg${key}`, upId: `propBitUp${key}`, clrId: `propBitClr${key}`, fileId: `propBitFile${key}`, viewId: `propBitPrev${key}`,
+        value: el['stateImage' + key], small: true, placeholder: 'URL ảnh hoặc tải lên…'
+    }), '', `data-grp="${grp}"`);
     const LAMP_DOT_HINT = { Parked: '🔴', Free: '🟢', Error: '🟡', Unused: '⚪' };
     const sensorKeytop = sensorMeta?.type === 'Keytop';
     const sensorDevCount = Math.max(sensorMeta?.deviceCount || 32, (el.sensorDevice || 0) + 1);
@@ -2998,33 +3642,24 @@ async function renderBitProps(el) {
         + camZones.map(z => `<option value="${escHtml(z.zone)}|${escHtml(z.number)}" ${`${z.zone}|${z.number}` === camSel ? 'selected' : ''}>Zone ${escHtml(z.zone)} · vị trí ${escHtml(z.number)}${z.cameraIp ? ' — camera ' + escHtml(z.cameraIp) : ''}</option>`).join('');
     const curSrc = bitSourceOf(el);
 
-    propsPanel.innerHTML = `
-        <h3>Đèn bit / Công tắc bit</h3>
-        <div class="prop-tabs">
-            <button type="button" class="prop-tab active" data-pane="general">General</button>
-            <button type="button" class="prop-tab" data-pane="shape">Shape</button>
-            <button type="button" class="prop-tab" data-pane="label">Label</button>
-            <button type="button" class="prop-tab" data-pane="pos">Vị trí</button>
-        </div>
-
-        <div class="bit-pane" data-pane="general">
-            <div class="prop-field"><label>Comment</label>
-                <input id="propBitComment" type="text" maxlength="200" value="${escHtml(el.comment)}" /></div>
-            <div class="prop-field">
-                <label class="checkbox-label"><input type="radio" name="propBitMode" value="Lamp" ${mode === 'Lamp' ? 'checked' : ''} /> Bit Lamp (chỉ hiển thị)</label>
-                <label class="checkbox-label"><input type="radio" name="propBitMode" value="Switch" ${mode === 'Switch' ? 'checked' : ''} /> Toggle Switch (bấm để ghi, ở chế độ Chạy)</label>
-            </div>
-            <div class="prop-field" id="propBitSourceRow">
-                <label>Nguồn dữ liệu của đèn</label>
-                <select id="propBitSource">
-                    <option value="Tag" ${curSrc === 'Tag' ? 'selected' : ''}>Tag bit (0 / 1)</option>
-                    <option value="Sensor" ${curSrc === 'Sensor' ? 'selected' : ''}>Cảm biến (Đã đỗ / Còn trống / Lỗi / Chưa sử dụng)</option>
-                    <option value="CameraSlot" ${curSrc === 'CameraSlot' ? 'selected' : ''}>Vị trí đỗ chỉ định trên camera (4 trạng thái)</option>
-                </select>
-            </div>
-
-            <div id="propBitSensorGroup">
-                <div class="prop-section-title">Cảm biến</div>
+    propsPanel.innerHTML = ppTabs(el.type, [
+        { id: 'general', label: 'Chung', html:
+            ppCard('Chế độ hoạt động', `
+                <div class="prop-field"><label>Ghi chú (Comment)</label>
+                    <input id="propBitComment" type="text" maxlength="200" value="${escHtml(el.comment)}" /></div>
+                <div class="prop-field">
+                    <label class="checkbox-label"><input type="radio" name="propBitMode" value="Lamp" ${mode === 'Lamp' ? 'checked' : ''} /> Bit Lamp (chỉ hiển thị)</label>
+                    <label class="checkbox-label"><input type="radio" name="propBitMode" value="Switch" ${mode === 'Switch' ? 'checked' : ''} /> Toggle Switch (bấm để ghi, ở chế độ Chạy)</label>
+                </div>
+                <div class="prop-field" id="propBitSourceRow">
+                    <label>Nguồn dữ liệu của đèn</label>
+                    <select id="propBitSource">
+                        <option value="Tag" ${curSrc === 'Tag' ? 'selected' : ''}>Tag bit (0 / 1)</option>
+                        ${isPanelFloor(window.currentFloorData) ? '' : `<option value="Sensor" ${curSrc === 'Sensor' ? 'selected' : ''}>Cảm biến (Đã đỗ / Còn trống / Lỗi / Chưa sử dụng)</option>
+                        <option value="CameraSlot" ${curSrc === 'CameraSlot' ? 'selected' : ''}>Vị trí đỗ chỉ định trên camera (4 trạng thái)</option>`}
+                    </select>
+                </div>`)
+            + `<div id="propBitSensorGroup" class="pp-contents">` + ppCard('Cảm biến', `
                 <div class="prop-field"><label>Thiết bị</label>
                     <select id="propSnDevice">${Array.from({ length: sensorDevCount }, (_, d) => devOpt(d)).join('')}</select></div>
                 <div class="prop-grid-2" id="propSnPmRow">
@@ -3035,74 +3670,43 @@ async function renderBitProps(el) {
                 </div>
                 <div class="prop-field" id="propSnKtRow"><label>Cảm biến số</label>
                     <select id="propSnNum">${rangeOpts(1, sensorPer, sIdx + 1, v => 'Cảm biến ' + v)}</select></div>
-                <p class="hint small">Có xe → <b>Đã đỗ</b> · Trống → <b>Còn trống</b> · Lỗi hoặc thiết bị mất kết nối → <b>Lỗi</b> ·
-                    Thiết bị không kích hoạt / ngoài số thiết bị đang dùng / cảm biến chưa báo trạng thái → <b>Chưa sử dụng</b>.</p>
-            </div>
-
-            <div id="propBitCamGroup">
-                <div class="prop-section-title">Vị trí đỗ chỉ định trên camera</div>
+                ${ppHint('Có xe → <b>Đã đỗ</b> · Trống → <b>Còn trống</b> · Lỗi hoặc thiết bị mất kết nối → <b>Lỗi</b> · Thiết bị không kích hoạt / ngoài số thiết bị đang dùng / cảm biến chưa báo trạng thái → <b>Chưa sử dụng</b>.')}`) + `</div>`
+            + `<div id="propBitCamGroup" class="pp-contents">` + ppCard('Vị trí đỗ chỉ định trên camera', `
                 <div class="prop-field"><label>Vị trí nhận diện (tầng ${escHtml(CURRENT_FLOOR)})</label>
                     <select id="propCamPos">${camOptions}</select></div>
-                <p class="hint small">Lấy từ các vị trí đã vẽ ở Hệ thống › Camera › Vị trí đỗ. Xe trong vùng → <b>Đã đỗ</b> · không có xe → <b>Còn trống</b> ·
-                    camera mất kết nối → <b>Lỗi</b> · vị trí chưa khai báo (đã bị xoá khỏi camera) → <b>Chưa sử dụng</b>.</p>
-            </div>
-
-            <div id="propBitTagGroup">
-            <div class="prop-section-title">Đọc / Ghi</div>
-            <label class="checkbox-label" style="margin-bottom:8px;"><input type="checkbox" id="propBitSep" ${el.separateWriteTag ? 'checked' : ''} /> Đọc và ghi dùng tag khác nhau</label>
-            <div class="prop-field"><label id="propBitReadLbl">Tag</label><select id="propBitReadTag"></select></div>
-            <div class="prop-field" id="propBitWriteRow"><label>Tag ghi (Project tag)</label><select id="propBitWriteTag"></select></div>
-            <label class="checkbox-label" style="margin-bottom:8px;"><input type="checkbox" id="propBitInvert" ${el.invertSignal ? 'checked' : ''} /> Đảo tín hiệu (Invert signal)</label>
-            <label class="checkbox-label" style="margin-bottom:8px;"><input type="checkbox" id="propBitRelease" ${el.writeOnRelease ? 'checked' : ''} /> Chỉ ghi khi nhả nút</label>
-            <div class="prop-section-title">Thuộc tính</div>
-            <div class="prop-field"><label>Kiểu công tắc (Switch style)</label>
-                <select id="propBitStyle">
-                    <option value="SetOn" ${style === 'SetOn' ? 'selected' : ''}>Set ON — luôn ghi ON</option>
-                    <option value="SetOff" ${style === 'SetOff' ? 'selected' : ''}>Set OFF — luôn ghi OFF</option>
-                    <option value="Toggle" ${style === 'Toggle' ? 'selected' : ''}>Toggle — đảo trạng thái</option>
-                    <option value="Momentary" ${style === 'Momentary' ? 'selected' : ''}>Momentary — giữ = ON, nhả = OFF</option>
-                </select></div>
-            <p class="hint small">System tags chỉ để đọc (đèn). Muốn bấm để ghi, tag ghi phải là Project tag kiểu Boolean (TASKS › Tags).</p>
-            </div>
-        </div>
-
-        <div class="bit-pane" data-pane="shape" hidden>
-            ${imgBlock('0', 'Trạng thái 0 (OFF)', 'tag')}
-            ${imgBlock('1', 'Trạng thái 1 (ON)', 'tag')}
-            ${LAMP_STATES.map(k => imgBlock(k, `${LAMP_DOT_HINT[k]} ${LAMP_LABEL[k]}`, 'lamp')).join('')}
-            <p class="hint small">Không chọn ảnh = vẽ hình mặc định (đèn tròn / công tắc; đèn 4 trạng thái: đỏ = Đã đỗ, xanh = Còn trống, vàng = Lỗi, xám = Chưa sử dụng). Ảnh PNG/JPG/GIF/WEBP/BMP, tối đa 5 MB.</p>
-        </div>
-
-        <div class="bit-pane" data-pane="label" hidden>
-            <div class="prop-field" data-grp="tag"><label>Chữ khi trạng thái 0 (OFF)</label><input id="propBitText0" type="text" maxlength="64" value="${escHtml(el.stateText0)}" /></div>
-            <div class="prop-field" data-grp="tag"><label>Chữ khi trạng thái 1 (ON)</label><input id="propBitText1" type="text" maxlength="64" value="${escHtml(el.stateText1)}" /></div>
-            ${LAMP_STATES.map(k => `<div class="prop-field" data-grp="lamp"><label>Chữ khi ${LAMP_LABEL[k].toLowerCase()}</label><input id="propBitText${k}" type="text" maxlength="64" value="${escHtml(el['stateText' + k])}" /></div>`).join('')}
-            <div class="prop-grid-2">
-                <div class="prop-field"><label>Màu chữ</label><input id="propBitTextColor" type="color" value="${escHtml(el.textColor || '#e6ebf5')}" /></div>
-                <div class="prop-field"><label>Cỡ chữ (px)</label><input id="propBitFont" type="number" min="1" max="200" step="1" placeholder="mặc định" value="${el.fontSize ?? ''}" /></div>
-            </div>
-        </div>
-
-        <div class="bit-pane" data-pane="pos" hidden>
-            ${positionFieldsHtml(el)}
-            ${styleFieldsHtml(el)}
-            ${effectsFieldsHtml(el)}
-        </div>
-
-        ${DIRTY_NOTE_HTML}
-        <div class="prop-actions">
-            <button id="savePropsBtn" class="btn primary">✓ Áp dụng</button>
-            <button id="deleteElBtn" class="btn secondary">🗑️ Xoá</button>
-        </div>
-    `;
-    bindEffectsButtons();
-
-    // --- tab ---
-    propsPanel.querySelectorAll('.prop-tab').forEach(tab => tab.addEventListener('click', () => {
-        propsPanel.querySelectorAll('.prop-tab').forEach(t => t.classList.toggle('active', t === tab));
-        propsPanel.querySelectorAll('.bit-pane').forEach(p => { p.hidden = p.dataset.pane !== tab.dataset.pane; });
-        fitPropsDialog();
-    }));
+                ${ppHint('Lấy từ các vị trí đã vẽ ở Hệ thống › Camera › Vị trí đỗ. Xe trong vùng → <b>Đã đỗ</b> · không có xe → <b>Còn trống</b> · camera mất kết nối → <b>Lỗi</b> · vị trí chưa khai báo (đã bị xoá khỏi camera) → <b>Chưa sử dụng</b>.')}`) + `</div>`
+            + `<div id="propBitTagGroup" class="pp-contents">` + ppCard('Đọc / Ghi', `
+                <label class="checkbox-label" style="margin-bottom:10px;"><input type="checkbox" id="propBitSep" ${el.separateWriteTag ? 'checked' : ''} /> Đọc và ghi dùng tag khác nhau</label>
+                <div class="prop-field"><label id="propBitReadLbl">Tag</label><select id="propBitReadTag"></select></div>
+                <div class="prop-field" id="propBitWriteRow"><label>Tag ghi (Project tag)</label><select id="propBitWriteTag"></select></div>
+                <label class="checkbox-label" style="margin-bottom:8px;"><input type="checkbox" id="propBitInvert" ${el.invertSignal ? 'checked' : ''} /> Đảo tín hiệu (Invert signal)</label>
+                <label class="checkbox-label"><input type="checkbox" id="propBitRelease" ${el.writeOnRelease ? 'checked' : ''} /> Chỉ ghi khi nhả nút</label>`)
+            + ppCard('Kiểu công tắc', `
+                <div class="prop-field"><label>Kiểu công tắc (Switch style)</label>
+                    <select id="propBitStyle">
+                        <option value="SetOn" ${style === 'SetOn' ? 'selected' : ''}>Set ON — luôn ghi ON</option>
+                        <option value="SetOff" ${style === 'SetOff' ? 'selected' : ''}>Set OFF — luôn ghi OFF</option>
+                        <option value="Toggle" ${style === 'Toggle' ? 'selected' : ''}>Toggle — đảo trạng thái</option>
+                        <option value="Momentary" ${style === 'Momentary' ? 'selected' : ''}>Momentary — giữ = ON, nhả = OFF</option>
+                    </select></div>
+                ${ppHint('System tags chỉ để đọc (đèn). Muốn bấm để ghi, tag ghi phải là Project tag kiểu Boolean (TASKS › Tags).')}`) + `</div>` },
+        { id: 'shape', label: 'Hình ảnh', html:
+            imgBlock('0', 'Trạng thái 0 (OFF)', 'tag')
+            + imgBlock('1', 'Trạng thái 1 (ON)', 'tag')
+            + LAMP_STATES.map(k => imgBlock(k, `${LAMP_DOT_HINT[k]} ${LAMP_LABEL[k]}`, 'lamp')).join('')
+            + ppCard('', ppHint('Không chọn ảnh = vẽ hình mặc định (đèn tròn / công tắc; đèn 4 trạng thái: đỏ = Đã đỗ, xanh = Còn trống, vàng = Lỗi, xám = Chưa sử dụng). Ảnh PNG/JPG/GIF/WEBP/BMP, tối đa 5 MB. Ô vuông xám trắng trong vùng xem là phần ảnh trong suốt.'), 'wide') },
+        { id: 'label', label: 'Nhãn', html:
+            ppCard('Chữ hiển thị theo trạng thái', `
+                <div class="prop-field" data-grp="tag"><label>Chữ khi trạng thái 0 (OFF)</label><input id="propBitText0" type="text" maxlength="64" value="${escHtml(el.stateText0)}" /></div>
+                <div class="prop-field" data-grp="tag"><label>Chữ khi trạng thái 1 (ON)</label><input id="propBitText1" type="text" maxlength="64" value="${escHtml(el.stateText1)}" /></div>
+                ${LAMP_STATES.map(k => `<div class="prop-field" data-grp="lamp"><label>Chữ khi ${LAMP_LABEL[k].toLowerCase()}</label><input id="propBitText${k}" type="text" maxlength="64" value="${escHtml(el['stateText' + k])}" /></div>`).join('')}`)
+            + ppCard('Định dạng chữ', `
+                <div class="prop-grid-2">
+                    <div class="prop-field"><label>Màu chữ</label><input id="propBitTextColor" type="color" value="${escHtml(el.textColor || '#e6ebf5')}" /></div>
+                    <div class="prop-field"><label>Cỡ chữ (px)</label><input id="propBitFont" type="number" min="1" max="200" step="1" placeholder="mặc định" value="${el.fontSize ?? ''}" /></div>
+                </div>`) },
+        { id: 'style', label: 'Kiểu dáng', html: styleFieldsHtml(el) + effectsFieldsHtml(el) }
+    ]) + ppFooter();
 
     // --- danh sach tag + bat/tat o theo che do ---
     const curMode = () => propsPanel.querySelector('input[name="propBitMode"]:checked')?.value || 'Switch';
@@ -3137,29 +3741,11 @@ async function renderBitProps(el) {
     q('propBitStyle').addEventListener('change', syncForm);
     syncForm();
 
-    // --- hinh anh theo trang thai ---
-    ['0', '1', ...LAMP_STATES].forEach(i => {
-        const inp = q(`propBitImg${i}`), prev = q(`propBitPrev${i}`), file = q(`propBitFile${i}`);
-        const showPrev = () => { prev.innerHTML = inp.value.trim() ? `<img src="${escHtml(inp.value.trim())}" alt="" />` : '<span>Mặc định</span>'; };
-        showPrev();
-        inp.addEventListener('input', showPrev);
-        q(`propBitUp${i}`).addEventListener('click', () => file.click());
-        q(`propBitClr${i}`).addEventListener('click', () => { inp.value = ''; inp.dispatchEvent(new Event('input', { bubbles: true })); });
-        file.addEventListener('change', async () => {
-            const f = file.files[0];
-            if (!f) return;
-            const fd = new FormData();
-            fd.append('image', f);
-            try {
-                const r = await fetch('/api/layout/upload-image', { method: 'POST', body: fd });
-                const d = await r.json().catch(() => ({}));
-                if (!r.ok) throw new Error(d.message || 'Không tải được ảnh.');
-                inp.value = d.url;
-                inp.dispatchEvent(new Event('input', { bubbles: true }));
-            } catch (err) { alert(err.message || 'Không tải được ảnh.'); }
-            file.value = '';
-        });
-    });
+    // --- hinh anh theo trang thai (vung xem truoc + tai len / bo anh) ---
+    ['0', '1', ...LAMP_STATES].forEach(i => bindImgPick({
+        urlId: `propBitImg${i}`, upId: `propBitUp${i}`, clrId: `propBitClr${i}`, fileId: `propBitFile${i}`, viewId: `propBitPrev${i}`,
+        emptyHtml: `<span class="pp-img-dot" style="background:${DEF_DOT[i]}"></span><span>Mặc định</span>`
+    }));
 
     const applyForm = (el) => {
         el.comment = q('propBitComment').value.trim() || null;
@@ -3193,7 +3779,6 @@ async function renderBitProps(el) {
         el.textColor = (tc.toLowerCase() !== '#e6ebf5' || el.textColor) ? tc : null;
         const fs = parseFloat(q('propBitFont').value);
         el.fontSize = Number.isFinite(fs) && fs > 0 ? fs : null;
-        applyPositionFieldsFromForm(el);
         applyStyleFieldsFromForm(el);
         applyEffectsFromForm(el);
     };
@@ -3206,7 +3791,116 @@ async function renderBitProps(el) {
     fitPropsDialog();
 }
 
+// ---------------------------------------------------------------------------
+// FORMAT TAB (ribbon "Dinh dang"): Vi tri X/Y, Kich thuoc Rong/Cao, Goc xoay, Lop cua doi tuong dang chon.
+// Tach khoi hop thoai thuoc tinh; sua o day xem truoc ngay tren ban do va tu luu.
+// ---------------------------------------------------------------------------
+const FMT_INPUTS = { fmtX: 'x', fmtY: 'y', fmtW: 'w', fmtH: 'h', fmtRot: 'rot', fmtZ: 'z' };
+const FMT_BUTTONS = { fmtCenterH: 'centerH', fmtCenterV: 'centerV', fmtRotL: 'rotL', fmtRotR: 'rotR', fmtBack: 'back', fmtFront: 'front' };
+const fmtLock = { id: null, on: false, ratio: 1 };   // khoa ti le Rong : Cao cua doi tuong dang chon
+let fmtSaveTimer = null, fmtDebounce = null;
+const fmtById = (id) => document.getElementById(id);
+const fmtRound = (v, n = 2) => { const k = 10 ** n; return Math.round(v * k) / k; };
+const fmtCurrent = () => (editMode && selectedIds.size === 1 ? elements.find(x => x.id === selectedId) || null : null);
+
+function syncFormatTab(force) {
+    const panel = fmtById('fmtPanel');
+    if (!panel) return;
+    const el = fmtCurrent();
+    panel.classList.toggle('fmt-off', !el);
+    [...Object.keys(FMT_INPUTS), ...Object.keys(FMT_BUTTONS), 'fmtLock'].forEach(id => { fmtById(id).disabled = !el; });
+
+    const name = fmtById('fmtSelName'), hint = fmtById('fmtSelHint');
+    if (!el) {
+        const many = selectedIds.size > 1;
+        name.textContent = many ? `${selectedIds.size} đối tượng` : 'Chưa chọn đối tượng';
+        hint.textContent = many ? 'Chuột phải để căn chỉnh nhóm' : 'Nhấp vào 1 đối tượng trên bản đồ';
+        Object.keys(FMT_INPUTS).forEach(id => { fmtById(id).value = ''; });
+        fmtById('fmtLock').checked = false;
+        return;
+    }
+    name.textContent = typeLabel(el.type);
+    hint.textContent = `Mặt bằng ${CURRENT_FLOOR}`;
+
+    // Doi tuong moi duoc chon: hinh tron dang tron deu thi tu khoa ti le
+    if (fmtLock.id !== el.id) {
+        fmtLock.id = el.id;
+        fmtLock.ratio = el.height / el.width || 1;
+        fmtLock.on = el.type === 'Circle' && Math.abs(el.height - el.width * canvasAspect()) < 0.3;
+    }
+    const isLine = el.type === 'Line';
+    fmtById('fmtLock').checked = fmtLock.on && !isLine;
+    fmtById('fmtLock').disabled = isLine;
+    fmtById('fmtWLbl').textContent = isLine ? 'Dài:' : 'Rộng:';
+    fmtById('fmtHLbl').textContent = isLine ? 'Vùng chọn:' : 'Cao:';
+
+    // Vi tri / kich thuoc doc tu node (dang keo / co gian thi chua ghi vao el)
+    const node = canvas.querySelector(`.layout-el[data-id="${el.id}"]`);
+    const g = (prop, fb) => { const v = node ? parseFloat(node.style[prop]) : NaN; return Number.isFinite(v) ? v : fb; };
+    const vals = { fmtX: g('left', el.x), fmtY: g('top', el.y), fmtW: g('width', el.width), fmtH: g('height', el.height),
+        fmtRot: Number(el.rotation ?? 0), fmtZ: Number(el.zIndex ?? 0) };
+    Object.entries(vals).forEach(([id, v]) => {
+        const n = fmtById(id);
+        if (force || document.activeElement !== n) n.value = String(fmtRound(v));
+    });
+}
+
+function fmtApply(src) {
+    const el = fmtCurrent();
+    if (!el) return;
+    const num = (id, fb) => { const v = parseFloat(fmtById(id).value); return Number.isFinite(v) ? v : fb; };
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+    const normAngle = (a) => { a = ((a % 360) + 360) % 360; return a > 180 ? a - 360 : a; };
+
+    if (src === 'w' || src === 'h') {
+        let w = clamp(num('fmtW', el.width), 1, 100), h = clamp(num('fmtH', el.height), 1, 100);
+        if (fmtLock.on && el.type !== 'Line') {
+            if (src === 'w') h = w * fmtLock.ratio; else w = h / fmtLock.ratio;
+            if (h > 100) { h = 100; w = h / fmtLock.ratio; }
+            if (w > 100) { w = 100; h = w * fmtLock.ratio; }
+        }
+        el.width = fmtRound(w); el.height = fmtRound(h);
+    }
+    if (src === 'x') el.x = num('fmtX', el.x);
+    if (src === 'y') el.y = num('fmtY', el.y);
+    if (src === 'centerH') el.x = (100 - el.width) / 2;
+    if (src === 'centerV') el.y = (100 - el.height) / 2;
+    el.x = fmtRound(clamp(el.x, 0, 100 - el.width));
+    el.y = fmtRound(clamp(el.y, 0, 100 - el.height));
+
+    if (src === 'rot' || src === 'rotL' || src === 'rotR') {
+        const cur = Number(el.rotation) || 0;
+        const a = src === 'rot' ? clamp(num('fmtRot', cur), -360, 360) : normAngle(cur + (src === 'rotR' ? 90 : -90));
+        el.rotation = a !== 0 ? a : null;
+    }
+    if (src === 'z') el.zIndex = clamp(Math.round(num('fmtZ', el.zIndex || 0)), -1000, 1000);
+    if (src === 'back') el.zIndex = Math.min(0, ...elements.map(e => e.zIndex || 0)) - 1;
+    if (src === 'front') el.zIndex = Math.max(0, ...elements.map(e => e.zIndex || 0)) + 1;
+
+    refreshNode(el);                 // ve lai + cap nhat khung co gian + dong bo lai cac o cua tab
+    clearTimeout(fmtSaveTimer);
+    fmtSaveTimer = setTimeout(() => persistElement(el).catch(() => { /* loi mang: bo qua */ }), 300);
+}
+
+Object.entries(FMT_INPUTS).forEach(([id, src]) => {
+    const inp = fmtById(id);
+    if (!inp) return;
+    inp.addEventListener('input', () => { clearTimeout(fmtDebounce); fmtDebounce = setTimeout(() => fmtApply(src), 120); });
+    inp.addEventListener('change', () => { clearTimeout(fmtDebounce); fmtApply(src); syncFormatTab(true); });   // Enter / roi o: chuan hoa gia tri hien thi
+});
+Object.entries(FMT_BUTTONS).forEach(([id, src]) => {
+    const b = fmtById(id);
+    if (b) b.addEventListener('click', () => { fmtApply(src); syncFormatTab(true); });
+});
+fmtById('fmtLock')?.addEventListener('change', (e) => {
+    const el = fmtCurrent();
+    if (!el) return;
+    fmtLock.on = e.target.checked;
+    fmtLock.ratio = el.height / el.width || 1;
+});
+
 async function persistElement(el) {
+    if (live && live.el === el) applyAnimFromForm(el);      // gom ca thay doi o 2 tab hieu ung dong chua kip xem truoc
     await fetch(`/api/layout/${el.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -3227,7 +3921,7 @@ async function deleteElement(id) {
 
 function typeLabel(type) {
     return { Button: 'Nút ấn', Image: 'Hình ảnh', Text: 'Text', ParkingSlot: 'Vùng nhận diện', SlotStats: 'Thống kê chỗ', BitLampSwitch: 'Đèn / Công tắc bit', Number: 'Số (Number)',
-        Rectangle: 'Hình chữ nhật', Circle: 'Hình tròn', Line: 'Đường thẳng' }[type] || type;
+        Rectangle: 'Hình chữ nhật', Circle: 'Hình tròn', Line: 'Đường thẳng', DateTime: 'Ngày giờ' }[type] || type;
 }
 
 function toLocalDateTimeInputValue(isoString) {
@@ -3327,32 +4021,248 @@ function savedLayoutMode() {
     try { return window.PG_MODE_KEY ? localStorage.getItem(window.PG_MODE_KEY) : null; } catch { return null; }
 }
 
+// ---------------------------------------------------------------------------
+// Header + Navigation khi CHẠY: mỗi màn hình là 1 iframe (/?panel=Header | Navigation) có kích thước pixel đã thiết lập.
+//   Header     : góc trên-trái
+//   Navigation : sát mép trái, ngay dưới Header
+//   Mặt bằng đỗ xe: bắt đầu từ góc trên-trái của vùng còn lại (dưới Header, bên phải Navigation).
+//   Toàn kích thước: Header rộng hết màn hình / Navigation cao hết phần còn lại.
+// Tài khoản + nút Đăng xuất giữ nguyên vị trí cũ (góc dưới-trái); phần menu còn lại của thanh bên bị ẩn.
+// ---------------------------------------------------------------------------
+const PANEL_FRAMES = { Header: 'pgHeaderFrame', Navigation: 'pgNavFrame' };
+
+// ---------------------------------------------------------------------------
+// Chừa đáy màn hình khi CHẠY: thanh taskbar của Windows có thể che phần dưới cửa sổ (toàn màn hình / kiosk).
+// Mặc định tự tính phần cửa sổ lấn xuống dưới vùng làm việc của màn hình; có thể nhập tay (px) ở ô "Chừa đáy khi chạy",
+// lưu riêng từng máy. Trang bị trừ phần này: khung mặt bằng, Navigation, khối tài khoản.
+// ---------------------------------------------------------------------------
+const RUN_INSET_KEY = 'pg.runBottomInset';
+let lastRunInset = -1;
+// Toàn màn hình: Fullscreen API (document.fullscreenElement) hoặc F11 của trình duyệt (cửa sổ trùng kích thước màn hình)
+function isRunFullscreen() {
+    if (document.fullscreenElement) return true;
+    try { return window.innerWidth >= screen.width - 1 && window.innerHeight >= screen.height - 1; } catch { return false; }
+}
+function computeRunInset() {
+    if (isRunFullscreen()) return 0;       // toàn màn hình: taskbar đã bị che, không cần chừa
+    try {
+        const manual = localStorage.getItem(RUN_INSET_KEY);
+        if (manual !== null && manual.trim() !== '' && Number.isFinite(+manual)) return Math.min(400, Math.max(0, Math.round(+manual)));
+    } catch { /* bỏ qua */ }
+    try {
+        const bottom = (window.screenY ?? window.screenTop ?? 0) + window.outerHeight;           // đáy cửa sổ trên màn hình
+        const availBottom = (screen.availTop ?? 0) + screen.availHeight;                         // đáy vùng làm việc (trên taskbar)
+        return Math.min(200, Math.max(0, Math.round(bottom - availBottom)));
+    } catch { return 0; }
+}
+function applyRunInset() {
+    if (window.PG_PANEL) return;
+    const v = computeRunInset();
+    if (v === lastRunInset) return;
+    lastRunInset = v;
+    document.documentElement.style.setProperty('--run-bottom', `${v}px`);
+    window.dispatchEvent(new Event('resize'));       // khung mặt bằng tính lại vừa vùng còn lại (lần sau v không đổi nên không lặp)
+}
+window.addEventListener('resize', applyRunInset);
+window.addEventListener('resize', () => updateFsPrompt());      // F11 cũng đổi kích thước cửa sổ
+
+// ---------------------------------------------------------------------------
+// Toàn màn hình khi CHẠY (mặc định bật): ứng dụng che luôn thanh taskbar. Trình duyệt chỉ cho vào toàn màn hình sau 1 thao tác của người dùng:
+// bấm nút Chạy là được ngay; mở lại trang đang ở chế độ Chạy thì chờ lần bấm chuột / phím đầu tiên.
+// Thoát: ESC (trình duyệt thoát toàn màn hình trước, rồi chế độ Chạy cũng thoát theo — chỉ cần 1 lần ESC).
+// ---------------------------------------------------------------------------
+const RUN_FS_KEY = 'pg.runFullscreen';
+const runFsEnabled = () => true;        // CỐ ĐỊNH: chạy luôn ở toàn màn hình (khung mặt bằng chỉ đúng tỉ lệ khi toàn màn hình)
+let runFsActive = false;       // toàn màn hình do chế độ Chạy yêu cầu
+let fsArm = null;              // AbortController của bộ chờ thao tác đầu tiên
+
+function requestRunFullscreen() {
+    if (window.PG_PANEL || !runFsEnabled() || isRunFullscreen()) return;
+    const el = document.documentElement;
+    if (!el.requestFullscreen) return;
+    try { Promise.resolve(el.requestFullscreen({ navigationUI: 'hide' })).catch(() => { /* chưa có thao tác người dùng: bỏ qua */ }); } catch { /* bỏ qua */ }
+}
+function armRunFullscreen() {
+    if (window.PG_PANEL || !runFsEnabled() || fsArm) return;
+    fsArm = new AbortController();
+    const go = () => { fsArm?.abort(); fsArm = null; if (!editMode) requestRunFullscreen(); };
+    window.addEventListener('pointerdown', go, { capture: true, signal: fsArm.signal });
+    window.addEventListener('keydown', go, { capture: true, signal: fsArm.signal });
+}
+// Chưa ở toàn màn hình (trình duyệt chỉ cho vào sau 1 thao tác của người dùng): hiện thanh nhắc, bấm / nhấn phím là vào ngay
+function updateFsPrompt() {
+    const need = !window.PG_PANEL && !editMode && document.body.classList.contains('layout-run-mode') && !isRunFullscreen();
+    const cur = document.getElementById('pgFsPrompt');
+    if (!need) { cur?.remove(); return; }
+    if (cur) return;
+    const b = document.createElement('button');
+    b.id = 'pgFsPrompt'; b.type = 'button';
+    b.innerHTML = '<span class="fs-ico">⛶</span><span>Chế độ Chạy chỉ hoạt động ở toàn màn hình<br><small>Nhấn vào đây để tiếp tục</small></span>';
+    b.addEventListener('click', () => { requestRunFullscreen(); });
+    document.body.appendChild(b);
+}
+function leaveRunFullscreen() {
+    fsArm?.abort(); fsArm = null;
+    runFsActive = false;
+    if (document.fullscreenElement) { try { Promise.resolve(document.exitFullscreen()).catch(() => { }); } catch { /* bỏ qua */ } }
+}
+document.addEventListener('fullscreenchange', () => {
+    setTimeout(applyRunInset, 150);
+    updateFsPrompt();
+    if (window.PG_PANEL) return;
+    if (document.fullscreenElement) { if (!editMode) runFsActive = true; return; }
+    if (runFsActive) {                               // vừa thoát toàn màn hình (thường do ESC)
+        runFsActive = false;
+        if (!editMode && !window.PG_FORCE_RUN) exitRunMode();   // admin: thoát luôn chế độ Chạy; tài khoản User luôn ở chế độ Chạy (bấm lại sẽ vào toàn màn hình)
+        else if (!editMode) armRunFullscreen();
+    }
+});
+const fsChk = document.getElementById('runFullscreenChk');
+if (fsChk) {
+    fsChk.checked = runFsEnabled();
+    fsChk.addEventListener('change', () => {
+        try { localStorage.setItem(RUN_FS_KEY, fsChk.checked ? '1' : '0'); } catch { /* bỏ qua */ }
+        if (!fsChk.checked) leaveRunFullscreen(); else if (!editMode) { requestRunFullscreen(); armRunFullscreen(); }
+    });
+}
+const insetInput = document.getElementById('runBottomInset');
+if (insetInput) {
+    try { insetInput.value = localStorage.getItem(RUN_INSET_KEY) ?? ''; } catch { /* bỏ qua */ }
+    insetInput.addEventListener('change', () => {
+        try { localStorage.setItem(RUN_INSET_KEY, insetInput.value.trim()); } catch { /* bỏ qua */ }
+        applyRunInset();
+    });
+}
+
+function syncPanels() {
+    if (window.PG_PANEL) return;                       // chính iframe thì không tự nhúng thêm
+    const list = window.floorList || [];
+    const fl = {   // Header / Navigation luôn có sẵn trong dự án; chỉ nhúng khi được chọn "Sử dụng"
+        Header: list.find(f => f.kind === 'Header' && f.enabled !== false),
+        Navigation: list.find(f => f.kind === 'Navigation' && f.enabled !== false),
+    };
+    const sizeOf = (f) => [Math.max(5, f.panelWidth || 0), Math.max(5, f.panelHeight || 0)];
+    const run = !editMode;
+    const body = document.body;
+    const hdr = run ? fl.Header : null, nav = run ? fl.Navigation : null;
+    const hdrH = hdr ? sizeOf(hdr)[1] : 0;             // chiều cao Header: Navigation nằm ngay dưới
+    const navW = nav ? sizeOf(nav)[0] : 0;             // chiều rộng Navigation: mặt bằng đỗ xe bắt đầu ngay bên phải
+
+    for (const kind of ['Header', 'Navigation']) {
+        const id = PANEL_FRAMES[kind];
+        let fr = document.getElementById(id);
+        const f = run ? fl[kind] : null;
+        if (!f) { fr?.remove(); continue; }
+        const [w, h] = sizeOf(f);
+        const full = !!f.fullSize;                     // Toàn kích thước: Header rộng hết màn hình, Navigation cao hết phần còn lại
+        const sig = `${f.id}|${w}|${h}|${full}`;
+        if (fr && fr.dataset.sig !== sig) { fr.remove(); fr = null; }
+        if (!fr) {
+            fr = document.createElement('iframe');
+            fr.id = id; fr.className = `pg-panel-frame pg-panel-${kind.toLowerCase()}`;
+            fr.title = kind; fr.tabIndex = -1; fr.dataset.sig = sig;
+            fr.src = `/?panel=${kind}`;
+            fr.addEventListener('load', notifyPanels);
+            body.appendChild(fr);
+        }
+        if (kind === 'Header') {
+            fr.style.width = full ? '100vw' : `${w}px`; fr.style.height = `${h}px`;
+        } else {
+            fr.style.width = `${w}px`; fr.style.height = full ? `calc(100vh - ${hdrH}px - var(--run-bottom, 0px))` : `${h}px`;
+        }
+    }
+
+    body.classList.toggle('has-panels', !!(hdr || nav));
+    body.classList.toggle('nav-has-account', !!(nav && nav.showAccount));   // tài khoản + Đăng xuất nằm trong Navigation -> bỏ khối ở góc dưới-trái
+    body.style.setProperty('--pnl-top', `${hdrH}px`);
+    body.style.setProperty('--pnl-left', `${navW}px`);
+    body.style.setProperty('--pnl-left-w', nav ? `${navW}px` : '260px');   // khối tài khoản ở góc dưới-trái co theo bề rộng Navigation
+    window.dispatchEvent(new Event('resize'));
+}
+
+// Báo cho Header / Navigation biết mặt bằng đỗ xe đang xem (để nút ấn tương ứng sáng lên)
+function notifyPanels() {
+    document.querySelectorAll('.pg-panel-frame').forEach(fr => {
+        try { fr.contentWindow?.postMessage({ pgFloor: CURRENT_FLOOR }, location.origin); } catch { /* bỏ qua */ }
+    });
+}
+window.addEventListener('floorchange', notifyPanels);
+window.addEventListener('floorlistchange', () => { if (!editMode) syncPanels(); });
+
+window.addEventListener('message', (e) => {
+    if (e.origin !== location.origin) return;
+    const d = e.data || {};
+    if (window.PG_PANEL) {
+        if (d.pgFloor) { window.pgViewedFloor = d.pgFloor; renderLayout(); }
+    } else if (d.pgEsc && !editMode && !window.PG_FORCE_RUN) {
+        exitRunMode();                                  // ESC bấm khi đang chọn trong khung Header / Navigation
+    }
+});
+if (window.PG_PANEL) {
+    document.querySelectorAll('#pgNavAccount form').forEach(f => { f.target = '_top'; });   // Đăng xuất: chuyển cả trang về đăng nhập
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { try { window.parent.postMessage({ pgEsc: 1 }, location.origin); } catch { /* bỏ qua */ } }
+    }, true);
+}
+
 function enterRunMode() {
     saveLayoutMode('run');
     closePropsDialog();      // luu thay doi dang do va dong hop thoai thuoc tinh
-    if (live) { clearTimeout(live.timer); live = null; }
-    flushPending();
+    clearSelection();        // bo chon (xoa vien .selected + khung co gian) - o che do Chay khong duoc con duong bao cua che do Build
     editMode = false;
     updateResizeFrame();
     updateValueNodes(true);          // Number cho nhap: doi sang o nhap that
+    updateAnimNodes();               // hieu ung dong bat dau tac dung
     document.body.classList.add('layout-run-mode');
+    // Đang mở Header / Navigation để thiết kế mà bấm Chạy: 2 màn hình này có khung riêng -> chuyển về mặt bằng đỗ xe khởi động
+    if (!window.PG_PANEL && isPanelFloor(window.currentFloorData)) {
+        const nf = (window.floorList || []).find(f => f.isStartup && !isPanelFloor(f)) || (window.floorList || []).find(f => !isPanelFloor(f));
+        if (nf) navigateToFloor(nf.id);
+    }
+    syncPanels();
+    requestRunFullscreen();          // bấm Chạy: vào toàn màn hình ngay (che taskbar)
+    armRunFullscreen();              // mở lại trang ở chế độ Chạy: chờ lần bấm / phím đầu tiên
+    setTimeout(updateFsPrompt, 400);
+    applyRunInset();
     showRunExitButton();
 }
 
 function exitRunMode() {
     if (window.PG_FORCE_RUN) return;   // tai khoan User: luon o che do Chay
-    saveLayoutMode('build');
-    releaseAllMomentary();
+    // Mỗi bước chạy độc lập (try/catch): 1 bước lỗi cũng không được làm kẹt giao diện ở chế độ Chạy.
+    const step = (fn) => { try { fn(); } catch (err) { console.error('exitRunMode:', err); } };
     editMode = true;
-    updateResizeFrame();
-    updateValueNodes(true);
-    document.body.classList.remove('layout-run-mode');
-    hideRunExitButton();
+    document.body.classList.remove('layout-run-mode', 'has-panels', 'nav-has-account');   // gỡ giao diện Chạy TRƯỚC TIÊN
+    step(() => saveLayoutMode('build'));
+    step(() => hideRunExitButton());
+    step(() => leaveRunFullscreen());
+    step(() => document.querySelectorAll('.pg-panel-frame').forEach(fr => fr.remove()));   // gỡ khung Header / Navigation
+    step(() => releaseAllMomentary());
+    step(() => updateResizeFrame());
+    step(() => renderLayout());          // go moi hieu ung dong (an / dich vi tri / doi mau) -> ve lai dung thiet ke
+    step(() => updateValueNodes(true));
+    step(() => syncPanels());
+    step(() => window.dispatchEvent(new Event('resize')));
 }
 
 // Thoat che do Chay bang phim ESC (khong con nut tren man hinh)
-function showRunExitButton() { showRunHint(); }
-function hideRunExitButton() { document.getElementById('layoutRunHint')?.remove(); }
+function showRunExitButton() {
+    showRunHint();
+    showRunAccountBox();
+    // Phòng khi ESC không tới được trang (đang ở toàn màn hình của trình duyệt, tiêu điểm nằm trong khung Header / Navigation...):
+    // góc trên-phải có nút nhỏ, chỉ hiện rõ khi rê chuột vào, bấm để thoát chế độ Chạy.
+    if (window.PG_FORCE_RUN || window.PG_PANEL || document.getElementById('pgRunExit')) return;
+    const b = document.createElement('button');
+    b.id = 'pgRunExit'; b.type = 'button'; b.title = 'Thoát chế độ Chạy (hoặc nhấn ESC)'; b.textContent = '✕ Thoát';
+    b.addEventListener('click', exitRunMode);
+    document.body.appendChild(b);
+}
+function hideRunExitButton() {
+    document.getElementById('pgRunAcct')?.remove();
+    document.getElementById('pgFsPrompt')?.remove();
+    document.getElementById('layoutRunHint')?.remove();
+    document.getElementById('pgRunExit')?.remove();
+}
 
 // Goi y nho "ESC de thoat", tu mo dan sau ~2.5s de khong che ban do
 function showRunHint() {
@@ -3367,16 +4277,64 @@ function showRunHint() {
     setTimeout(() => tip.remove(), 3300);
 }
 
-document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || editMode || window.PG_FORCE_RUN) return;
+window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || editMode || window.PG_FORCE_RUN || window.PG_PANEL) return;
     e.preventDefault();
     exitRunMode();
-});
+}, true);
+
+// ---------------------------------------------------------------------------
+// Góc dưới-phải màn hình Chạy: tài khoản đang chạy + Đăng xuất + Thoát ứng dụng (mọi tài khoản).
+// Tài khoản User không có Build: muốn vào Build thì Đăng xuất rồi đăng nhập bằng tài khoản quản trị.
+// ---------------------------------------------------------------------------
+function doLogout() {
+    if (!confirm('Đăng xuất khỏi tài khoản hiện tại?')) return;
+    const f = document.querySelector('.account-logout-form');
+    if (f) { try { f.requestSubmit(); } catch { f.submit(); } }
+    else location.href = '/Login';
+}
+async function doExitApp() {
+    if (!confirm('Thoát ứng dụng? Chương trình giám sát sẽ TẮT hoàn toàn.')) return;
+    let res;
+    try {
+        res = await fetch('/api/system/app/exit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    } catch { res = null; }                          // máy chủ đã tắt ngay: coi như thành công
+    if (res && !res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message || 'Không tắt được ứng dụng.');
+        return;
+    }
+    try { if (document.fullscreenElement) await document.exitFullscreen(); } catch { /* bỏ qua */ }
+    const ov = document.createElement('div');
+    ov.className = 'pg-exit-overlay';
+    ov.innerHTML = '<div><h2>Ứng dụng đã tắt</h2><p>Bạn có thể đóng cửa sổ này.</p></div>';
+    document.body.appendChild(ov);
+    try { window.close(); } catch { /* trình duyệt có thể chặn */ }
+}
+function showRunAccountBox() {
+    if (window.PG_PANEL || document.getElementById('pgRunAcct')) return;
+    const u = window.PG_USER || {};
+    const box = document.createElement('div');
+    box.id = 'pgRunAcct';
+    const who = document.createElement('span');
+    who.className = 'acct-who';
+    who.textContent = `👤 ${u.name || '—'}${u.role ? ' · ' + u.role : ''}`;
+    who.title = 'Tài khoản đang chạy';
+    const mk = (text, cls, fn) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = cls; b.textContent = text;
+        b.addEventListener('click', fn);
+        return b;
+    };
+    box.append(who, mk('↪ Đăng xuất', 'acct-btn', doLogout), mk('⏻ Thoát ứng dụng', 'acct-btn danger', doExitApp));
+    document.body.appendChild(box);
+}
 
 applyFloorBackground(window.currentFloorData);
 // User: luon Chay. Tai khoan khac: giu che do da dung lan truoc (Chay cho toi khi tu thoat bang ESC / nut Build)
 if (window.PG_FORCE_RUN || savedLayoutMode() === 'run') enterRunMode();
 loadLayout();
+if (!editMode) syncPanels();     // danh sách mặt bằng có thể đã nạp xong trước khi layout.js chạy
 loadVarCatalog();
 pollBits();
 pollLampStates();

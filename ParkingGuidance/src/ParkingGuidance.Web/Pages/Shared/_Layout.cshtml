@@ -13,31 +13,47 @@
     @{
         var currentPath = (Context.Request.Path.Value ?? "/").ToLowerInvariant();
         Func<string, bool> isActive = p => currentPath == p.ToLowerInvariant();
+        // Menu dự án (mở khi bấm logo): ẩn với tài khoản User (cấp 3)
+        var canProject = User.Identity?.IsAuthenticated == true && ParkingGuidance.Web.Services.Licensing.AccessLevel.Of(User) != ParkingGuidance.Web.Services.Licensing.AccessLevel.User;
     }
     <div class="app-shell">
         <aside class="sidebar">
-            <div class="brand">
+            <div class="@("brand" + (canProject ? " brand-menu" : ""))" id="pgBrand" role="@(canProject ? "button" : null)" tabindex="@(canProject ? "0" : null)" aria-haspopup="@(canProject ? "menu" : null)" aria-expanded="@(canProject ? "false" : null)" title="@(canProject ? "Menu dự án (Alt+P)" : null)">
                 <div class="brand-badge">P</div>
                 <div>
                     <div class="brand-title">Parking Guidance</div>
                     <div class="brand-sub" data-i18n="brand.sub">Hướng dẫn đỗ xe</div>
                 </div>
+                @if (canProject)
+                {
+                    <span class="brand-caret" aria-hidden="true">▾</span>
+                }
             </div>
 
             @* DỰ ÁN: nút LƯU chung (Ctrl+S) cho mọi phần cài đặt + Mở / Mới / Lưu thành. Dữ liệu dự án gom trong 1 thư mục; bản quyền, train... nằm riêng (hệ thống). *@
             @* Ẩn với tài khoản User (cấp 3). Khi trang Giám sát ở chế độ Chạy (body.layout-run-mode) CSS cũng ẩn khối này; chế độ Build thì vẫn hiện. *@
-            @if (User.Identity?.IsAuthenticated == true && ParkingGuidance.Web.Services.Licensing.AccessLevel.Of(User) != ParkingGuidance.Web.Services.Licensing.AccessLevel.User)
+            @if (canProject)
             {
-                <div class="project-box" id="pgProject">
-                    <div class="project-name" id="pgProjName">📁 …</div>
-                    <div class="project-path" id="pgProjPath"></div>
-                    <button type="button" id="pgSaveBtn" class="btn primary project-save" title="Lưu toàn bộ dự án (Ctrl+S)">💾 Lưu</button>
-                    <div class="project-actions">
-                        <button type="button" id="pgOpenBtn" class="btn secondary" title="Mở một dự án khác">📂 Mở</button>
-                        <button type="button" id="pgNewBtn" class="btn secondary" title="Tạo dự án mới (trống)">🆕 Mới</button>
-                        <button type="button" id="pgSaveAsBtn" class="btn secondary" title="Lưu dự án thành bản sao ở thư mục khác">📑 Lưu thành…</button>
+                @* Menu dự án kiểu "nút Office": cột trái = Mới / Mở / Lưu / Lưu thành (chữ gạch chân = phím tắt khi menu đang mở), cột phải = dự án gần đây (phím 1-9). *@
+                <div class="pg-fmenu" id="pgProject" role="menu" aria-label="Menu dự án">
+                    <div class="pg-fmenu-main">
+                        <div class="pg-fmenu-left">
+                            <button type="button" id="pgNewBtn" class="pg-fm-item" role="menuitem" data-keys="mn" title="Tạo dự án mới (trống)"><span class="pg-fm-ico">📄</span><span class="pg-fm-label">Dự án <u>m</u>ới…</span><kbd>Ctrl+Alt+N</kbd></button>
+                            <button type="button" id="pgOpenBtn" class="pg-fm-item" role="menuitem" data-keys="o" title="Mở một dự án khác"><span class="pg-fm-ico">📂</span><span class="pg-fm-label">M<u>ở</u> dự án…</span><kbd>Ctrl+O</kbd></button>
+                            <div class="pg-fm-sep"></div>
+                            <button type="button" id="pgSaveBtn" class="pg-fm-item" role="menuitem" data-keys="ls" title="Lưu toàn bộ dự án (Ctrl+S)"><span class="pg-fm-ico">💾</span><span class="pg-fm-label"><u>L</u>ưu</span><kbd>Ctrl+S</kbd></button>
+                            <button type="button" id="pgSaveAsBtn" class="pg-fm-item" role="menuitem" data-keys="ta" title="Lưu dự án thành bản sao ở thư mục khác"><span class="pg-fm-ico">📑</span><span class="pg-fm-label">Lưu <u>t</u>hành…</span><kbd>Ctrl+Shift+S</kbd></button>
+                        </div>
+                        <div class="pg-fmenu-right">
+                            <div class="pg-fmenu-title">Dự án gần đây</div>
+                            <div class="pg-fm-recent" id="pgRecentList"></div>
+                        </div>
                     </div>
-                    <div class="project-state hint small" id="pgProjState"></div>
+                    <div class="pg-fmenu-foot">
+                        <div class="project-name" id="pgProjName">…</div>
+                        <div class="project-path" id="pgProjPath"></div>
+                        <div class="project-state hint small" id="pgProjState"></div>
+                    </div>
                 </div>
             }
 
@@ -84,8 +100,8 @@
                     </button>
                     <div class="nav-group-body">
                         <a href="#" class="nav-link" data-soon><span class="nav-ico" aria-hidden="true">👤</span><span data-i18n="nav.user">Người dùng</span></a>
-                        <a href="/User/Preferences" class="nav-link nav-sublink @(isActive("/User/Preferences") ? "active" : "")"><span class="nav-ico" aria-hidden="true">🎨</span><span data-i18n="nav.prefs">Giao diện &amp; ngôn ngữ</span></a>
-                        <a href="/System/License" class="nav-link nav-sublink @(isActive("/System/License") ? "active" : "")"><span class="nav-ico" aria-hidden="true">🔑</span><span data-i18n="nav.license">Giấy phép</span></a>
+                        <a href="/User/Preferences" class="nav-link @(isActive("/User/Preferences") ? "active" : "")"><span class="nav-ico" aria-hidden="true">🎨</span><span data-i18n="nav.prefs">Giao diện &amp; ngôn ngữ</span></a>
+                        <a href="/System/License" class="nav-link @(isActive("/System/License") ? "active" : "")"><span class="nav-ico" aria-hidden="true">🔑</span><span data-i18n="nav.license">Giấy phép</span></a>
                     </div>
                 </div>
                 <div class="nav-group" data-group="device">
@@ -181,7 +197,7 @@
                     a.href = '/?floor=' + encodeURIComponent(f.id);
                     a.dataset.floor = f.id;
                     a.title = f.id + ' — ' + f.name;
-                    var ico = document.createElement('span'); ico.className = 'nav-ico'; ico.setAttribute('aria-hidden', 'true'); ico.textContent = f.isStartup ? '★' : '▫';
+                    var ico = document.createElement('span'); ico.className = 'nav-ico'; ico.setAttribute('aria-hidden', 'true'); ico.textContent = f.kind === 'Header' ? '▀' : f.kind === 'Navigation' ? '▐' : (f.isStartup ? '★' : '▫');
                     var txt = document.createElement('span'); txt.className = 'nav-floor-name'; txt.textContent = f.name || f.id;
                     a.appendChild(ico); a.appendChild(txt);
                     list.appendChild(a);
